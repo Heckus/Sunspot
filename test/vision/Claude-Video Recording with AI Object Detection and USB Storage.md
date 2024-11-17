@@ -1,5 +1,5 @@
 ## Prompt:
-im looking to record a video, do ai object detection on it while simultaneouly saving it to the root of a detected USB storage device. This is done in c++. in detail can you show me code of what that would look like, focusing on the detecting USB and saving part more, just leave the ai detection as a pseudo code. For each line can you provide detailed // comments so I understand what is going on for each. Use opencv for for recording the video
+I'm looking to record a video, do AI object detection on it while simultaneously saving it to the root of a detected USB storage device. This is done in c++. In detail can you show me code of what that would look like, focusing on the detecting USB and saving part more, just leave the AI detection as a pseudocode. For each line can you provide detailed // comments, so I understand what is going on for each. Use OpenCV for recording the video
 
 ## Response:
 I'll help you create a C++ program that combines video recording, AI object detection, and saving to a USB device.
@@ -8,7 +8,7 @@ Video Recording with AI Detection and USB Storage
 
 Click to open code
 
-I've created a comprehensive C++ program that handles video recording, AI object detection (as pseudo-code), and USB storage detection. Let me explain the key components:
+I've created a comprehensive C++ program that handles video recording, AI object detection (as pseudocode), and USB storage detection. Let me explain the key components:
 
 1.  USB Detection:
 
@@ -21,7 +21,7 @@ I've created a comprehensive C++ program that handles video recording, AI object
 
 *   The `VideoProcessor` class handles video capture and recording using OpenCV
 *   It includes frame capture, processing, and saving functionality
-*   The AI object detection part is left as pseudo-code that you can implement with your preferred model
+*   The AI object detection part is left as pseudocode that you can implement with your preferred model
 *   Video is saved in AVI format with XVID codec for good compression and compatibility
 
 3.  Main Program Flow:
@@ -34,7 +34,7 @@ I've created a comprehensive C++ program that handles video recording, AI object
 
 To compile this code, you'll need:
 
-1.  OpenCV library
+1.  OpenCV's library
 2.  On Windows: Windows SDK
 3.  On Linux: libudev-dev package
 4.  A C++17 compatible compiler
