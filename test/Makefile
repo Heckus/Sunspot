@@ -5,8 +5,8 @@ CXX = g++
 TARGETS = vision detection
 
 # Define the source files
-SRC_DETECTION = /home/hecke/GitRepos/projects/Sunspot/test/vision/detectionexample.cpp
-SRC_SAVING = /home/hecke/GitRepos/projects/Sunspot/test/vision/savingexample.cpp
+SRC_DETECTION = /home/hecke/GitRepos/projects/Sunspot/test/src/detectionexample.cpp
+SRC_SAVING = /home/hecke/GitRepos/projects/Sunspot/test/src/savingexample.cpp
 
 # Define the pkg-config command for OpenCV
 PKG_CONFIG = $(shell pkg-config --cflags --libs opencv4)
