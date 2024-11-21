@@ -1,6 +1,6 @@
-^C:\USERS\THECR\DOCUMENTS\ZACH'S STUFF\SUNSPOTTEST\BUILD\CMAKEFILES\B5331B3ADC7606F91F1AA0ABB8995CCF\GENERATE.STAMP.RULE
+^C:\USERS\THECR\DOCUMENTS\ZACH'S STUFF\SUNSPOT\BUILD\CMAKEFILES\6B7BA07ECE055AEA73C91428DEB1E88C\GENERATE.STAMP.RULE
 setlocal
-"C:\Program Files\CMake\bin\cmake.exe" "-SC:/Users/thecr/Documents/Zach's Stuff/SunspotTest" "-BC:/Users/thecr/Documents/Zach's Stuff/SunspotTest/build" --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file "C:/Users/thecr/Documents/Zach's Stuff/SunspotTest/build/SunspotTest.sln"
+"C:\Program Files\CMake\bin\cmake.exe" "-SC:/Users/thecr/Documents/Zach's Stuff/Sunspot" "-BC:/Users/thecr/Documents/Zach's Stuff/Sunspot/build" --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file "C:/Users/thecr/Documents/Zach's Stuff/Sunspot/build/SunspotTest.sln"
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
