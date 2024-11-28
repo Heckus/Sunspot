@@ -1,0 +1,4 @@
+/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/detection.dir
+/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/saving.dir
+/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/edit_cache.dir
+/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/rebuild_cache.dir
