@@ -37,6 +37,7 @@ target_link_libraries(servo
     PRIVATE 
     ${LGPIO_LIB}
     Threads::Threads
+    
 )
 
 
