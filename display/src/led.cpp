@@ -1,10 +1,10 @@
-#include <rpi_ws281x/ws2811.h>
+#include <ws2811.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 // LED strip configuration
-#define LED_COUNT 8
+#define LED_COUNT 1
 #define LED_PIN 18
 #define LED_FREQ_HZ 800000
 #define LED_DMA 10
@@ -17,8 +17,8 @@ ws2811_t ledstrip = {
     .channel = {
         [0] = {
             .gpionum = LED_PIN,
-            .count = LED_COUNT,
             .invert = 0,
+            .count = LED_COUNT,
             .brightness = LED_BRIGHTNESS,
         }
     }
