@@ -1,1 +1,1 @@
-/usr/bin/c++ CMakeFiles/servo.dir/src/servo.cpp.o -o servo  /usr/lib/libwiringPi.so 
+/usr/bin/c++ CMakeFiles/servo.dir/src/servo.cpp.o -o servo  -Wl,-rpath,/usr/local/lib /usr/local/lib/liblgpio.so 

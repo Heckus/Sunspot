@@ -1,21 +1,22 @@
-#include <wiringPi.h>
-#include <softPwm.h>
 #include <iostream>
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <lgpio.h>
 
 // Pin definitions - adjust these according to your wiring
 #define SERVO1_PIN 18  // GPIO 18 (Pin 12)
 #define SERVO2_PIN 19  // GPIO 19 (Pin 35)
 
 // Servo configuration
-#define PWM_FREQ 50     // 50Hz frequency
-#define MIN_PULSE 500   // Minimum pulse width in microseconds (0 degrees)
-#define MAX_PULSE 2500  // Maximum pulse width in microseconds (180 degrees)
+#define MIN_PULSE 0.5   // Minimum pulse width in milliseconds (0 degrees)
+#define MAX_PULSE 2.5   // Maximum pulse width in milliseconds (180 degrees)
+#define SERVO_FREQUENCY 50 // Servo frequency in Hz
+#define SERVO_OFFSET 0 // Servo offset
+#define SERVO_CYCLES 0 // Infinite cycles
 
 // Function to convert angle to PWM value
-int angleToPulse(float angle) {
+float angleToPulse(float angle) {
     // Constrain angle between 0 and 180 degrees
     if (angle < 0) angle = 0;
     if (angle > 180) angle = 180;
@@ -24,33 +25,23 @@ int angleToPulse(float angle) {
 }
 
 // Function to set servo angle
-void setServoAngle(int pin, float angle) {
-    int pulse = angleToPulse(angle);
-    // Convert pulse width to PWM value (0-200 range for 20ms period)
-    int pwmValue = (pulse * 200) / 20000;
-    softPwmWrite(pin, pwmValue);
-}
-
-// Function to initialize servo
-void initServo(int pin) {
-    pinMode(pin, OUTPUT);
-    softPwmCreate(pin, 0, 200);  // Range: 0-200 (20ms period at 50Hz)
+void setServoAngle(int h, int pin, float angle) {
+    float pulse = angleToPulse(angle);
+    int pulseWidth = static_cast<int>(pulse * 1000); // Convert to microseconds
+    lgTxServo(h, pin, pulseWidth, SERVO_FREQUENCY, SERVO_OFFSET, SERVO_CYCLES);
 }
 
 int main() {
-    // Initialize WiringPi
-    if (wiringPiSetupGpio() == -1) {
-        std::cerr << "Failed to initialize WiringPi!" << std::endl;
+    int h;
+    h = lgGpiochipOpen(0); // Open GPIO chip 0
+    if (h < 0) {
+        std::cerr << "Failed to open GPIO chip" << std::endl;
         return 1;
     }
 
-    // Initialize both servos
-    initServo(SERVO1_PIN);
-    initServo(SERVO2_PIN);
-
     // Set initial position (90 degrees)
-    setServoAngle(SERVO1_PIN, 90);
-    setServoAngle(SERVO2_PIN, 90);
+    setServoAngle(h, SERVO1_PIN, 90);
+    setServoAngle(h, SERVO2_PIN, 90);
 
     // Main control loop
     while (true) {
@@ -71,8 +62,8 @@ int main() {
         }
 
         // Set servo positions
-        setServoAngle(SERVO1_PIN, theta);
-        setServoAngle(SERVO2_PIN, beta);
+        setServoAngle(h, SERVO1_PIN, theta);
+        setServoAngle(h, SERVO2_PIN, beta);
 
         // Small delay to allow servos to reach position
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -91,8 +82,10 @@ int main() {
     }
 
     // Center servos before exit
-    setServoAngle(SERVO1_PIN, 90);
-    setServoAngle(SERVO2_PIN, 90);
+    setServoAngle(h, SERVO1_PIN, 90);
+    setServoAngle(h, SERVO2_PIN, 90);
+
+    lgGpiochipClose(h); // Close GPIO chip
     
     return 0;
 }

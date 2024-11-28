@@ -129,19 +129,6 @@ servo/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo.dir/build.make CMakeFiles/servo.dir/build
 .PHONY : servo/fast
 
-#=============================================================================
-# Target rules for targets named servo_oop
-
-# Build rule for target.
-servo_oop: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 servo_oop
-.PHONY : servo_oop
-
-# fast build rule for target.
-servo_oop/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo_oop.dir/build.make CMakeFiles/servo_oop.dir/build
-.PHONY : servo_oop/fast
-
 src/servo.o: src/servo.cpp.o
 .PHONY : src/servo.o
 
@@ -166,30 +153,6 @@ src/servo.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo.dir/build.make CMakeFiles/servo.dir/src/servo.cpp.s
 .PHONY : src/servo.cpp.s
 
-src/servo_oop.o: src/servo_oop.cpp.o
-.PHONY : src/servo_oop.o
-
-# target to build an object file
-src/servo_oop.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo_oop.dir/build.make CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o
-.PHONY : src/servo_oop.cpp.o
-
-src/servo_oop.i: src/servo_oop.cpp.i
-.PHONY : src/servo_oop.i
-
-# target to preprocess a source file
-src/servo_oop.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo_oop.dir/build.make CMakeFiles/servo_oop.dir/src/servo_oop.cpp.i
-.PHONY : src/servo_oop.cpp.i
-
-src/servo_oop.s: src/servo_oop.cpp.s
-.PHONY : src/servo_oop.s
-
-# target to generate assembly for a file
-src/servo_oop.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo_oop.dir/build.make CMakeFiles/servo_oop.dir/src/servo_oop.cpp.s
-.PHONY : src/servo_oop.cpp.s
-
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -199,13 +162,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... servo"
-	@echo "... servo_oop"
 	@echo "... src/servo.o"
 	@echo "... src/servo.i"
 	@echo "... src/servo.s"
-	@echo "... src/servo_oop.o"
-	@echo "... src/servo_oop.i"
-	@echo "... src/servo_oop.s"
 .PHONY : help
 
 
