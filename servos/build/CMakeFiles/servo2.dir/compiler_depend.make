@@ -198,8 +198,25 @@ CMakeFiles/servo2.dir/src/servo2.cpp.o: /home/hecke/Code/GitRepositories/Sunspot
   /usr/include/c++/12/tuple \
   /usr/include/c++/12/bits/uses_allocator.h \
   /usr/include/c++/12/bits/unique_ptr.h \
-  /usr/include/c++/12/bits/this_thread_sleep.h
+  /usr/include/c++/12/bits/this_thread_sleep.h \
+  /usr/include/c++/12/map \
+  /usr/include/c++/12/bits/stl_tree.h \
+  /usr/include/c++/12/ext/aligned_buffer.h \
+  /usr/include/c++/12/bits/node_handle.h \
+  /usr/include/c++/12/bits/stl_map.h \
+  /usr/include/c++/12/bits/stl_multimap.h \
+  /usr/include/c++/12/bits/erase_if.h
 
+
+/usr/include/c++/12/bits/stl_multimap.h:
+
+/usr/include/c++/12/bits/stl_map.h:
+
+/usr/include/c++/12/bits/node_handle.h:
+
+/usr/include/c++/12/ext/aligned_buffer.h:
+
+/usr/include/c++/12/bits/stl_tree.h:
 
 /usr/include/c++/12/bits/unique_ptr.h:
 
@@ -387,9 +404,13 @@ CMakeFiles/servo2.dir/src/servo2.cpp.o: /home/hecke/Code/GitRepositories/Sunspot
 
 /usr/include/arm-linux-gnueabihf/bits/types/struct_sched_param.h:
 
+/usr/include/c++/12/map:
+
 /usr/include/stdc-predef.h:
 
 /usr/include/arm-linux-gnueabihf/bits/types/time_t.h:
+
+/usr/include/c++/12/bits/erase_if.h:
 
 /usr/include/arm-linux-gnueabihf/bits/uintn-identity.h:
 
