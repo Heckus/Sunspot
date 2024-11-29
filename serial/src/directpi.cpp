@@ -41,7 +41,7 @@ int main() {
 
         // Wait for response
         std::string response;
-        while (serialDataAvail(serialFd)) {
+        while (serialDataAvail(serialFd) > 0) {
             char c = serialGetchar(serialFd);
             if (c == '\n') break; // End of message
             response += c;
@@ -57,4 +57,4 @@ int main() {
     return 0;
 }
 
-//g++ -o directpi /home/hecke/Code/GitRepositories/Sunspot/serial/src/directpi.cpp -lwiringPi
+// Compile with: g++ -o directpi /home/hecke/Code/GitRepositories/Sunspot/serial/src/directpi.cpp -lwiringPi
