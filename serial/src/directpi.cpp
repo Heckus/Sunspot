@@ -36,8 +36,9 @@ int main() {
         std::getline(std::cin, userInput);
 
         // Send user input to Arduino
-        serialPuts(serialFd, userInput.c_str());
-        serialPutchar(serialFd, '\n'); // End of message
+        serialPuts(serialFd, (userInput + '\n').c_str()); // Send message with newline
+        serialFlush(serialFd); // Ensure the message is sent immediately
+        delay(100); // Small delay to allow Arduino to process the message
 
         // Wait for response
         std::string response;
