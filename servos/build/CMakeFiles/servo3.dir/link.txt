@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/servo3.dir/src/servo3.cpp.o -o servo3  -lgpiod 

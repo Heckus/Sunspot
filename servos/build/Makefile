@@ -142,6 +142,32 @@ servo_oop/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo_oop.dir/build.make CMakeFiles/servo_oop.dir/build
 .PHONY : servo_oop/fast
 
+#=============================================================================
+# Target rules for targets named servo2
+
+# Build rule for target.
+servo2: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 servo2
+.PHONY : servo2
+
+# fast build rule for target.
+servo2/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo2.dir/build.make CMakeFiles/servo2.dir/build
+.PHONY : servo2/fast
+
+#=============================================================================
+# Target rules for targets named servo3
+
+# Build rule for target.
+servo3: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 servo3
+.PHONY : servo3
+
+# fast build rule for target.
+servo3/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo3.dir/build.make CMakeFiles/servo3.dir/build
+.PHONY : servo3/fast
+
 src/servo.o: src/servo.cpp.o
 .PHONY : src/servo.o
 
@@ -165,6 +191,54 @@ src/servo.s: src/servo.cpp.s
 src/servo.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo.dir/build.make CMakeFiles/servo.dir/src/servo.cpp.s
 .PHONY : src/servo.cpp.s
+
+src/servo2.o: src/servo2.cpp.o
+.PHONY : src/servo2.o
+
+# target to build an object file
+src/servo2.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo2.dir/build.make CMakeFiles/servo2.dir/src/servo2.cpp.o
+.PHONY : src/servo2.cpp.o
+
+src/servo2.i: src/servo2.cpp.i
+.PHONY : src/servo2.i
+
+# target to preprocess a source file
+src/servo2.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo2.dir/build.make CMakeFiles/servo2.dir/src/servo2.cpp.i
+.PHONY : src/servo2.cpp.i
+
+src/servo2.s: src/servo2.cpp.s
+.PHONY : src/servo2.s
+
+# target to generate assembly for a file
+src/servo2.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo2.dir/build.make CMakeFiles/servo2.dir/src/servo2.cpp.s
+.PHONY : src/servo2.cpp.s
+
+src/servo3.o: src/servo3.cpp.o
+.PHONY : src/servo3.o
+
+# target to build an object file
+src/servo3.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo3.dir/build.make CMakeFiles/servo3.dir/src/servo3.cpp.o
+.PHONY : src/servo3.cpp.o
+
+src/servo3.i: src/servo3.cpp.i
+.PHONY : src/servo3.i
+
+# target to preprocess a source file
+src/servo3.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo3.dir/build.make CMakeFiles/servo3.dir/src/servo3.cpp.i
+.PHONY : src/servo3.cpp.i
+
+src/servo3.s: src/servo3.cpp.s
+.PHONY : src/servo3.s
+
+# target to generate assembly for a file
+src/servo3.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/servo3.dir/build.make CMakeFiles/servo3.dir/src/servo3.cpp.s
+.PHONY : src/servo3.cpp.s
 
 src/servo_oop.o: src/servo_oop.cpp.o
 .PHONY : src/servo_oop.o
@@ -199,10 +273,18 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... servo"
+	@echo "... servo2"
+	@echo "... servo3"
 	@echo "... servo_oop"
 	@echo "... src/servo.o"
 	@echo "... src/servo.i"
 	@echo "... src/servo.s"
+	@echo "... src/servo2.o"
+	@echo "... src/servo2.i"
+	@echo "... src/servo2.s"
+	@echo "... src/servo3.o"
+	@echo "... src/servo3.i"
+	@echo "... src/servo3.s"
 	@echo "... src/servo_oop.o"
 	@echo "... src/servo_oop.i"
 	@echo "... src/servo_oop.s"

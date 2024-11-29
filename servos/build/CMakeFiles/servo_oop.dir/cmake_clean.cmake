@@ -2,6 +2,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o"
   "CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o.d"
   "servo"
+  "servo2"
+  "servo3"
   "servo_oop"
   "servo_oop.pdb"
 )

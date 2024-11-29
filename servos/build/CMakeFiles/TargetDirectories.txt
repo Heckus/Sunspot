@@ -1,4 +1,6 @@
 /home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/servo.dir
 /home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/servo_oop.dir
+/home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/servo2.dir
+/home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/servo3.dir
 /home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/edit_cache.dir
 /home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles/rebuild_cache.dir
