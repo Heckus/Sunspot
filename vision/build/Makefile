@@ -142,6 +142,32 @@ saving/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/build
 .PHONY : saving/fast
 
+#=============================================================================
+# Target rules for targets named zachvision
+
+# Build rule for target.
+zachvision: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 zachvision
+.PHONY : zachvision
+
+# fast build rule for target.
+zachvision/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/build
+.PHONY : zachvision/fast
+
+#=============================================================================
+# Target rules for targets named preloadedmotion
+
+# Build rule for target.
+preloadedmotion: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 preloadedmotion
+.PHONY : preloadedmotion
+
+# fast build rule for target.
+preloadedmotion/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/build
+.PHONY : preloadedmotion/fast
+
 src/detectionexample.o: src/detectionexample.cpp.o
 .PHONY : src/detectionexample.o
 
@@ -165,6 +191,30 @@ src/detectionexample.s: src/detectionexample.cpp.s
 src/detectionexample.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/detection.dir/build.make CMakeFiles/detection.dir/src/detectionexample.cpp.s
 .PHONY : src/detectionexample.cpp.s
+
+src/preloadedmotion.o: src/preloadedmotion.cpp.o
+.PHONY : src/preloadedmotion.o
+
+# target to build an object file
+src/preloadedmotion.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/src/preloadedmotion.cpp.o
+.PHONY : src/preloadedmotion.cpp.o
+
+src/preloadedmotion.i: src/preloadedmotion.cpp.i
+.PHONY : src/preloadedmotion.i
+
+# target to preprocess a source file
+src/preloadedmotion.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/src/preloadedmotion.cpp.i
+.PHONY : src/preloadedmotion.cpp.i
+
+src/preloadedmotion.s: src/preloadedmotion.cpp.s
+.PHONY : src/preloadedmotion.s
+
+# target to generate assembly for a file
+src/preloadedmotion.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/src/preloadedmotion.cpp.s
+.PHONY : src/preloadedmotion.cpp.s
 
 src/savingexample.o: src/savingexample.cpp.o
 .PHONY : src/savingexample.o
@@ -190,6 +240,30 @@ src/savingexample.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/src/savingexample.cpp.s
 .PHONY : src/savingexample.cpp.s
 
+src/zachvision.o: src/zachvision.cpp.o
+.PHONY : src/zachvision.o
+
+# target to build an object file
+src/zachvision.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/src/zachvision.cpp.o
+.PHONY : src/zachvision.cpp.o
+
+src/zachvision.i: src/zachvision.cpp.i
+.PHONY : src/zachvision.i
+
+# target to preprocess a source file
+src/zachvision.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/src/zachvision.cpp.i
+.PHONY : src/zachvision.cpp.i
+
+src/zachvision.s: src/zachvision.cpp.s
+.PHONY : src/zachvision.s
+
+# target to generate assembly for a file
+src/zachvision.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/src/zachvision.cpp.s
+.PHONY : src/zachvision.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -199,13 +273,21 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... detection"
+	@echo "... preloadedmotion"
 	@echo "... saving"
+	@echo "... zachvision"
 	@echo "... src/detectionexample.o"
 	@echo "... src/detectionexample.i"
 	@echo "... src/detectionexample.s"
+	@echo "... src/preloadedmotion.o"
+	@echo "... src/preloadedmotion.i"
+	@echo "... src/preloadedmotion.s"
 	@echo "... src/savingexample.o"
 	@echo "... src/savingexample.i"
 	@echo "... src/savingexample.s"
+	@echo "... src/zachvision.o"
+	@echo "... src/zachvision.i"
+	@echo "... src/zachvision.s"
 .PHONY : help
 
 

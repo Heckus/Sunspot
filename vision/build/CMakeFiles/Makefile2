@@ -65,6 +65,8 @@ CMAKE_BINARY_DIR = /home/hecke/Code/GitRepositories/Sunspot/vision/build
 # The main recursive "all" target.
 all: CMakeFiles/detection.dir/all
 all: CMakeFiles/saving.dir/all
+all: CMakeFiles/zachvision.dir/all
+all: CMakeFiles/preloadedmotion.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -74,6 +76,8 @@ preinstall:
 # The main recursive "clean" target.
 clean: CMakeFiles/detection.dir/clean
 clean: CMakeFiles/saving.dir/clean
+clean: CMakeFiles/zachvision.dir/clean
+clean: CMakeFiles/preloadedmotion.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -109,7 +113,7 @@ CMakeFiles/detection.dir/clean:
 CMakeFiles/saving.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=3,4 "Built target saving"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=5,6 "Built target saving"
 .PHONY : CMakeFiles/saving.dir/all
 
 # Build rule for subdir invocation for target.
@@ -127,6 +131,58 @@ saving: CMakeFiles/saving.dir/rule
 CMakeFiles/saving.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/clean
 .PHONY : CMakeFiles/saving.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/zachvision.dir
+
+# All Build rule for target.
+CMakeFiles/zachvision.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=7,8 "Built target zachvision"
+.PHONY : CMakeFiles/zachvision.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/zachvision.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/zachvision.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 0
+.PHONY : CMakeFiles/zachvision.dir/rule
+
+# Convenience name for target.
+zachvision: CMakeFiles/zachvision.dir/rule
+.PHONY : zachvision
+
+# clean rule for target.
+CMakeFiles/zachvision.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/clean
+.PHONY : CMakeFiles/zachvision.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/preloadedmotion.dir
+
+# All Build rule for target.
+CMakeFiles/preloadedmotion.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=3,4 "Built target preloadedmotion"
+.PHONY : CMakeFiles/preloadedmotion.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/preloadedmotion.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/preloadedmotion.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 0
+.PHONY : CMakeFiles/preloadedmotion.dir/rule
+
+# Convenience name for target.
+preloadedmotion: CMakeFiles/preloadedmotion.dir/rule
+.PHONY : preloadedmotion
+
+# clean rule for target.
+CMakeFiles/preloadedmotion.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/clean
+.PHONY : CMakeFiles/preloadedmotion.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
