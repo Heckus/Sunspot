@@ -184,117 +184,13 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
   /usr/include/c++/12/bits/ostream.tcc \
   /usr/include/c++/12/istream \
   /usr/include/c++/12/bits/istream.tcc \
-  /usr/include/c++/12/cmath \
-  /usr/include/math.h \
-  /usr/include/arm-linux-gnueabihf/bits/math-vector.h \
-  /usr/include/arm-linux-gnueabihf/bits/libm-simd-decl-stubs.h \
-  /usr/include/arm-linux-gnueabihf/bits/flt-eval-method.h \
-  /usr/include/arm-linux-gnueabihf/bits/fp-logb.h \
-  /usr/include/arm-linux-gnueabihf/bits/fp-fast.h \
-  /usr/include/arm-linux-gnueabihf/bits/mathcalls-helper-functions.h \
-  /usr/include/arm-linux-gnueabihf/bits/mathcalls.h \
-  /usr/include/arm-linux-gnueabihf/bits/mathcalls-narrow.h \
-  /usr/include/arm-linux-gnueabihf/bits/iscanonical.h \
-  /usr/include/c++/12/bits/specfun.h \
-  /usr/include/c++/12/limits \
-  /usr/include/c++/12/tr1/gamma.tcc \
-  /usr/include/c++/12/tr1/special_function_util.h \
-  /usr/include/c++/12/tr1/bessel_function.tcc \
-  /usr/include/c++/12/tr1/beta_function.tcc \
-  /usr/include/c++/12/tr1/ell_integral.tcc \
-  /usr/include/c++/12/tr1/exp_integral.tcc \
-  /usr/include/c++/12/tr1/hypergeometric.tcc \
-  /usr/include/c++/12/tr1/legendre_function.tcc \
-  /usr/include/c++/12/tr1/modified_bessel_func.tcc \
-  /usr/include/c++/12/tr1/poly_hermite.tcc \
-  /usr/include/c++/12/tr1/poly_laguerre.tcc \
-  /usr/include/c++/12/tr1/riemann_zeta.tcc \
-  /usr/include/c++/12/thread \
-  /usr/include/c++/12/bits/std_thread.h \
-  /usr/include/c++/12/tuple \
-  /usr/include/c++/12/bits/uses_allocator.h \
-  /usr/include/c++/12/bits/unique_ptr.h \
-  /usr/include/c++/12/bits/this_thread_sleep.h \
-  /usr/include/c++/12/bits/chrono.h \
-  /usr/include/c++/12/ratio \
-  /usr/include/c++/12/ctime \
-  /usr/include/c++/12/bits/parse_numbers.h \
-  /usr/include/c++/12/chrono \
-  /usr/local/include/lgpio.h \
-  /usr/include/inttypes.h \
-  /usr/include/linux/gpio.h \
-  /usr/include/linux/const.h \
-  /usr/include/linux/ioctl.h \
-  /usr/lib/linux/uapi/arm/asm/ioctl.h \
-  /usr/include/asm-generic/ioctl.h \
-  /usr/include/linux/types.h \
-  /usr/lib/linux/uapi/arm/asm/types.h \
-  /usr/include/asm-generic/int-ll64.h \
-  /usr/lib/linux/uapi/arm/asm/bitsperlong.h \
-  /usr/include/asm-generic/bitsperlong.h \
-  /usr/include/linux/posix_types.h \
-  /usr/include/linux/stddef.h \
-  /usr/lib/linux/uapi/arm/asm/posix_types.h \
-  /usr/include/asm-generic/posix_types.h
+  /usr/local/include/wiringPi.h \
+  /usr/local/include/softPwm.h
 
-
-/usr/include/asm-generic/posix_types.h:
-
-/usr/include/asm-generic/bitsperlong.h:
-
-/usr/lib/linux/uapi/arm/asm/types.h:
-
-/usr/include/asm-generic/ioctl.h:
-
-/usr/include/linux/gpio.h:
-
-/usr/include/inttypes.h:
-
-/usr/include/linux/posix_types.h:
-
-/usr/include/c++/12/ctime:
-
-/usr/include/c++/12/ratio:
-
-/usr/include/c++/12/bits/unique_ptr.h:
-
-/usr/local/include/lgpio.h:
-
-/usr/include/c++/12/thread:
-
-/usr/include/c++/12/tr1/riemann_zeta.tcc:
-
-/usr/include/c++/12/tr1/poly_laguerre.tcc:
-
-/usr/include/c++/12/tr1/poly_hermite.tcc:
-
-/usr/include/c++/12/tr1/legendre_function.tcc:
-
-/usr/include/linux/ioctl.h:
-
-/usr/include/c++/12/tr1/hypergeometric.tcc:
-
-/usr/include/c++/12/tr1/exp_integral.tcc:
-
-/usr/include/c++/12/tr1/beta_function.tcc:
-
-/usr/include/arm-linux-gnueabihf/bits/iscanonical.h:
-
-/usr/include/arm-linux-gnueabihf/bits/flt-eval-method.h:
-
-/usr/include/arm-linux-gnueabihf/bits/libm-simd-decl-stubs.h:
-
-/usr/include/arm-linux-gnueabihf/bits/math-vector.h:
-
-/usr/include/math.h:
-
-/usr/include/c++/12/cmath:
 
 /usr/include/c++/12/bits/istream.tcc:
 
 /usr/include/c++/12/bits/basic_ios.tcc:
-
-/usr/include/c++/12/chrono:
 
 /usr/include/c++/12/bits/streambuf_iterator.h:
 
@@ -302,13 +198,9 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/wctype.h:
 
-/usr/include/linux/stddef.h:
-
 /usr/include/c++/12/cwctype:
 
 /usr/include/arm-linux-gnueabihf/c++/12/bits/error_constants.h:
-
-/usr/include/c++/12/bits/uses_allocator.h:
 
 /usr/include/c++/12/bits/charconv.h:
 
@@ -328,6 +220,8 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/arm-linux-gnueabihf/bits/types/__fpos_t.h:
 
+/usr/local/include/softPwm.h:
+
 /usr/include/stdio.h:
 
 /usr/include/c++/12/cstdio:
@@ -341,8 +235,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/alloca.h:
 
 /usr/include/arm-linux-gnueabihf/bits/select.h:
-
-/usr/include/c++/12/tr1/gamma.tcc:
 
 /usr/include/arm-linux-gnueabihf/bits/byteswap.h:
 
@@ -367,8 +259,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/c++/12/stdexcept:
 
 /usr/include/c++/12/cwchar:
-
-/usr/lib/linux/uapi/arm/asm/ioctl.h:
 
 /usr/include/c++/12/bits/exception_defines.h:
 
@@ -410,13 +300,7 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/arm-linux-gnueabihf/bits/thread-shared-types.h:
 
-/usr/include/c++/12/bits/std_thread.h:
-
 /usr/lib/gcc/arm-linux-gnueabihf/12/include/stdint.h:
-
-/usr/include/asm-generic/int-ll64.h:
-
-/usr/include/c++/12/bits/this_thread_sleep.h:
 
 /usr/include/arm-linux-gnueabihf/bits/pthread_stack_min-dynamic.h:
 
@@ -443,8 +327,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/arm-linux-gnueabihf/bits/uintn-identity.h:
 
 /usr/include/arm-linux-gnueabihf/bits/long-double.h:
-
-/usr/include/c++/12/limits:
 
 /usr/include/c++/12/bits/char_traits.h:
 
@@ -486,8 +368,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/lib/gcc/arm-linux-gnueabihf/12/include/stdarg.h:
 
-/usr/include/linux/const.h:
-
 /usr/include/arm-linux-gnueabihf/sys/cdefs.h:
 
 /usr/include/c++/12/bits/postypes.h:
@@ -496,17 +376,15 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/arm-linux-gnueabihf/bits/time64.h:
 
+/usr/local/include/wiringPi.h:
+
 /usr/include/arm-linux-gnueabihf/gnu/stubs.h:
 
 /usr/include/arm-linux-gnueabihf/gnu/stubs-hard.h:
 
-/usr/lib/linux/uapi/arm/asm/bitsperlong.h:
-
 /usr/include/c++/12/iosfwd:
 
 /usr/include/arm-linux-gnueabihf/c++/12/bits/c++config.h:
-
-/usr/include/arm-linux-gnueabihf/bits/mathcalls.h:
 
 /usr/include/stdc-predef.h:
 
@@ -517,8 +395,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/c++/12/bits/locale_classes.tcc:
 
 /usr/include/arm-linux-gnueabihf/bits/wchar.h:
-
-/usr/include/arm-linux-gnueabihf/bits/mathcalls-narrow.h:
 
 /usr/include/arm-linux-gnueabihf/c++/12/bits/gthr.h:
 
@@ -534,21 +410,13 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/c++/12/bits/range_access.h:
 
-/usr/include/c++/12/tr1/bessel_function.tcc:
-
 /usr/include/arm-linux-gnueabihf/bits/floatn.h:
-
-/usr/include/arm-linux-gnueabihf/bits/fp-fast.h:
 
 /usr/include/arm-linux-gnueabihf/bits/types/__locale_t.h:
 
 /usr/include/arm-linux-gnueabihf/bits/floatn-common.h:
 
 /usr/include/c++/12/bits/exception.h:
-
-/usr/lib/linux/uapi/arm/asm/posix_types.h:
-
-/usr/include/c++/12/tr1/special_function_util.h:
 
 /usr/include/c++/12/bits/stl_iterator_base_types.h:
 
@@ -559,8 +427,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/arm-linux-gnueabihf/bits/timesize.h:
 
 /usr/include/c++/12/bits/locale_classes.h:
-
-/usr/include/c++/12/bits/chrono.h:
 
 /usr/include/features-time64.h:
 
@@ -596,23 +462,15 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/c++/12/bits/ios_base.h:
 
-/usr/include/c++/12/bits/specfun.h:
-
 /usr/include/arm-linux-gnueabihf/c++/12/bits/gthr-default.h:
 
 /usr/include/arm-linux-gnueabihf/bits/types/__fpos64_t.h:
 
 /usr/include/pthread.h:
 
-/usr/include/linux/types.h:
-
-/usr/include/c++/12/tr1/ell_integral.tcc:
-
 /usr/include/c++/12/ios:
 
 /usr/include/arm-linux-gnueabihf/bits/types/struct_tm.h:
-
-/usr/include/c++/12/tr1/modified_bessel_func.tcc:
 
 /usr/include/arm-linux-gnueabihf/bits/types/mbstate_t.h:
 
@@ -634,8 +492,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/arm-linux-gnueabihf/bits/types/clock_t.h:
 
-/usr/include/c++/12/tuple:
-
 /usr/include/c++/12/bits/streambuf.tcc:
 
 /usr/include/wchar.h:
@@ -646,8 +502,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 
 /usr/include/arm-linux-gnueabihf/bits/atomic_wide_counter.h:
 
-/usr/include/arm-linux-gnueabihf/bits/mathcalls-helper-functions.h:
-
 /usr/include/c++/12/pstl/pstl_config.h:
 
 /usr/include/arm-linux-gnueabihf/bits/types/__FILE.h:
@@ -655,8 +509,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/arm-linux-gnueabihf/bits/struct_mutex.h:
 
 /usr/include/c++/12/bits/predefined_ops.h:
-
-/usr/include/arm-linux-gnueabihf/bits/fp-logb.h:
 
 /usr/include/arm-linux-gnueabihf/bits/setjmp.h:
 
@@ -701,8 +553,6 @@ CMakeFiles/servo.dir/src/servo.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/s
 /usr/include/c++/12/bits/refwrap.h:
 
 /usr/include/c++/12/initializer_list:
-
-/usr/include/c++/12/bits/parse_numbers.h:
 
 /usr/include/c++/12/bits/basic_string.h:
 

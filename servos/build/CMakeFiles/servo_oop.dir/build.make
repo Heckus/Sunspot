@@ -92,7 +92,7 @@ servo_oop_EXTERNAL_OBJECTS =
 
 servo_oop: CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o
 servo_oop: CMakeFiles/servo_oop.dir/build.make
-servo_oop: /usr/local/lib/liblgpio.so
+servo_oop: /usr/lib/libwiringPi.so
 servo_oop: CMakeFiles/servo_oop.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/servos/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX executable servo_oop"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/servo_oop.dir/link.txt --verbose=$(VERBOSE)

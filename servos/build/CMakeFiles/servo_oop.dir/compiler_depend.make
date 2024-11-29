@@ -3,8 +3,8 @@
 
 CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/Sunspot/servos/src/servo_oop.cpp \
   /usr/include/stdc-predef.h \
-  /usr/include/wiringPi.h \
-  /usr/include/softPwm.h \
+  /usr/local/include/wiringPi.h \
+  /usr/local/include/softPwm.h \
   /usr/include/c++/12/iostream \
   /usr/include/arm-linux-gnueabihf/c++/12/bits/c++config.h \
   /usr/include/arm-linux-gnueabihf/c++/12/bits/os_defines.h \
@@ -290,9 +290,9 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 
 /usr/include/c++/12/cerrno:
 
-/usr/include/arm-linux-gnueabihf/bits/types/__fpos_t.h:
+/usr/include/arm-linux-gnueabihf/bits/stdio_lim.h:
 
-/usr/include/stdio.h:
+/usr/include/arm-linux-gnueabihf/bits/types/__fpos_t.h:
 
 /usr/include/c++/12/cstdio:
 
@@ -356,10 +356,6 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 
 /usr/include/arm-linux-gnueabihf/bits/types.h:
 
-/usr/include/stdint.h:
-
-/usr/include/arm-linux-gnueabihf/bits/wordsize.h:
-
 /usr/include/c++/12/cstdint:
 
 /usr/include/arm-linux-gnueabihf/c++/12/bits/os_defines.h:
@@ -371,6 +367,8 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 /usr/include/c++/12/bits/functional_hash.h:
 
 /usr/include/c++/12/bits/nested_exception.h:
+
+/usr/include/c++/12/bits/cpp_type_traits.h:
 
 /usr/include/c++/12/type_traits:
 
@@ -393,10 +391,6 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 /usr/include/arm-linux-gnueabihf/bits/waitflags.h:
 
 /usr/include/arm-linux-gnueabihf/bits/types/__mbstate_t.h:
-
-/usr/include/arm-linux-gnueabihf/bits/stdio_lim.h:
-
-/usr/include/wiringPi.h:
 
 /usr/include/arm-linux-gnueabihf/bits/time.h:
 
@@ -434,9 +428,19 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 
 /usr/include/c++/12/debug/assertions.h:
 
+/usr/include/c++/12/bits/new_allocator.h:
+
+/usr/include/arm-linux-gnueabihf/bits/pthreadtypes.h:
+
+/usr/include/sched.h:
+
 /usr/include/arm-linux-gnueabihf/bits/types/timer_t.h:
 
 /usr/include/arm-linux-gnueabihf/bits/stdint-uintn.h:
+
+/usr/include/arm-linux-gnueabihf/bits/wordsize.h:
+
+/usr/include/stdint.h:
 
 /usr/include/c++/12/bits/functexcept.h:
 
@@ -460,17 +464,9 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 
 /usr/include/c++/12/iostream:
 
-/usr/include/c++/12/bits/cpp_type_traits.h:
+/usr/include/stdio.h:
 
-/usr/include/softPwm.h:
-
-/usr/include/c++/12/initializer_list:
-
-/usr/include/c++/12/bits/new_allocator.h:
-
-/usr/include/arm-linux-gnueabihf/bits/pthreadtypes.h:
-
-/usr/include/sched.h:
+/usr/local/include/softPwm.h:
 
 /usr/include/arm-linux-gnueabihf/bits/fp-fast.h:
 
@@ -493,6 +489,12 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 /usr/include/c++/12/iosfwd:
 
 /usr/include/arm-linux-gnueabihf/c++/12/bits/c++config.h:
+
+/usr/include/c++/12/bits/stl_iterator_base_funcs.h:
+
+/usr/include/c++/12/bits/invoke.h:
+
+/usr/local/include/wiringPi.h:
 
 /usr/include/arm-linux-gnueabihf/gnu/stubs.h:
 
@@ -636,10 +638,6 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 
 /usr/include/c++/12/bits/ostream_insert.h:
 
-/usr/include/c++/12/bits/invoke.h:
-
-/usr/include/c++/12/bits/stl_iterator_base_funcs.h:
-
 /usr/include/c++/12/bits/concept_check.h:
 
 /usr/include/c++/12/bits/stl_iterator.h:
@@ -665,3 +663,5 @@ CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o: /home/hecke/Code/GitRepositories/S
 /usr/include/c++/12/bits/stl_pair.h:
 
 /usr/include/c++/12/bits/refwrap.h:
+
+/usr/include/c++/12/initializer_list:

@@ -4,8 +4,8 @@
 CMakeFiles/servo_oop.dir/src/servo_oop.cpp.o
  /home/hecke/Code/GitRepositories/Sunspot/servos/src/servo_oop.cpp
  /usr/include/stdc-predef.h
- /usr/include/wiringPi.h
- /usr/include/softPwm.h
+ /usr/local/include/wiringPi.h
+ /usr/local/include/softPwm.h
  /usr/include/c++/12/iostream
  /usr/include/arm-linux-gnueabihf/c++/12/bits/c++config.h
  /usr/include/arm-linux-gnueabihf/c++/12/bits/os_defines.h

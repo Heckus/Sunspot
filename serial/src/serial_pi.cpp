@@ -102,7 +102,7 @@ uint32_t receive_message(int handle) {
 }
 
 int main() {
-    const char* device = "/dev/ttyACM0";  // Adjust as needed
+    const char* device = "/dev/ttyACM1";  // Adjust as needed
     int handle;
 
     // Open serial connection
