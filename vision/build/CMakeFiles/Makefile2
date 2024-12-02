@@ -67,6 +67,7 @@ all: CMakeFiles/detection.dir/all
 all: CMakeFiles/saving.dir/all
 all: CMakeFiles/zachvision.dir/all
 all: CMakeFiles/preloadedmotion.dir/all
+all: CMakeFiles/vision1.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -78,6 +79,7 @@ clean: CMakeFiles/detection.dir/clean
 clean: CMakeFiles/saving.dir/clean
 clean: CMakeFiles/zachvision.dir/clean
 clean: CMakeFiles/preloadedmotion.dir/clean
+clean: CMakeFiles/vision1.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -139,7 +141,7 @@ CMakeFiles/saving.dir/clean:
 CMakeFiles/zachvision.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=7,8 "Built target zachvision"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=9,10 "Built target zachvision"
 .PHONY : CMakeFiles/zachvision.dir/all
 
 # Build rule for subdir invocation for target.
@@ -183,6 +185,32 @@ preloadedmotion: CMakeFiles/preloadedmotion.dir/rule
 CMakeFiles/preloadedmotion.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/clean
 .PHONY : CMakeFiles/preloadedmotion.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/vision1.dir
+
+# All Build rule for target.
+CMakeFiles/vision1.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=7,8 "Built target vision1"
+.PHONY : CMakeFiles/vision1.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/vision1.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/vision1.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 0
+.PHONY : CMakeFiles/vision1.dir/rule
+
+# Convenience name for target.
+vision1: CMakeFiles/vision1.dir/rule
+.PHONY : vision1
+
+# clean rule for target.
+CMakeFiles/vision1.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/clean
+.PHONY : CMakeFiles/vision1.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

@@ -53,4 +53,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/saving.dir/DependInfo.cmake"
   "CMakeFiles/zachvision.dir/DependInfo.cmake"
   "CMakeFiles/preloadedmotion.dir/DependInfo.cmake"
+  "CMakeFiles/vision1.dir/DependInfo.cmake"
   )

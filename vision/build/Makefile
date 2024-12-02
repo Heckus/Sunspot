@@ -168,6 +168,19 @@ preloadedmotion/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/preloadedmotion.dir/build.make CMakeFiles/preloadedmotion.dir/build
 .PHONY : preloadedmotion/fast
 
+#=============================================================================
+# Target rules for targets named vision1
+
+# Build rule for target.
+vision1: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vision1
+.PHONY : vision1
+
+# fast build rule for target.
+vision1/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/build
+.PHONY : vision1/fast
+
 src/detectionexample.o: src/detectionexample.cpp.o
 .PHONY : src/detectionexample.o
 
@@ -240,6 +253,30 @@ src/savingexample.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/saving.dir/build.make CMakeFiles/saving.dir/src/savingexample.cpp.s
 .PHONY : src/savingexample.cpp.s
 
+src/vision1.o: src/vision1.cpp.o
+.PHONY : src/vision1.o
+
+# target to build an object file
+src/vision1.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/src/vision1.cpp.o
+.PHONY : src/vision1.cpp.o
+
+src/vision1.i: src/vision1.cpp.i
+.PHONY : src/vision1.i
+
+# target to preprocess a source file
+src/vision1.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/src/vision1.cpp.i
+.PHONY : src/vision1.cpp.i
+
+src/vision1.s: src/vision1.cpp.s
+.PHONY : src/vision1.s
+
+# target to generate assembly for a file
+src/vision1.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/src/vision1.cpp.s
+.PHONY : src/vision1.cpp.s
+
 src/zachvision.o: src/zachvision.cpp.o
 .PHONY : src/zachvision.o
 
@@ -275,6 +312,7 @@ help:
 	@echo "... detection"
 	@echo "... preloadedmotion"
 	@echo "... saving"
+	@echo "... vision1"
 	@echo "... zachvision"
 	@echo "... src/detectionexample.o"
 	@echo "... src/detectionexample.i"
@@ -285,6 +323,9 @@ help:
 	@echo "... src/savingexample.o"
 	@echo "... src/savingexample.i"
 	@echo "... src/savingexample.s"
+	@echo "... src/vision1.o"
+	@echo "... src/vision1.i"
+	@echo "... src/vision1.s"
 	@echo "... src/zachvision.o"
 	@echo "... src/zachvision.i"
 	@echo "... src/zachvision.s"

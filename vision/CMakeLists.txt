@@ -33,6 +33,11 @@ set(SRC_SAVING ${CMAKE_CURRENT_SOURCE_DIR}/src/savingexample.cpp)
 set(SRC_ZACHVISION ${CMAKE_CURRENT_SOURCE_DIR}/src/zachvision.cpp)
 set(SRC_PRELOADEDMOTION ${CMAKE_CURRENT_SOURCE_DIR}/src/preloadedmotion.cpp)
 
+
+set(SRC_VISION1 ${CMAKE_CURRENT_SOURCE_DIR}/src/vision1.cpp)
+
+
+
 # Add the executables
 add_executable(detection ${SRC_DETECTION})
 target_link_libraries(detection ${OpenCV_LIBRARIES})
@@ -45,6 +50,10 @@ target_link_libraries(zachvision ${OpenCV_LIBRARIES})
 
 add_executable(preloadedmotion ${SRC_PRELOADEDMOTION})
 target_link_libraries(preloadedmotion ${OpenCV_LIBRARIES})
+
+# Add vision1 executable
+add_executable(vision1 ${SRC_VISION1})
+target_link_libraries(vision1 ${OpenCV_LIBRARIES})
 
 # Define the clean rule
 set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "detection;saving;zachvision;preloadedmotion")
