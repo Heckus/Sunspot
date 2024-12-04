@@ -177,13 +177,14 @@ int main() {
     camera.startCapture();
 
     cv::CascadeClassifier ball_cascade;
-    if (!ball_cascade.load("/home/hecke/Code/GitRepositories/Sunspot/vision/models/cascade1.xml")) {
+    if (!ball_cascade.load("/home/hecke/Code/GitRepositories/Sunspot/vision/models/cascade4.xml")) {
         std::cout << "Error loading face cascade classifier" << std::endl;
         return -1;
     }
 
     std::cout << "Press 1 for normal webcam view\n";
     std::cout << "Press 2 for ball detection\n";
+    std::cout << "Press 3 for ball detection on video file\n";
     std::cout << "Press Ctrl+C to exit\n";
 
     char input;
@@ -205,7 +206,10 @@ int main() {
         else if (input == '2') {
             while (running) {
                 frame = camera.captureFrame();
-                if (frame.empty()) break;
+                if (frame.empty()) {
+                    std::cout << "Camera disconnected or frame capture failed" << std::endl;
+                    return -1;
+                }
 
                 cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
                 std::vector<cv::Rect> balls;
@@ -223,6 +227,40 @@ int main() {
                 cv::imshow("Gray Image", gray);
                 if (cv::waitKey(1) == 27) break;
             }
+            cv::destroyAllWindows();
+        }
+        else if (input == '3') {
+            std::string videoPath;
+            std::cout << "Enter the path to the video file: ";
+            std::cin >> videoPath;
+
+            cv::VideoCapture cap(videoPath);
+            if (!cap.isOpened()) {
+                std::cout << "Error opening video file" << std::endl;
+                continue;
+            }
+
+            while (running) {
+                cap >> frame;
+                if (frame.empty()) break;
+
+                cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+                std::vector<cv::Rect> balls;
+                ball_cascade.detectMultiScale(gray, balls, 1.1, 4);
+
+                for (const auto& face : balls) {
+                    cv::rectangle(frame, face, cv::Scalar(0, 0, 255), 2);
+                    cv::putText(frame, "ball", 
+                              cv::Point(face.x, face.y - 5),
+                              cv::FONT_HERSHEY_SIMPLEX, 0.8,
+                              cv::Scalar(0, 0, 255), 2);
+                }
+
+                cv::imshow("Ball Detection on Video", frame);
+                cv::imshow("Gray Image", gray);
+                if (cv::waitKey(1) == 27) break;
+            }
+            cap.release();
             cv::destroyAllWindows();
         }
     }
