@@ -29,6 +29,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.25/Modules/Compiler/GNU.cmake"
   "/usr/share/cmake-3.25/Modules/FindPackageHandleStandardArgs.cmake"
   "/usr/share/cmake-3.25/Modules/FindPackageMessage.cmake"
+  "/usr/share/cmake-3.25/Modules/FindPkgConfig.cmake"
   "/usr/share/cmake-3.25/Modules/Platform/Linux-GNU-C.cmake"
   "/usr/share/cmake-3.25/Modules/Platform/Linux-GNU-CXX.cmake"
   "/usr/share/cmake-3.25/Modules/Platform/Linux-GNU.cmake"
@@ -54,4 +55,6 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/zachvision.dir/DependInfo.cmake"
   "CMakeFiles/preloadedmotion.dir/DependInfo.cmake"
   "CMakeFiles/vision1.dir/DependInfo.cmake"
+  "CMakeFiles/vision2.dir/DependInfo.cmake"
+  "CMakeFiles/vision2_1.dir/DependInfo.cmake"
   )

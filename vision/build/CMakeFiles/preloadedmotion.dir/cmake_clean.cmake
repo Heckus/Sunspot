@@ -5,6 +5,9 @@ file(REMOVE_RECURSE
   "preloadedmotion"
   "preloadedmotion.pdb"
   "saving"
+  "vision1"
+  "vision2"
+  "vision2_1"
   "zachvision"
 )
 

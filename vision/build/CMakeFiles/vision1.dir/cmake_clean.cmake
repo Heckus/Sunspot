@@ -6,6 +6,8 @@ file(REMOVE_RECURSE
   "saving"
   "vision1"
   "vision1.pdb"
+  "vision2"
+  "vision2_1"
   "zachvision"
 )
 

@@ -181,6 +181,32 @@ vision1/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/build
 .PHONY : vision1/fast
 
+#=============================================================================
+# Target rules for targets named vision2
+
+# Build rule for target.
+vision2: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vision2
+.PHONY : vision2
+
+# fast build rule for target.
+vision2/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2.dir/build.make CMakeFiles/vision2.dir/build
+.PHONY : vision2/fast
+
+#=============================================================================
+# Target rules for targets named vision2_1
+
+# Build rule for target.
+vision2_1: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 vision2_1
+.PHONY : vision2_1
+
+# fast build rule for target.
+vision2_1/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_1.dir/build.make CMakeFiles/vision2_1.dir/build
+.PHONY : vision2_1/fast
+
 src/detectionexample.o: src/detectionexample.cpp.o
 .PHONY : src/detectionexample.o
 
@@ -277,6 +303,54 @@ src/vision1.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision1.dir/build.make CMakeFiles/vision1.dir/src/vision1.cpp.s
 .PHONY : src/vision1.cpp.s
 
+src/vision2.o: src/vision2.cpp.o
+.PHONY : src/vision2.o
+
+# target to build an object file
+src/vision2.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2.dir/build.make CMakeFiles/vision2.dir/src/vision2.cpp.o
+.PHONY : src/vision2.cpp.o
+
+src/vision2.i: src/vision2.cpp.i
+.PHONY : src/vision2.i
+
+# target to preprocess a source file
+src/vision2.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2.dir/build.make CMakeFiles/vision2.dir/src/vision2.cpp.i
+.PHONY : src/vision2.cpp.i
+
+src/vision2.s: src/vision2.cpp.s
+.PHONY : src/vision2.s
+
+# target to generate assembly for a file
+src/vision2.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2.dir/build.make CMakeFiles/vision2.dir/src/vision2.cpp.s
+.PHONY : src/vision2.cpp.s
+
+src/vision2_1.o: src/vision2_1.cpp.o
+.PHONY : src/vision2_1.o
+
+# target to build an object file
+src/vision2_1.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_1.dir/build.make CMakeFiles/vision2_1.dir/src/vision2_1.cpp.o
+.PHONY : src/vision2_1.cpp.o
+
+src/vision2_1.i: src/vision2_1.cpp.i
+.PHONY : src/vision2_1.i
+
+# target to preprocess a source file
+src/vision2_1.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_1.dir/build.make CMakeFiles/vision2_1.dir/src/vision2_1.cpp.i
+.PHONY : src/vision2_1.cpp.i
+
+src/vision2_1.s: src/vision2_1.cpp.s
+.PHONY : src/vision2_1.s
+
+# target to generate assembly for a file
+src/vision2_1.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_1.dir/build.make CMakeFiles/vision2_1.dir/src/vision2_1.cpp.s
+.PHONY : src/vision2_1.cpp.s
+
 src/zachvision.o: src/zachvision.cpp.o
 .PHONY : src/zachvision.o
 
@@ -313,6 +387,8 @@ help:
 	@echo "... preloadedmotion"
 	@echo "... saving"
 	@echo "... vision1"
+	@echo "... vision2"
+	@echo "... vision2_1"
 	@echo "... zachvision"
 	@echo "... src/detectionexample.o"
 	@echo "... src/detectionexample.i"
@@ -326,6 +402,12 @@ help:
 	@echo "... src/vision1.o"
 	@echo "... src/vision1.i"
 	@echo "... src/vision1.s"
+	@echo "... src/vision2.o"
+	@echo "... src/vision2.i"
+	@echo "... src/vision2.s"
+	@echo "... src/vision2_1.o"
+	@echo "... src/vision2_1.i"
+	@echo "... src/vision2_1.s"
 	@echo "... src/zachvision.o"
 	@echo "... src/zachvision.i"
 	@echo "... src/zachvision.s"

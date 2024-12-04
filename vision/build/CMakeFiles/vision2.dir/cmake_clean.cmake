@@ -1,17 +1,17 @@
 file(REMOVE_RECURSE
-  "CMakeFiles/detection.dir/src/detectionexample.cpp.o"
-  "CMakeFiles/detection.dir/src/detectionexample.cpp.o.d"
+  "CMakeFiles/vision2.dir/src/vision2.cpp.o"
+  "CMakeFiles/vision2.dir/src/vision2.cpp.o.d"
   "detection"
-  "detection.pdb"
   "preloadedmotion"
   "saving"
   "vision1"
   "vision2"
+  "vision2.pdb"
   "vision2_1"
   "zachvision"
 )
 
 # Per-language clean rules from dependency scanning.
 foreach(lang CXX)
-  include(CMakeFiles/detection.dir/cmake_clean_${lang}.cmake OPTIONAL)
+  include(CMakeFiles/vision2.dir/cmake_clean_${lang}.cmake OPTIONAL)
 endforeach()

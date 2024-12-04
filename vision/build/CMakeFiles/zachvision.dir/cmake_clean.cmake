@@ -4,6 +4,9 @@ file(REMOVE_RECURSE
   "detection"
   "preloadedmotion"
   "saving"
+  "vision1"
+  "vision2"
+  "vision2_1"
   "zachvision"
   "zachvision.pdb"
 )
