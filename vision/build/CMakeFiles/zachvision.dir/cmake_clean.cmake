@@ -7,6 +7,7 @@ file(REMOVE_RECURSE
   "vision1"
   "vision2"
   "vision2_1"
+  "vision2_2"
   "zachvision"
   "zachvision.pdb"
 )

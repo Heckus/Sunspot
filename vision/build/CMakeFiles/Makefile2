@@ -70,6 +70,7 @@ all: CMakeFiles/preloadedmotion.dir/all
 all: CMakeFiles/vision1.dir/all
 all: CMakeFiles/vision2.dir/all
 all: CMakeFiles/vision2_1.dir/all
+all: CMakeFiles/vision2_2.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -84,6 +85,7 @@ clean: CMakeFiles/preloadedmotion.dir/clean
 clean: CMakeFiles/vision1.dir/clean
 clean: CMakeFiles/vision2.dir/clean
 clean: CMakeFiles/vision2_1.dir/clean
+clean: CMakeFiles/vision2_2.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -145,7 +147,7 @@ CMakeFiles/saving.dir/clean:
 CMakeFiles/zachvision.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/zachvision.dir/build.make CMakeFiles/zachvision.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=13,14 "Built target zachvision"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=15,16 "Built target zachvision"
 .PHONY : CMakeFiles/zachvision.dir/all
 
 # Build rule for subdir invocation for target.
@@ -267,6 +269,32 @@ vision2_1: CMakeFiles/vision2_1.dir/rule
 CMakeFiles/vision2_1.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_1.dir/build.make CMakeFiles/vision2_1.dir/clean
 .PHONY : CMakeFiles/vision2_1.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/vision2_2.dir
+
+# All Build rule for target.
+CMakeFiles/vision2_2.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_2.dir/build.make CMakeFiles/vision2_2.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_2.dir/build.make CMakeFiles/vision2_2.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles --progress-num=13,14 "Built target vision2_2"
+.PHONY : CMakeFiles/vision2_2.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/vision2_2.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/vision2_2.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles 0
+.PHONY : CMakeFiles/vision2_2.dir/rule
+
+# Convenience name for target.
+vision2_2: CMakeFiles/vision2_2.dir/rule
+.PHONY : vision2_2
+
+# clean rule for target.
+CMakeFiles/vision2_2.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/vision2_2.dir/build.make CMakeFiles/vision2_2.dir/clean
+.PHONY : CMakeFiles/vision2_2.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

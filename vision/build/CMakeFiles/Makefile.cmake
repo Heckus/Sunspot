@@ -57,4 +57,5 @@ set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/vision1.dir/DependInfo.cmake"
   "CMakeFiles/vision2.dir/DependInfo.cmake"
   "CMakeFiles/vision2_1.dir/DependInfo.cmake"
+  "CMakeFiles/vision2_2.dir/DependInfo.cmake"
   )

@@ -5,5 +5,6 @@
 /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/vision1.dir
 /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/vision2.dir
 /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/vision2_1.dir
+/home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/vision2_2.dir
 /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/edit_cache.dir
 /home/hecke/Code/GitRepositories/Sunspot/vision/build/CMakeFiles/rebuild_cache.dir
