@@ -12,15 +12,7 @@ int main() {
     signal(SIGINT, signalHandler);
 
     // Old pipeline
-    //std::string pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, format=BGR ! videoconvert ! appsink";
-    
-    //New pipeline with improved quality
-    // std::string pipeline = R"(
-    // libcamerasrc ae-mode=on ! awb-mode=auto ! video/x-raw,width=1920,height=1080,framerate=30/1,format=BGR ! videoconvert ! videobalance contrast=1.5 brightness=-0.1 saturation=1.2 ! videoflip method=rotate-180 ! appsink sync=false max-buffers=1 drop=true
-    // )";
-
-    std::string pipeline = R"(libcamerasrc ! video/x-raw,width=1920,height=1080,framerate=30/1,format=BGR ! videoconvert ! videobalance contrast=1.5 brightness=-0.1 saturation=1.2 ! appsink sync=false drop=true)";
-
+    std::string pipeline = "libcamerasrc ! video/x-raw, width=640, height=480, format=I420 !  videoconvert ! videobalance contrast=1.5 brightness=-0.1 saturation=1.2 ! appsink";
     cv::VideoCapture camera(pipeline, cv::CAP_GSTREAMER);
 
     std::cout << "Camera opened successfully" << std::endl;
