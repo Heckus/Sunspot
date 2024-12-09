@@ -11,6 +11,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBCAMERA REQUIRED libcamera)
 
 # Find GStreamer package
+find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
 pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
 
@@ -53,7 +54,6 @@ add_executable(vision2_1 ${SRC_VISION2_1})
 target_link_libraries(vision2_1 ${OpenCV_LIBRARIES})
 
 add_executable(vision2_2 ${SRC_VISION2_2})
-target_link_libraries(vision2_2 ${OpenCV_LIBRARIES} ${GSTREAMER_LIBRARIES} ${GSTREAMER_APP_LIBRARIES} ${GTK_LIBRARIES})
-
+target_link_libraries(vision2_2 ${OpenCV_LIBRARIES})
 # Define the clean rule
 set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES "detection;saving;zachvision;preloadedmotion;vision1;vision2;vision2_1;vision2_2")
