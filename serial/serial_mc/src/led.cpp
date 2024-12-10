@@ -123,3 +123,6 @@ void LEDBoard::setBatteryLevel(int percentage) {
   }
   show();
 }
+
+// connect signal wire to pwm pins and power into 5v and ground into ground 
+// for each board

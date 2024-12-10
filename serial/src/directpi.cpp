@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <signal.h>
+#include <thread>
 
 volatile bool running = true;
 
@@ -10,10 +11,38 @@ void handleCtrlC(int signal) {
     running = false;
 }
 
+#include <regex>
+
+void receiveMessages(int serialFd) {
+    std::string buffer;
+    while (running) {
+        if (serialDataAvail(serialFd) > 0) {
+            char c = serialGetchar(serialFd);
+            if (c == '\n') {
+                std::regex pattern(R"(THETA:(\d+)\s+BETA:(\d+)\s+LED0:(\w+)\s+BAT:(\d+)\s+STATE:(\d+))");
+                std::smatch matches;
+                if (std::regex_search(buffer, matches, pattern)) {
+                    std::cout << "THETA: " << matches[1] << std::endl;
+                    std::cout << "BETA: " << matches[2] << std::endl;
+                    std::cout << "LED0: " << matches[3] << std::endl;
+                    std::cout << "BAT: " << matches[4] << std::endl;
+                    std::cout << "STATE: " << matches[5] << std::endl;
+                } else {
+                    std::cerr << "Received malformed message: " << buffer << std::endl;
+                }
+                buffer.clear();
+            } else {
+                buffer += c;
+            }
+        }
+    }
+}
+
 int main() {
     signal(SIGINT, handleCtrlC); // Handle Ctrl+C for clean exit
 
     const char *serialDevice = "/dev/ttyAMA0"; // Adjust if using a USB-serial adapter
+    //const char *serialDevice = "/dev/ttyACM0"; 
     const int baudRate = 9600;
 
     // Initialize WiringPi and open the serial port
@@ -28,30 +57,20 @@ int main() {
         return 1;
     }
 
-    std::cout << "Communication started. Type a message to send to Arduino." << std::endl;
+    std::thread receiverThread(receiveMessages, serialFd);
 
+    std::cout << "Communication started. Type a message to send to Controller." << std::endl;
+
+    
     while (running) {
         std::string userInput;
-        std::cout << "You: ";
         std::getline(std::cin, userInput);
 
-        // Send user input to Arduino
+        // Send user input to Controller
         serialPuts(serialFd, (userInput + '\n').c_str()); // Send message with newline
-        serialFlush(serialFd); // Ensure the message is sent immediately
-        delay(100); // Small delay to allow Arduino to process the message
-
-        // Wait for response
-        std::string response;
-        while (serialDataAvail(serialFd) > 0) {
-            char c = serialGetchar(serialFd);
-            if (c == '\n') break; // End of message
-            response += c;
-        }
-
-        if (!response.empty()) {
-            std::cout << "Arduino: " << response << std::endl;
-        }
     }
+
+    receiverThread.join();
 
     serialClose(serialFd);
     std::cout << "Exiting..." << std::endl;

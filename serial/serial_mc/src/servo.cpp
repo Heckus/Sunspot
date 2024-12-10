@@ -26,4 +26,5 @@ int move(int value, int axis) {
 }
 
 
-
+//connect the control wire into pwm pins and power into 5v and ground into ground
+// ensure the controller shares a common ground with the servo(will happen on the board)
