@@ -1,86 +1,151 @@
 
-// #include "led.h"
-// #include "servo.h"
-// #include "switch.h"
-// #include "buttons.h"
+#include "led.h"
+#include "servo.h"
+#include "switch.h"
+#include "buttons.h"
+#include "serial.h"
 
-// #define LEDBOARD0 7
-// #define LEDNUM0 1
-// #define LEDBOARD1 6
-// #define LEDNUM1 8
-// #define LEDBOARD2 5
-// #define LEDNUM2 3
+#define LEDBOARD0 7
+#define LEDNUM0 1
+#define LEDBOARD1 6
+#define LEDNUM1 8
+#define LEDBOARD2 5
+#define LEDNUM2 3
 
 
-// #define SERVOthetaPIN 9
-// #define SERVObetaPIN 10
+#define SERVOthetaPIN 9
+#define SERVObetaPIN 10
 
-// #define SWITCHPIN A0
-// #define BUTTON1PINTX 3
-// #define BUTTON1PINRX 2 //connect to button
-// #define BUTTON2PINTX 13
-// #define BUTTON2PINRX 12 //connect to button
-// #define BUTTON3PIN 11
+#define SWITCHPIN A0
+#define BUTTON1PINTX 3
+#define BUTTON1PINRX 2 //connect to button
+#define BUTTON2PIN 13
+#define BUTTON3PIN 11
+#define BUTTON4PIN 12
 
-// LEDBoard statusBoard(LEDBOARD0, LEDNUM0);   // 1 LEDs on pin 7
-// LEDBoard batteryBoard(LEDBOARD1, LEDNUM1);   // 8 LEDs on pin 6
-// LEDBoard buttonBoard(LEDBOARD2,LEDNUM2); // 3 LEDs on pin 5
+LEDBoard statusBoard(LEDBOARD0, LEDNUM0);   // 1 LEDs on pin 7
+LEDBoard batteryBoard(LEDBOARD1, LEDNUM1);   // 8 LEDs on pin 6
+LEDBoard buttonBoard(LEDBOARD2,LEDNUM2); // 3 LEDs on pin 5
 
-// Servo servotheta;
-// Servo servobeta;
+Servo servotheta;
+Servo servobeta;
 
-// ThreeWaySwitch threeWaySwitch(SWITCHPIN);
+ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
-// CapacitiveButton button1(BUTTON1PINTX, BUTTON1PINRX, 10000);
-// CapacitiveButton button2(BUTTON2PINTX, BUTTON2PINRX, 10000);
-// RegularButton button3(BUTTON3PIN);
+CapacitiveButton button1(BUTTON1PINTX, BUTTON1PINRX, 10000);
+RegularButton button2(BUTTON2PIN);
+RegularButton button3(BUTTON3PIN);
 
-// void setup() {
-//     Serial.begin(9600);
-//     FastLED.setBrightness(50);
-//     servotheta.attach(SERVOthetaPIN);
-//     servobeta.attach(SERVObetaPIN);
-//     servotheta.write(move(0,xaxis));
-//     servobeta.write(move(0,yaxis));
-//     statusBoard.setLED(0, 255, 255, 255);    // Set camera LED to white
-//     // while (!Serial) {
-//     //     // Wait for serial connection
-//     // }
-//     // Serial.println("Arduino ready.");
-// }
 
-// void loop() {
-//     // Check if data is available from Raspberry Pi
-//     // if (Serial.available() > 0) {
-//     //     String message = Serial.readStringUntil('\n'); // Read until newline
-//     //     Serial.print("I got this message: ");
-//     //     Serial.println(message); // Send acknowledgment
-//     // }
+SerialComm serialComm(9600);
+
+int theta =0;
+void setTheta(int value) {
+    if (value > 90) {
+        theta = 90;
+    } else if (value < -90) {
+        theta = -90;
+    } else {
+        theta = value;
+    }
+}
+int beta = 0;
+void setBeta(int value) {
+    if (value > 90) {
+        beta = 90;
+    } else if (value < -90) {
+        beta = -90;
+    } else {
+        beta = value;
+    }
+}
+int batteryLevel;
+
+String led0 = "white";
+
+int switchState = 1;
+
+int button1State = 0;
+int button2State = 0;
+int button3State = 0;
+int button4State = 0;
+
+
+void setup() {
+    serialComm.waitTillConnected();
+    FastLED.setBrightness(75);
+    servotheta.attach(SERVOthetaPIN);
+    servobeta.attach(SERVObetaPIN);
+    servotheta.write(move(0,xaxis));
+    servobeta.write(move(0,yaxis));
+    statusBoard.setLED(0,LEDBoard::STCRGB(led0));    // Set camera LED to white
+    batteryBoard.setBatteryLevel(100);
+    buttonBoard.setLED(0,CRGB::Red);
+    buttonBoard.setLED(1,CRGB::Red);
+    buttonBoard.setLED(2,CRGB::Red);
+    
+}
+
+int skip = 0;
+void loop() {
+    String message = serialComm.receive();
+    if (message.length() == 0) {
+        return;
+    }
+    int cmd = serialComm.extractcmd(message);
+    switch (cmd) {
+        case 2: //Status
+            skip = 1;
+            break;
+        case 3: //RESET
+            servotheta.write(move(0,xaxis));
+            servobeta.write(move(0,yaxis));
+            statusBoard.setLED(0,LEDBoard::STCRGB(led0));   
+            batteryBoard.setBatteryLevel(100);
+            buttonBoard.setLED(0,CRGB::Red);
+            buttonBoard.setLED(1,CRGB::Red);
+            buttonBoard.setLED(2,CRGB::Red);
+            break;
+        case 4:
+            setTheta(theta + serialComm.extractValue(message, cmd).toInt());
+            servotheta.write(move(theta,xaxis));
+            break;
+        case 5:
+            setBeta(beta + serialComm.extractValue(message, cmd).toInt());
+            servobeta.write(move(beta,yaxis));
+            break;
+        case 6:
+            led0 = serialComm.extractValue(message, cmd);
+            statusBoard.setLED(0,LEDBoard::STCRGB(led0));
+            break;
+        default:
+            break;
+    }
+    servotheta.write(move(theta,xaxis));
+    servobeta.write(move(beta,yaxis));
+    
+    if (button1.isPressed()) {
+        button1State ^= 1;
+        buttonBoard.setLED(0, button1State ? CRGB::Green : CRGB::Red);
+    }
+    if (button2.isPressed()) {
+        button2State ^= 1;
+        buttonBoard.setLED(1, button2State ? CRGB::Green : CRGB::Red);
+    }
+    if (button3.isPressed()) {
+        button3State ^= 1;
+        buttonBoard.setLED(2, button3State ? CRGB::Green : CRGB::Red);
+    }
+    switchState = threeWaySwitch.getPosition();
+    batteryBoard.setBatteryLevel(batteryLevel);
+
+    if (skip == 1) {
+        serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
+        skip = 0;
+    }
+}
   
-//     batteryBoard.setBatteryLevel(100);
-//     delay(1000);
-//     batteryBoard.setBatteryLevel(50);
-//     delay(1000);
-//     batteryBoard.setBatteryLevel(10);
-//     delay(1000);
-//     batteryBoard.setBatteryLevel(0);
-//     delay(1000);
   
-//   for (int i = -90; i <= 90; i++) {
-//         servotheta.write(move(i,xaxis));
-//         servobeta.write(move(-i,yaxis));
-//         delay(20);
-//     }
-//     for (int i = 90; i >= -90; i--) {
-//         servotheta.write(move(i,xaxis));
-//         servobeta.write(move(-i,yaxis));
-//         delay(20);
-//     }
-//     delay(1000);
-//     servotheta.write(move(0,xaxis));
-//     servobeta.write(move(0,yaxis));
-//     delay(1000);
   
-
-// }
-
+    
+  

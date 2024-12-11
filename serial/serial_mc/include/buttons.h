@@ -26,7 +26,7 @@ private:
 
 public:
     RegularButton(int buttonPin);
-    bool isPressed();
+    bool isPressed(); //untested
 };
 
 #endif // BUTTONS_H

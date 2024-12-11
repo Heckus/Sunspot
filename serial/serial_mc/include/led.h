@@ -24,6 +24,8 @@ public:
   void show();
   void clear();
   void setBatteryLevel(int percentage);
+
+static CRGB STCRGB(String color);
 };
 
 #endif // LED_H

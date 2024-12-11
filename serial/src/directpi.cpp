@@ -60,15 +60,34 @@ int main() {
     std::thread receiverThread(receiveMessages, serialFd);
 
     std::cout << "Communication started. Type a message to send to Controller." << std::endl;
+    std::string bootcommand = "BOOT";
+    serialPuts(serialFd, (bootcommand + '\n').c_str()); // Send message with newline
+        
+  
 
-    
     while (running) {
-        std::string userInput;
-        std::getline(std::cin, userInput);
-
-        // Send user input to Controller
-        serialPuts(serialFd, (userInput + '\n').c_str()); // Send message with newline
+        char userInput = getchar();
+        std::string message;
+        
+        if (userInput == 'a') {
+            message = "THETA:5";
+        } else if (userInput == 'd') {
+            message = "THETA:-5";
+        } else if (userInput == 'w') {
+            message = "BETA:5";
+        } else if (userInput == 's') {
+            message = "BETA:-5";
+        } else if (userInput == 3) { // Ctrl+C
+            running = false;
+            break;
+        } else {
+            message = "STATUS";
+        }
+        
+        serialPuts(serialFd, (message + '\n').c_str());
+        fflush(stdout);
     }
+
 
     receiverThread.join();
 

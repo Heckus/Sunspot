@@ -42,6 +42,28 @@ void LEDBoard::setLED(int index, uint8_t r, uint8_t g, uint8_t b) {
   show();
 }
 
+CRGB LEDBoard::STCRGB(String color) {
+  if (color == "red") {
+      return CRGB::Red;
+  } else if (color == "green") {
+      return CRGB::Green;
+  } else if (color == "blue") {
+      return CRGB::Blue;
+  } else if (color == "white") {
+      return CRGB::White;
+  } else if (color == "black") {
+      return CRGB::Black;
+  } else if (color == "yellow") {
+      return CRGB::Yellow;
+  } else if (color == "purple") {
+      return CRGB::Purple;
+  } else if (color == "cyan") {
+      return CRGB::Cyan;
+  } else {
+      return CRGB::Black; // Default to black if color is unknown
+  }
+}
+
 // Overloaded setLED with CRGB input
 void LEDBoard::setLED(int index, CRGB color) {
   if (index >= 0 && index < numLEDs) {
