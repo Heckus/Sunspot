@@ -3,6 +3,8 @@
 #define SERVO_H
 #include <Arduino.h>
 #include <Servo.h>
+//#include <ServoTimer2.h>
+
 
 extern const int X_MIN;
 extern const int X_MAX;
@@ -16,6 +18,7 @@ extern const int yaxis;
 
 // Function to map a value from one range to another
 int move(int value, int axis);
+int pwmout(int angle);
 #endif // SERVO_H
 
 

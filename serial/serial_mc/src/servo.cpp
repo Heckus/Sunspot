@@ -1,9 +1,5 @@
 #include "servo.h"
 
-#include <Arduino.h>
-#include <Servo.h>
-// Create servo objects
-
 // Servo pins
 const int X_MIN = 23;
 const int X_MAX = 157;
@@ -23,6 +19,10 @@ int move(int value, int axis) {
         return map(value, inputmin, inputmax, Y_MIN, Y_MAX);
     }
     return 0; // Default return value if axis is neither 'x' nor 'y'
+}
+
+int pwmout(int angle) {
+    return map(angle, -90, 90, 750, 2250);
 }
 
 

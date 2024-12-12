@@ -33,11 +33,11 @@ Servo servobeta;
 ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
 CapacitiveButton button1(BUTTON1PINTX, BUTTON1PINRX, 10000);
-RegularButton button2(BUTTON2PIN);
-RegularButton button3(BUTTON3PIN);
+// RegularButton button2(BUTTON2PIN);
+// RegularButton button3(BUTTON3PIN);
 
 
-SerialComm serialComm(9600);
+SerialComm serialComm(19200);
 
 int theta =0;
 void setTheta(int value) {
@@ -59,7 +59,7 @@ void setBeta(int value) {
         beta = value;
     }
 }
-int batteryLevel;
+int batteryLevel = 8;
 
 String led0 = "white";
 
@@ -72,6 +72,9 @@ int button4State = 0;
 
 
 void setup() {
+    statusBoard.clear();
+    batteryBoard.clear();
+    buttonBoard.clear();
     serialComm.waitTillConnected();
     FastLED.setBrightness(75);
     servotheta.attach(SERVOthetaPIN);
@@ -98,21 +101,27 @@ void loop() {
             skip = 1;
             break;
         case 3: //RESET
-            servotheta.write(move(0,xaxis));
-            servobeta.write(move(0,yaxis));
-            statusBoard.setLED(0,LEDBoard::STCRGB(led0));   
-            batteryBoard.setBatteryLevel(100);
-            buttonBoard.setLED(0,CRGB::Red);
-            buttonBoard.setLED(1,CRGB::Red);
-            buttonBoard.setLED(2,CRGB::Red);
+            theta = 0;
+            beta = 0;
+            statusBoard.clear();
+            batteryBoard.clear();
+            buttonBoard.clear();
+            switchState = 1;
+            button1State = 0;
+            button2State = 0;
+            button3State = 0;
+            button4State = 0;
+            asm volatile ("  jmp 0");
             break;
         case 4:
             setTheta(theta + serialComm.extractValue(message, cmd).toInt());
             servotheta.write(move(theta,xaxis));
+
+            
             break;
         case 5:
             setBeta(beta + serialComm.extractValue(message, cmd).toInt());
-            servobeta.write(move(beta,yaxis));
+            servobeta.write(move(beta,xaxis));
             break;
         case 6:
             led0 = serialComm.extractValue(message, cmd);
@@ -121,21 +130,19 @@ void loop() {
         default:
             break;
     }
-    servotheta.write(move(theta,xaxis));
-    servobeta.write(move(beta,yaxis));
     
     if (button1.isPressed()) {
         button1State ^= 1;
         buttonBoard.setLED(0, button1State ? CRGB::Green : CRGB::Red);
     }
-    if (button2.isPressed()) {
-        button2State ^= 1;
-        buttonBoard.setLED(1, button2State ? CRGB::Green : CRGB::Red);
-    }
-    if (button3.isPressed()) {
-        button3State ^= 1;
-        buttonBoard.setLED(2, button3State ? CRGB::Green : CRGB::Red);
-    }
+    // if (button2.isPressed()) {
+    //     button2State ^= 1;
+    //     buttonBoard.setLED(1, button2State ? CRGB::Green : CRGB::Red);
+    // }
+    // if (button3.isPressed()) {
+    //     button3State ^= 1;
+    //     buttonBoard.setLED(2, button3State ? CRGB::Green : CRGB::Red);
+    // }
     switchState = threeWaySwitch.getPosition();
     batteryBoard.setBatteryLevel(batteryLevel);
 
@@ -143,6 +150,7 @@ void loop() {
         serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
         skip = 0;
     }
+    delay(100);
 }
   
   

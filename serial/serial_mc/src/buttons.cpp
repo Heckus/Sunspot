@@ -9,6 +9,11 @@ CapacitiveButton::CapacitiveButton(int sendPin, int receivePin, long thresholdVa
     sensor = new CapacitiveSensor(pinSend, pinReceive);
 }
 
+// CapacitiveButton::CapacitiveButton(int sendPin, long thresholdValue)
+//     : pinSend(sendPin), threshold(thresholdValue) {
+//     sensor = touchRead(pinSend);
+// }
+
 CapacitiveButton::~CapacitiveButton() {
     delete sensor;
 }

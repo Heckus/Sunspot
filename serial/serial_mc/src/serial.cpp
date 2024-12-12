@@ -27,7 +27,7 @@ void SerialComm::send(const String& message) {
 void SerialComm::send(int theta,int beta,String led0,int batteryLevel,int SwitchState,int Button1,int Button2,int Button3) {
     String message1 = "THETA:" + String(theta) + " BETA:" + String(beta) + 
                 " LED0:" + led0 + " BAT:" + String(batteryLevel);
-    String message2 = " STATE:" + String(SwitchState, BIN).substring(0, 3) + 
+    String message2 = " SWITCHSTATE:" + String(SwitchState) + " BUTTONSTATE:" + 
             String(Button1) + String(Button2) + String(Button3);
     String message = message1 + message2;
     Serial.println(message);
@@ -40,6 +40,7 @@ String SerialComm::receive() {
     }
     return message;
 }
+
 
 
 int SerialComm::extractcmd(String message) {

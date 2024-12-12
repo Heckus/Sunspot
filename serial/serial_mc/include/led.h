@@ -23,6 +23,9 @@ public:
   void setLED(int index, CRGB color);
   void show();
   void clear();
+
+  void handleLowBattery();
+  CRGB calculateColorGradient(int index);
   void setBatteryLevel(int percentage);
 
 static CRGB STCRGB(String color);

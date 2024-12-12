@@ -85,6 +85,49 @@ void LEDBoard::clear() {
   show();
 }
 
+void LEDBoard::handleLowBattery() {
+  // Use millis() for non-blocking blink
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis >= blinkInterval) {
+      // Save the last time you blinked the LED
+      previousMillis = currentMillis;
+      
+      // Toggle LED state
+      ledState = !ledState;
+      
+      if (ledState) {
+          // When ledState is true, turn on the first LED in red
+          boardLEDs[0] = CRGB(255, 0, 0);  // Bright red
+      } else {
+          // When ledState is false, turn off the LED
+          boardLEDs[0] = CRGB(0, 0, 0);
+      }
+  }
+  show();
+}
+
+CRGB LEDBoard::calculateColorGradient(int index) {
+  float ratio = (float)index / (numLEDs - 1);
+  
+  // Color transitions:
+  // 0-0.5 ratio: Red to Orange
+  // 0.5-1 ratio: Orange to Green
+  if (ratio <= 0.5) {
+      // Red to Orange
+      uint8_t r = 255;
+      uint8_t g = map(ratio * 2 * 255, 0, 255, 0, 165);
+      uint8_t b = 0;
+      return CRGB(r, g, b);
+  } else {
+      // Orange to Green
+      uint8_t r = map((ratio - 0.5) * 2 * 255, 0, 255, 165, 0);
+      uint8_t g = 255;
+      uint8_t b = 0;
+      return CRGB(r, g, b);
+  }
+}
+
 void LEDBoard::setBatteryLevel(int percentage) {
   // Constrain percentage to 0-100
   percentage = constrain(percentage, 0, 100);
@@ -94,27 +137,7 @@ void LEDBoard::setBatteryLevel(int percentage) {
   
   // Special handling for very low battery (10% or lower)
   if (percentage <= 10) {
-      // Use millis() for non-blocking blink
-      unsigned long currentMillis = millis();
-      
-      if (currentMillis - previousMillis >= blinkInterval) {
-          // Save the last time you blinked the LED
-          previousMillis = currentMillis;
-          
-          // Toggle LED state
-          ledState = !ledState;
-          
-          if (ledState) {
-              // When ledState is true, turn on the first LED in red
-              boardLEDs[0] = CRGB(255, 0, 0);  // Bright red
-          } else {
-              // When ledState is false, turn off the LED
-              boardLEDs[0] = CRGB(0, 0, 0);
-          }
-      }
-      
-      show();
-      delay(100);// Delay to prevent flickering
+      handleLowBattery();
       return;  // Exit the function after handling low battery
   }
   
@@ -123,28 +146,12 @@ void LEDBoard::setBatteryLevel(int percentage) {
   
   // Color gradient from red (low) to green (high)
   for (int i = 0; i < ledsToLight; i++) {
-      // Calculate color gradient based on actual LED position
-      float ratio = (float)i / (numLEDs - 1);
-      
-      // Color transitions:
-      // 0-0.5 ratio: Red to Orange
-      // 0.5-1 ratio: Orange to Green
-      if (ratio <= 0.5) {
-          // Red to Orange
-          uint8_t r = 255;
-          uint8_t g = map(ratio * 2 * 255, 0, 255, 0, 165);
-          uint8_t b = 0;
-          boardLEDs[i] = CRGB(r, g, b);
-      } else {
-          // Orange to Green
-          uint8_t r = map((ratio - 0.5) * 2 * 255, 0, 255, 165, 0);
-          uint8_t g = 255;
-          uint8_t b = 0;
-          boardLEDs[i] = CRGB(r, g, b);
-      }
+      boardLEDs[i] = calculateColorGradient(i);
   }
   show();
 }
+
+
 
 // connect signal wire to pwm pins and power into 5v and ground into ground 
 // for each board
