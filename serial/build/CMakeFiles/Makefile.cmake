@@ -50,5 +50,6 @@ set(CMAKE_MAKEFILE_PRODUCTS
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
-  "CMakeFiles/directpi.dir/DependInfo.cmake"
+  "CMakeFiles/mcserial.dir/DependInfo.cmake"
+  "CMakeFiles/mctest.dir/DependInfo.cmake"
   )

@@ -1,76 +1,56 @@
 #include "led.h"
 
-
 unsigned long previousMillis = 0;
 bool ledState = false;
 const unsigned long blinkInterval = 500;
 
 // Constructor
 LEDBoard::LEDBoard(int pin, int numLedsOnBoard) : 
-  numLEDs(numLedsOnBoard), dataPin(pin)
+  dataPin(pin), numLEDs(numLedsOnBoard) 
 {
   // Dynamically allocate LED array for this board
-  boardLEDs = new CRGB[numLEDs];
+  boardLEDs = new Adafruit_NeoPixel(numLEDs, dataPin, NEO_GRB + NEO_KHZ800);
   
-  // Add this board's LEDs to FastLED
-  FastLED.addLeds<WS2812B, GRB>(boardLEDs, numLEDs).setCorrection(TypicalLEDStrip);
+  // Initialize the NeoPixel library
+  boardLEDs->begin();
+  boardLEDs->show(); // Initialize all pixels to 'off'
 }
 
 // Destructor to free dynamically allocated memory
 LEDBoard::~LEDBoard() {
-  delete[] boardLEDs;
-}
-
-// Set color of a specific LED
-void LEDBoard::setLED(int index, uint8_t r, uint8_t g, uint8_t b) {
-  if (index >= 0 && index < numLEDs) {
-    boardLEDs[index] = CRGB(r, g, b);
-  }
-  show();
-}
-
-CRGB LEDBoard::STCRGB(String color) {
-  if (color == "red") {
-      return CRGB::Red;
-  } else if (color == "green") {
-      return CRGB::Green;
-  } else if (color == "blue") {
-      return CRGB::Blue;
-  } else if (color == "white") {
-      return CRGB::White;
-  } else if (color == "black") {
-      return CRGB::Black;
-  } else if (color == "yellow") {
-      return CRGB::Yellow;
-  } else if (color == "purple") {
-      return CRGB::Purple;
-  } else if (color == "cyan") {
-      return CRGB::Cyan;
-  } else {
-      return CRGB::Black; // Default to black if color is unknown
-  }
-}
-
-// Overloaded setLED with CRGB input
-void LEDBoard::setLED(int index, CRGB color) {
-  if (index >= 0 && index < numLEDs) {
-    boardLEDs[index] = color;
-  }
-  show();
+  delete boardLEDs;
 }
 
 // Show the current LED states
 void LEDBoard::show() {
-  FastLED.show();
+  boardLEDs->show();
 }
 
 // Clear all LEDs
 void LEDBoard::clear() {
   for (int i = 0; i < numLEDs; i++) {
-    boardLEDs[i] = CRGB::Black;
+    boardLEDs->setPixelColor(i, 0);
   }
   show();
 }
+
+
+// Set color of a specific LED
+void LEDBoard::setLED(int index, uint8_t r, uint8_t g, uint8_t b) {
+  if (index >= 0 && index < numLEDs) {
+    boardLEDs->setPixelColor(index, boardLEDs->Color(r, g, b));
+  }
+  show();
+}
+
+// Set color of a specific LED using a 32-bit color value
+void LEDBoard::setLED(int index, uint32_t color) {
+  if (index >= 0 && index < numLEDs) {
+    boardLEDs->setPixelColor(index, color);
+  }
+  show();
+}
+
 
 void LEDBoard::handleLowBattery() {
   // Use millis() for non-blocking blink
@@ -85,16 +65,16 @@ void LEDBoard::handleLowBattery() {
       
       if (ledState) {
           // When ledState is true, turn on the first LED in red
-          boardLEDs[0] = CRGB(255, 0, 0);  // Bright red
+          boardLEDs->setPixelColor(0, boardLEDs->Color(255, 0, 0));  // Bright red
       } else {
           // When ledState is false, turn off the LED
-          boardLEDs[0] = CRGB(0, 0, 0);
+          boardLEDs->setPixelColor(0, 0);
       }
   }
   show();
 }
 
-CRGB LEDBoard::calculateColorGradient(int index) {
+uint32_t LEDBoard::calculateColorGradient(int index) {
   float ratio = (float)index / (numLEDs - 1);
   
   // Color transitions:
@@ -105,13 +85,13 @@ CRGB LEDBoard::calculateColorGradient(int index) {
       uint8_t r = 255;
       uint8_t g = map(ratio * 2 * 255, 0, 255, 0, 165);
       uint8_t b = 0;
-      return CRGB(r, g, b);
+      return boardLEDs->Color(r, g, b);
   } else {
       // Orange to Green
       uint8_t r = map((ratio - 0.5) * 2 * 255, 0, 255, 165, 0);
       uint8_t g = 255;
       uint8_t b = 0;
-      return CRGB(r, g, b);
+      return boardLEDs->Color(r, g, b);
   }
 }
 
@@ -133,7 +113,29 @@ void LEDBoard::setBatteryLevel(int percentage) {
   
   // Color gradient from red (low) to green (high)
   for (int i = 0; i < ledsToLight; i++) {
-      boardLEDs[i] = calculateColorGradient(i);
+      boardLEDs->setPixelColor(i, calculateColorGradient(i));
   }
   show();
+}
+
+uint32_t LEDBoard::STC(String color) const {
+  if (color == "red") {
+      return boardLEDs->Color(255, 0, 0);
+  } else if (color == "green") {
+      return boardLEDs->Color(0, 255, 0);
+  } else if (color == "blue") {
+      return boardLEDs->Color(0, 0, 255);
+  } else if (color == "white") {
+      return boardLEDs->Color(255, 255, 255);
+  } else if (color == "black") {
+      return boardLEDs->Color(0, 0, 0);
+  } else if (color == "yellow") {
+      return boardLEDs->Color(255, 255, 0);
+  } else if (color == "purple") {
+      return boardLEDs->Color(128, 0, 128);
+  } else if (color == "cyan") {
+      return boardLEDs->Color(0, 255, 255);
+  } else {
+      return boardLEDs->Color(0, 0, 0); // Default to black if color is unknown
+  }
 }

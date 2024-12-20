@@ -9,7 +9,7 @@
 
 volatile bool running = true;
 volatile int serialFd;
-std::mutex serialMutex;
+
 
 int theta = 0;
 int beta = 0;
@@ -30,43 +30,25 @@ void handleCtrlC(int signal) {
 
 
 // New function for handling input
-void handleInput(int serialFd) {
-    std::string userInput;
-    std::cout << "Communication started. Type a message to send to Controller." << std::endl;
+void workthread(int serialFd) {
     while (running) {
-        if (std::cin >> userInput) {
-            std::string message;
-            
-            if (userInput == "a") {
-                message = "THETA:10";
-            } else if (userInput == "d") {
-                message = "THETA:-10";
-            } else if (userInput == "w") {
-                message = "BETA:10";
-            } else if (userInput == "s") {
-                message = "BETA:-10";
-            } else if(userInput == "l1") {
-                message = "LED0:red";
-            }else if(userInput == "l2"){
-                message = "LED0:green";
-            } else if (userInput == "q") {
-                running = false;
-                break;
-            }
-            
-            if (!message.empty()) {
-                std::lock_guard<std::mutex> lock(serialMutex);
-                serialPuts(serialFd, (message + '\n').c_str());
-                fflush(stdout);
-            }
+       
+            theta += (rand() % 3 - 1); // Add random noise between -1 and 1
+            beta += (rand() % 3 - 1);  // Add random noise between -1 and 1
+
+            // Clamp values to stay within -90 and 90
+            if (theta > 90) theta = 90;
+            if (theta < -90) theta = -90;
+            if (beta > 90) beta = 90;
+            if (beta < -90) beta = -90;
+        
         }
     }
-}
+
 
 // Modify receiveMessages to use mutex
-void receiveMessages(int serialFd) {
+void communicationthread(int serialFd) {
     std::string buffer;
-    std::string status = "STATUS";
     const int STATUS_INTERVAL = 100;
     auto lastStatusTime = std::chrono::steady_clock::now();
 
@@ -74,16 +56,18 @@ void receiveMessages(int serialFd) {
         while (serialDataAvail(serialFd) > 0) {  // Process all available data immediately
             char c = serialGetchar(serialFd);
             if (c == '\n') {
-                std::regex pattern(R"(THETA:(-?\d+)\s+BETA:(-?\d+)\s+LED0:(\w+)\s+BAT:(\d+)\s+SWITCHSTATE:(\d+)\s+BUTTONSTATE:(\d+))");
+                std::regex pattern(R"(MC-THETA:(-?\d{1,2})BETA:(-?\d{1,2})LED0:(\w+)BAT:(\d{1,3})MODE:(\d)INPUT:(\d{3}))");
                 std::smatch matches;
                 if (std::regex_search(buffer, matches, pattern)) {
-                    theta = std::stoi(matches[1]);
-                    beta = std::stoi(matches[2]);
-                    led0 = matches[3];
-                    bat = std::stoi(matches[4]);
-                    switchstate = std::stoi(matches[5]);
-                    buttonstate = std::stoi(matches[6]);
-                    
+                    {
+                        theta = std::stoi(matches[1]);
+                        beta = std::stoi(matches[2]);
+                        led0 = matches[3];
+                        bat = std::stoi(matches[4]);
+                        switchstate = std::stoi(matches[5]);
+                        buttonstate = std::stoi(matches[6]);
+                    }
+
                     // Clear terminal (Linux/Unix)
                     std::cout << "\033[2J\033[H";
                     // Print updates without buffering
@@ -91,9 +75,8 @@ void receiveMessages(int serialFd) {
                               << "BETA: " << beta << "\n"
                               << "LED0: " << led0 << "\n"
                               << "BAT: " << bat << "\n"
-                              << "SWITCHSTATE: " << switchstate << "\n"
-                              << "BUTTONSTATE: " << buttonstate << std::endl;
-                            
+                              << "MODE: " << switchstate << "\n"
+                              << "INPUT: " << buttonstate << std::endl;
                 } else {
                     std::cerr << "Received malformed message: " << buffer << std::endl;
                 }
@@ -105,8 +88,11 @@ void receiveMessages(int serialFd) {
 
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusTime).count() >= STATUS_INTERVAL) {
-            std::lock_guard<std::mutex> lock(serialMutex);
-            serialPuts(serialFd, (status + '\n').c_str());
+            std::string message = "PI-THETA:" + std::to_string(theta) +
+                                  "BETA:" + std::to_string(beta) +
+                                  "LED0:" + led0 +
+                                  "BAT:" + std::to_string(bat);
+            serialPuts(serialFd, (message + '\n').c_str());
             fflush(stdout);
             lastStatusTime = now;
         }
@@ -122,9 +108,9 @@ void receiveMessages(int serialFd) {
 int main() {
     signal(SIGINT, handleCtrlC); // Handle Ctrl+C for clean exit
 
-    const char *serialDevice = "/dev/ttyAMA0"; // Adjust if using a USB-serial adapter
+    const char *serialDevice = "/dev/serial0"; // Adjust if using a USB-serial adapter
     //const char *serialDevice = "/dev/ttyACM0"; 
-    const int baudRate = 19200;
+    const int baudRate = 115200;
     //115200
     // Initialize WiringPi and open the serial port
     if (wiringPiSetup() == -1) {
@@ -140,13 +126,13 @@ int main() {
 
     std::string bootcommand = "BOOT";
     serialPuts(serialFd, (bootcommand + '\n').c_str()); // Send message with newline
-
-    std::thread receiverThread(receiveMessages, serialFd);
-    std::thread inputThread(handleInput, serialFd);
+    delay(1000); // Wait for the controller to boot
+    std::thread communication(communicationthread, serialFd);
+    std::thread work(workthread, serialFd);
 
     // Wait for both threads to finish
-    inputThread.join();
-    receiverThread.join();
+    work.join();
+    communication.join();
 
     delay(500); // Wait for the last message to be sent
 

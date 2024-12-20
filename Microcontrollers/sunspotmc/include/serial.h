@@ -1,7 +1,8 @@
 #pragma once
 #ifndef SERIAL_COMM_H
 #define SERIAL_COMM_H
-
+#define RXD1 D7  // Hardware UART1 RX pin on Seeed Studio ESP32-S3
+#define TXD1 D6  // Hardware UART1 TX pin on Seeed Studio ESP32-S3
 #include <Arduino.h>
 
 class SerialComm {
@@ -12,8 +13,9 @@ public:
     void waitTillConnected();
     void send(const String& message);
     void send(int theta, int beta, String led0, int batteryLevel, int SwitchState, int Button1, int Button2, int Button3);
+    void debug(const String& message);
     String receive();
-    int extractcmd(String message);
+    int extractIntValue(String message, int cmd);
     String extractValue(String message, int cmd);
 
 private:

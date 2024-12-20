@@ -63,7 +63,8 @@ CMAKE_BINARY_DIR = /home/hecke/Code/GitRepositories/Sunspot/serial/build
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/directpi.dir/all
+all: CMakeFiles/mcserial.dir/all
+all: CMakeFiles/mctest.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -71,34 +72,61 @@ preinstall:
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/directpi.dir/clean
+clean: CMakeFiles/mcserial.dir/clean
+clean: CMakeFiles/mctest.dir/clean
 .PHONY : clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/directpi.dir
+# Target rules for target CMakeFiles/mcserial.dir
 
 # All Build rule for target.
-CMakeFiles/directpi.dir/all:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles --progress-num=1,2 "Built target directpi"
-.PHONY : CMakeFiles/directpi.dir/all
+CMakeFiles/mcserial.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles --progress-num=1,2 "Built target mcserial"
+.PHONY : CMakeFiles/mcserial.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/directpi.dir/rule: cmake_check_build_system
+CMakeFiles/mcserial.dir/rule: cmake_check_build_system
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles 2
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/directpi.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/mcserial.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles 0
-.PHONY : CMakeFiles/directpi.dir/rule
+.PHONY : CMakeFiles/mcserial.dir/rule
 
 # Convenience name for target.
-directpi: CMakeFiles/directpi.dir/rule
-.PHONY : directpi
+mcserial: CMakeFiles/mcserial.dir/rule
+.PHONY : mcserial
 
 # clean rule for target.
-CMakeFiles/directpi.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/clean
-.PHONY : CMakeFiles/directpi.dir/clean
+CMakeFiles/mcserial.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/clean
+.PHONY : CMakeFiles/mcserial.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/mctest.dir
+
+# All Build rule for target.
+CMakeFiles/mctest.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles --progress-num=3,4 "Built target mctest"
+.PHONY : CMakeFiles/mctest.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/mctest.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/mctest.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles 0
+.PHONY : CMakeFiles/mctest.dir/rule
+
+# Convenience name for target.
+mctest: CMakeFiles/mctest.dir/rule
+.PHONY : mctest
+
+# clean rule for target.
+CMakeFiles/mctest.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/clean
+.PHONY : CMakeFiles/mctest.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

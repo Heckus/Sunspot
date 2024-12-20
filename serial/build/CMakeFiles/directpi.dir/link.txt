@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/directpi.dir/src/directpi.cpp.o -o directpi  -Wl,-rpath,/usr/local/lib /usr/local/lib/libwiringPi.so 

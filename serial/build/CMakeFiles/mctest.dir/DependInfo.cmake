@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/hecke/Code/GitRepositories/Sunspot/serial/src/directpi.cpp" "CMakeFiles/directpi.dir/src/directpi.cpp.o" "gcc" "CMakeFiles/directpi.dir/src/directpi.cpp.o.d"
+  "/home/hecke/Code/GitRepositories/Sunspot/serial/src/test.cpp" "CMakeFiles/mctest.dir/src/test.cpp.o" "gcc" "CMakeFiles/mctest.dir/src/test.cpp.o.d"
   )
 
 # Targets to which this target links.

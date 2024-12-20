@@ -1,0 +1,12 @@
+[
+{
+  "directory": "/home/hecke/Code/GitRepositories/Sunspot/serial/build",
+  "command": "/usr/bin/arm-linux-gnueabihf-g++   -g -std=gnu++17 -o CMakeFiles/mcserial.dir/src/mcserial.cpp.o -c /home/hecke/Code/GitRepositories/Sunspot/serial/src/mcserial.cpp",
+  "file": "/home/hecke/Code/GitRepositories/Sunspot/serial/src/mcserial.cpp"
+},
+{
+  "directory": "/home/hecke/Code/GitRepositories/Sunspot/serial/build",
+  "command": "/usr/bin/arm-linux-gnueabihf-g++   -g -std=gnu++17 -o CMakeFiles/mctest.dir/src/test.cpp.o -c /home/hecke/Code/GitRepositories/Sunspot/serial/src/test.cpp",
+  "file": "/home/hecke/Code/GitRepositories/Sunspot/serial/src/test.cpp"
+}
+]

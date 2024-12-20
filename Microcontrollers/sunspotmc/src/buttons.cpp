@@ -15,7 +15,7 @@ void CapacitiveButton::printSensorValue() {
 }
 
 bool CapacitiveButton::isPressed() {
-    long sensorValue = touchRead(pinSend);
+    uint16_t sensorValue = touchRead(pinSend);
     return sensorValue > threshold;
 }
 

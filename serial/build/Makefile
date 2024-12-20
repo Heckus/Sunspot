@@ -117,41 +117,78 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named directpi
+# Target rules for targets named mcserial
 
 # Build rule for target.
-directpi: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 directpi
-.PHONY : directpi
+mcserial: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mcserial
+.PHONY : mcserial
 
 # fast build rule for target.
-directpi/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/build
-.PHONY : directpi/fast
+mcserial/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/build
+.PHONY : mcserial/fast
 
-src/directpi.o: src/directpi.cpp.o
-.PHONY : src/directpi.o
+#=============================================================================
+# Target rules for targets named mctest
+
+# Build rule for target.
+mctest: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 mctest
+.PHONY : mctest
+
+# fast build rule for target.
+mctest/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/build
+.PHONY : mctest/fast
+
+src/mcserial.o: src/mcserial.cpp.o
+.PHONY : src/mcserial.o
 
 # target to build an object file
-src/directpi.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/src/directpi.cpp.o
-.PHONY : src/directpi.cpp.o
+src/mcserial.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/src/mcserial.cpp.o
+.PHONY : src/mcserial.cpp.o
 
-src/directpi.i: src/directpi.cpp.i
-.PHONY : src/directpi.i
+src/mcserial.i: src/mcserial.cpp.i
+.PHONY : src/mcserial.i
 
 # target to preprocess a source file
-src/directpi.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/src/directpi.cpp.i
-.PHONY : src/directpi.cpp.i
+src/mcserial.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/src/mcserial.cpp.i
+.PHONY : src/mcserial.cpp.i
 
-src/directpi.s: src/directpi.cpp.s
-.PHONY : src/directpi.s
+src/mcserial.s: src/mcserial.cpp.s
+.PHONY : src/mcserial.s
 
 # target to generate assembly for a file
-src/directpi.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/directpi.dir/build.make CMakeFiles/directpi.dir/src/directpi.cpp.s
-.PHONY : src/directpi.cpp.s
+src/mcserial.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mcserial.dir/build.make CMakeFiles/mcserial.dir/src/mcserial.cpp.s
+.PHONY : src/mcserial.cpp.s
+
+src/test.o: src/test.cpp.o
+.PHONY : src/test.o
+
+# target to build an object file
+src/test.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/src/test.cpp.o
+.PHONY : src/test.cpp.o
+
+src/test.i: src/test.cpp.i
+.PHONY : src/test.i
+
+# target to preprocess a source file
+src/test.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/src/test.cpp.i
+.PHONY : src/test.cpp.i
+
+src/test.s: src/test.cpp.s
+.PHONY : src/test.s
+
+# target to generate assembly for a file
+src/test.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/mctest.dir/build.make CMakeFiles/mctest.dir/src/test.cpp.s
+.PHONY : src/test.cpp.s
 
 # Help Target
 help:
@@ -161,10 +198,14 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... directpi"
-	@echo "... src/directpi.o"
-	@echo "... src/directpi.i"
-	@echo "... src/directpi.s"
+	@echo "... mcserial"
+	@echo "... mctest"
+	@echo "... src/mcserial.o"
+	@echo "... src/mcserial.i"
+	@echo "... src/mcserial.s"
+	@echo "... src/test.o"
+	@echo "... src/test.i"
+	@echo "... src/test.s"
 .PHONY : help
 
 

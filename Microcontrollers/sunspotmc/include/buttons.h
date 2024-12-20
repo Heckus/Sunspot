@@ -8,7 +8,7 @@ class CapacitiveButton {
 private:   
     int pinSend;
     int pinReceive;
-    long threshold;
+    uint16_t threshold;
 
 public:
     CapacitiveButton(int sendPin,long thresholdValue);

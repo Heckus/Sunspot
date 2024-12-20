@@ -1,3 +1,4 @@
-/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles/directpi.dir
+/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles/mcserial.dir
+/home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles/mctest.dir
 /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles/edit_cache.dir
 /home/hecke/Code/GitRepositories/Sunspot/serial/build/CMakeFiles/rebuild_cache.dir

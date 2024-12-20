@@ -4,11 +4,11 @@
 #ifndef LED_H
 #define LED_H
 
-#include <FastLED.h>
+#include <Adafruit_NeoPixel.h>
 
 class LEDBoard {
 private:
-  CRGB* boardLEDs;
+  Adafruit_NeoPixel* boardLEDs;
   int numLEDs;
   int dataPin;
 
@@ -20,42 +20,15 @@ public:
   LEDBoard& operator=(const LEDBoard&) = delete;
 
   void setLED(int index, uint8_t r, uint8_t g, uint8_t b);
-  void setLED(int index, CRGB color);
+  void setLED(int index, uint32_t color);
   void show();
   void clear();
 
   void handleLowBattery();
-  CRGB calculateColorGradient(int index);
+  uint32_t calculateColorGradient(int index);
   void setBatteryLevel(int percentage);
 
-static CRGB STCRGB(String color);
+  uint32_t STC(String color) const; // Add const qualifier
 };
 
 #endif // LED_H
-
-
-
-// EXAMPLE USAGE
-
-//   // Create LED boards
-//   LEDBoard statusBoard(7, 1);   // 16 LEDs on pin 3
-//   LEDBoard batteryBoard(6, 8);   // 8 LEDs on pin 2
-
-
-// void setup() {
-//   // Initialize FastLED global settings
-//   FastLED.setBrightness(50);  // Set overall brightness
-
-//   // Demonstrate individual LED control
-//   statusBoard.setLED(0, 255, 255, 255);    // Set first LED to red
-//   delay(1000);
-  
-// }
-
-// void loop() {
-//   // Simulate battery level changes for demonstration
-  
-//     batteryBoard.setBatteryLevel(10);
-    
-
-// }
