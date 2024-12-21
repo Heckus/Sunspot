@@ -10,6 +10,7 @@ public:
     long baudRate;
     SerialComm(long baudRate);
 
+    void Begin();
     void waitTillConnected();
     void send(const String& message);
     void send(int theta, int beta, String led0, int batteryLevel, int SwitchState, int Button1, int Button2, int Button3);

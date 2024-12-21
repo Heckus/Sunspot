@@ -14,11 +14,10 @@ volatile int serialUSBFd;
 
 int theta = 0;
 int beta = 0;
-std::string led0 = "";
-int bat = 0;
+std::string led0 = "blue";
+int bat = 98;
 int switchstate = 0;
 int buttonstate = 0;
-
 bool ledtoggle = 0;
 
 void handleCtrlC(int signal) {
@@ -36,31 +35,37 @@ void handleCtrlC(int signal) {
 // New function for handling input
 void workthread() {
     while (running) {
-       
-            theta += (rand() % 3 - 1); // Add random noise between -1 and 1
-            beta += (rand() % 3 - 1);  // Add random noise between -1 and 1
+        theta += (rand() % 3 - 1); // Add random noise between -1 and 1
+        beta += (rand() % 3 - 1);  // Add random noise between -1 and 1
 
-            // Clamp values to stay within -90 and 90
-            if (theta > 90) theta = 90;
-            if (theta < -90) theta = -90;
-            if (beta > 90) beta = 90;
-            if (beta < -90) beta = -90;
-        
+        // Clamp values to stay within -90 and 90
+        if (theta > 90) theta = 90;
+        if (theta < -90) theta = -90;
+        if (beta > 90) beta = 90;
+        if (beta < -90) beta = -90;
+
+        // Toggle LED color
+        static int loopCounter = 0;
+        loopCounter++;
+        if (loopCounter % 2 == 0) {
+            led0 = (led0 == "red") ? "white" : "red";
         }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Add delay
     }
+}
 
 
 // Modify receiveMessages to use mutex
 void communicationthread(int serialFd) {
     std::string buffer;
-    const int STATUS_INTERVAL = 100;
+    const int STATUS_INTERVAL = 500;
     auto lastStatusTime = std::chrono::steady_clock::now();
 
     while (running) {
         while (serialDataAvail(serialFd) > 0) {  // Process all available data immediately
             char c = serialGetchar(serialFd);
             if (c == '\n') {
-                std::regex pattern(R"(MC-THETA:(-?\d{1,2})BETA:(-?\d{1,2})LED0:(\w+)BAT:(\d{1,3})MODE:(\d)INPUT:(\d{3}))");
+                std::regex pattern(R"(MC-THETA:(-?\d{1,2})BETA:(-?\d{1,2})LED0:(\w*)BAT:(\d{1,3})MODE:(\d)INPUT:(\d{3}))");
                 std::smatch matches;
                 if (std::regex_search(buffer, matches, pattern)) {
                     {
@@ -73,7 +78,8 @@ void communicationthread(int serialFd) {
                     }
 
                     // Clear terminal (Linux/Unix)
-                    std::cout << "\033[2J\033[H";
+                    //std::cout << "\033[2J\033[H";
+
                     // Print updates without buffering
                     std::cout << "THETA: " << theta << "\n"
                               << "BETA: " << beta << "\n"
@@ -82,7 +88,7 @@ void communicationthread(int serialFd) {
                               << "MODE: " << switchstate << "\n"
                               << "INPUT: " << buttonstate << std::endl;
                 } else {
-                    std::cerr << "Received malformed message: " << buffer << std::endl;
+                    std::cerr << "Received Raw message: " << buffer << std::endl;
                 }
                 buffer.clear();
             } else {
@@ -137,24 +143,7 @@ int main() {
 
     // Wait fo the controller to boot
     std::string bootcommand = "BOOT";
-    std::string response;
-    do {
-        serialPuts(serialWIREFd, (bootcommand + '\n').c_str()); // Send message with newline
-        delay(1000); // Wait for the controller to boot
-
-        response.clear();
-        while (serialDataAvail(serialUSBFd) > 0) {
-            char c = serialGetchar(serialUSBFd);
-            if (c == '\n') {
-                break;
-            } else {
-                response += c;
-            }
-        }
-        std::cout << "Response: " << response << std::endl;
-    } while (response != "MC_CONNECTED");
-
-
+    serialPuts(serialWIREFd, (bootcommand + '\n').c_str()); // Send message with newline
     std::thread communication(communicationthread, serialWIREFd);
     std::thread work(workthread);
 
@@ -162,7 +151,7 @@ int main() {
     work.join();
     communication.join();
 
-    delay(500); // Wait for the last message to be sent
+    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Add delay
 
     std::string reset = "RESET";
     serialPuts(serialWIREFd, (reset + '\n').c_str());

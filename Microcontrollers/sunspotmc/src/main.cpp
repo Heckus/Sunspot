@@ -10,7 +10,7 @@
 #define LEDBOARD1 D9 // D9 8
 #define LEDNUM1 8
 #define LEDBOARD2 D8 // D8 7
-#define LEDNUM2 8
+#define LEDNUM2 3
 
 
 #define SERVOthetaPIN D4 // D4 5
@@ -21,6 +21,7 @@
 #define BUTTON2PIN T2 // Touch 2
 #define BUTTON3PIN T3 // Touch 3
 
+/*   OBJECTS  */ 
 
 //LEDBoard statusBoard(LEDBOARD0, LEDNUM0);   // 1 LEDs on pin 7
 //LEDBoard batteryBoard(LEDBOARD1, LEDNUM1);   // 8 LEDs on pin 6
@@ -38,6 +39,7 @@
 
 SerialComm serialComm(115200);
 
+/*  VARIABLES   */
 int theta = 0;
 void setTheta(int value) {
     if (value > 90) {
@@ -60,18 +62,20 @@ void setBeta(int value) {
 }
 int batteryLevel = 8;
 
-String led0 = "white";
+String led0 = "black";
 
 int switchState = 1;
 
 int button1State = 0;
-int button2State = 0;
-int button3State = 0;
+int button2State = 1;
+int button3State = 1;
 
+/* FLOW CONTROL */
 
 bool nodata = false;
 
 void setup() {
+    serialComm.Begin();
     serialComm.waitTillConnected();
 }
 
@@ -88,9 +92,11 @@ void loop() {
     if (serialinput == "RESET"){
         ESP.restart();
     }
-
+    serialComm.send("ECHO "+serialinput);
     theta += serialComm.extractIntValue(serialinput, 1);
+    serialComm.debug("THETA "+ String(theta));
     beta += serialComm.extractIntValue(serialinput, 2);
+    serialComm.debug("BETA "+ String(beta));
     led0 = serialComm.extractValue(serialinput, 3);
     batteryLevel = serialComm.extractIntValue(serialinput, 4);
     }

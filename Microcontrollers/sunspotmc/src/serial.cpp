@@ -4,19 +4,20 @@ SerialComm::SerialComm(long baudRate) {
 this->baudRate = baudRate;    
 }
 
-void SerialComm::waitTillConnected() {
+void SerialComm::Begin() {
     Serial.begin(baudRate);  // For USB communication
     Serial1.begin(baudRate, SERIAL_8N1, RXD1, TXD1);  // For Pi communication using hardware UART1
+}
+
+void SerialComm::waitTillConnected() {
     bool waiting = true;
-    debug("MC_ONLINE");
-    debug("Waiting for Boot");
+    send("MC_ONLINE");
+    send("Waiting for Boot");
     while(waiting) {
         if (receive() == "BOOT"){waiting = false;}
-        Serial1.println("Waiting for Boot1");
-        Serial.println("Waiting for Boot");
-        delay(10);
+        debug("Waiting for Boot0");
     }
-    debug("MC_CONNECTED");
+    send("CONNECTED");
 }
 
 void SerialComm::send(const String& message) {
@@ -28,7 +29,7 @@ void SerialComm::send(int theta, int beta, String led0, int batteryLevel, int mo
                      "LED0:" + led0 + "BAT:" + String(batteryLevel) + 
                      "MODE:" + String(mode) + "INPUT:" + String(input1) + 
                      String(input2) + String(input3);
-    Serial1.println(message);
+    send(message);
 }
 
 String SerialComm::receive() {
@@ -52,12 +53,12 @@ String SerialComm::extractValue(String message, int cmd) {
 
     switch (cmd) {
         case 1: // THETA
-            startIndex = message.indexOf("THETA:") + 4;
+            startIndex = message.indexOf("THETA:") + 6;
             endIndex = message.indexOf("BETA:");
             value = message.substring(startIndex, endIndex);
             break;
         case 2: // BETA
-            startIndex = message.indexOf("BETA:") + 4;
+            startIndex = message.indexOf("BETA:") + 5;
             endIndex = message.indexOf("LED0:");
             value = message.substring(startIndex, endIndex);
             break;
