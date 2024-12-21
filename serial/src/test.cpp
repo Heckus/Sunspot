@@ -2,61 +2,38 @@
 #include <wiringSerial.h>
 #include <iostream>
 
-class SerialCommunicator {
-public:
-    SerialCommunicator(const char* port, int baudRate) : serialPort(port), baudRate(baudRate), serialHandle(-1) {}
-
-    bool initialize() {
-        if ((serialHandle = serialOpen(serialPort, baudRate)) < 0) {
-            std::cerr << "Error opening serial port!" << std::endl;
-            return false;
-        }
-
-        if (wiringPiSetup() == -1) {
-            std::cerr << "Error setting up WiringPi!" << std::endl;
-            return false;
-        }
-
-        std::cout << "Serial communication started. Type 'q' to quit." << std::endl;
-        return true;
-    }
-
-    void run() {
-        while (true) {
-            if (serialDataAvail(serialHandle)) {
-                char receivedChar = serialGetchar(serialHandle);
-                std::cout << "Received: " << receivedChar << std::endl;
-            }
-
-            char toSend;
-            std::cout << "Enter a character to send: ";
-            std::cin >> toSend;
-
-            if (toSend == 'q') break;
-
-            serialPutchar(serialHandle, toSend);
-        }
-    }
-
-    ~SerialCommunicator() {
-        if (serialHandle >= 0) {
-            serialClose(serialHandle);
-        }
-    }
-
-private:
-    const char* serialPort;
-    int baudRate;
-    int serialHandle;
-};
-
 int main() {
-    SerialCommunicator communicator("/dev/ttyACM0", 115200);
+    int serial_port;
+    const char *device = "/dev/ttyAMA0"; // Default serial port on Raspberry Pi
+    const int baud_rate = 115200; // ESP32 standard baud rate
 
-    if (!communicator.initialize()) {
+    // Initialize WiringPi
+    if (wiringPiSetup() == -1) {
+        std::cerr << "Unable to start wiringPi" << std::endl;
         return 1;
     }
 
-    communicator.run();
+    // Open the serial port
+    if ((serial_port = serialOpen(device, baud_rate)) < 0) {
+        std::cerr << "Unable to open serial device" << std::endl;
+        return 1;
+    }
+
+    // Main loop to read and write data
+    while (true) {
+        // Check if data is available to read
+        if (serialDataAvail(serial_port)) {
+            char data = serialGetchar(serial_port);
+            std::cout << data;
+            std::cout.flush();
+        }
+
+        // You can also write data to the serial port if needed
+        // serialPutchar(serial_port, 'A');
+    }
+
+    // Close the serial port
+    serialClose(serial_port);
+
     return 0;
 }

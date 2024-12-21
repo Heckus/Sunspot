@@ -5,21 +5,18 @@ this->baudRate = baudRate;
 }
 
 void SerialComm::waitTillConnected() {
-    Serial.begin(baudRate);
-    Serial1.begin(115200, SERIAL_8N1, RXD1, TXD1);  // For Pi communication using hardware UART1
-    String bootmessage;
+    Serial.begin(baudRate);  // For USB communication
+    Serial1.begin(baudRate, SERIAL_8N1, RXD1, TXD1);  // For Pi communication using hardware UART1
     bool waiting = true;
-    while (!Serial1) {
-        delay(100);
-    }
-    Serial.println("MC_ONLINE");
-    Serial.println("Waiting for Boot");
+    debug("MC_ONLINE");
+    debug("Waiting for Boot");
     while(waiting) {
-        bootmessage = receive();
-        debug(bootmessage);
-        if (bootmessage == "BOOT"){waiting = false;}
+        if (receive() == "BOOT"){waiting = false;}
+        Serial1.println("Waiting for Boot1");
+        Serial.println("Waiting for Boot");
+        delay(10);
     }
-    Serial.println("MC_CONNECTED");
+    debug("MC_CONNECTED");
 }
 
 void SerialComm::send(const String& message) {

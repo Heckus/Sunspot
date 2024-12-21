@@ -8,7 +8,8 @@
 #include <mutex>
 
 volatile bool running = true;
-volatile int serialFd;
+volatile int serialWIREFd;
+volatile int serialUSBFd;
 
 
 int theta = 0;
@@ -24,13 +25,16 @@ void handleCtrlC(int signal) {
     running = false;
     std::string reset;
     reset = "RESET";
-    serialPuts(serialFd, (reset + '\n').c_str());
+    serialPuts(serialWIREFd, (reset + '\n').c_str());
+
+    serialClose(serialWIREFd);
+    serialClose(serialUSBFd);
 }
 
 
 
 // New function for handling input
-void workthread(int serialFd) {
+void workthread() {
     while (running) {
        
             theta += (rand() % 3 - 1); // Add random noise between -1 and 1
@@ -108,27 +112,51 @@ void communicationthread(int serialFd) {
 int main() {
     signal(SIGINT, handleCtrlC); // Handle Ctrl+C for clean exit
 
-    const char *serialDevice = "/dev/serial0"; // Adjust if using a USB-serial adapter
-    //const char *serialDevice = "/dev/ttyACM0"; 
+    const char *serialWIREDevice = "/dev/ttyAMA0"; //for wired serial with pin 14 15
+    const char *serialUSBDevice = "/dev/ttyACM0"; // for USB serial
+
     const int baudRate = 115200;
     //115200
+
     // Initialize WiringPi and open the serial port
     if (wiringPiSetup() == -1) {
         std::cerr << "Failed to initialize WiringPi!" << std::endl;
         return 1;
     }
 
-    serialFd = serialOpen(serialDevice, baudRate);
-    if (serialFd == -1) {
-        std::cerr << "Failed to open serial device!" << std::endl;
+    serialWIREFd = serialOpen(serialWIREDevice, baudRate);
+    if (serialWIREFd == -1) {
+        std::cerr << "Failed to open WIRE serial device!" << std::endl;
+        return 1;
+    }
+    serialUSBFd = serialOpen(serialUSBDevice, baudRate);
+    if (serialUSBFd == -1) {
+        std::cerr << "Failed to open USB serial device!" << std::endl;
         return 1;
     }
 
+    // Wait fo the controller to boot
     std::string bootcommand = "BOOT";
-    serialPuts(serialFd, (bootcommand + '\n').c_str()); // Send message with newline
-    delay(1000); // Wait for the controller to boot
-    std::thread communication(communicationthread, serialFd);
-    std::thread work(workthread, serialFd);
+    std::string response;
+    do {
+        serialPuts(serialWIREFd, (bootcommand + '\n').c_str()); // Send message with newline
+        delay(1000); // Wait for the controller to boot
+
+        response.clear();
+        while (serialDataAvail(serialUSBFd) > 0) {
+            char c = serialGetchar(serialUSBFd);
+            if (c == '\n') {
+                break;
+            } else {
+                response += c;
+            }
+        }
+        std::cout << "Response: " << response << std::endl;
+    } while (response != "MC_CONNECTED");
+
+
+    std::thread communication(communicationthread, serialWIREFd);
+    std::thread work(workthread);
 
     // Wait for both threads to finish
     work.join();
@@ -137,8 +165,9 @@ int main() {
     delay(500); // Wait for the last message to be sent
 
     std::string reset = "RESET";
-    serialPuts(serialFd, (reset + '\n').c_str());
-    serialClose(serialFd);
+    serialPuts(serialWIREFd, (reset + '\n').c_str());
+    serialClose(serialWIREFd);
+    serialClose(serialUSBFd);
     std::cout << "Exiting..." << std::endl;
     return 0;
 }
