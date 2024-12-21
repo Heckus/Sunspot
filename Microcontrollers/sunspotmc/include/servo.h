@@ -1,7 +1,6 @@
 #pragma once
 #ifndef SERVO_H
 #define SERVO_H
-#include <Arduino.h>
 #include <ESP32Servo.h>
 //#include <Servo.h>
 
@@ -17,8 +16,8 @@ extern const int xaxis;
 extern const int yaxis;
 
 // Function to map a value from one range to another
-int move(int value, int axis);
-int pwmout(int angle);
+void moveServo(Servo& servo, int angle, int axis);
+int pwmout(int angle, int axis);
 #endif // SERVO_H
 
 

@@ -9,11 +9,16 @@
 
 volatile bool running = true;
 volatile int serialWIREFd;
-volatile int serialUSBFd;
+
+std::thread work;
+std::thread communication;
 
 
 int theta = 0;
 int beta = 0;
+int thetachange = 0;
+int betachange = 0;
+
 std::string led0 = "blue";
 int bat = 98;
 int switchstate = 0;
@@ -22,12 +27,6 @@ bool ledtoggle = 0;
 
 void handleCtrlC(int signal) {
     running = false;
-    std::string reset;
-    reset = "RESET";
-    serialPuts(serialWIREFd, (reset + '\n').c_str());
-
-    serialClose(serialWIREFd);
-    serialClose(serialUSBFd);
 }
 
 
@@ -35,20 +34,25 @@ void handleCtrlC(int signal) {
 // New function for handling input
 void workthread() {
     while (running) {
-        theta += (rand() % 3 - 1); // Add random noise between -1 and 1
-        beta += (rand() % 3 - 1);  // Add random noise between -1 and 1
+        thetachange = (rand() % 5 - 2); // Generate random number between -2 and 2
+        betachange = (rand() % 5 - 2);  // Generate random number between -2 and 2
 
-        // Clamp values to stay within -90 and 90
-        if (theta > 90) theta = 90;
-        if (theta < -90) theta = -90;
-        if (beta > 90) beta = 90;
-        if (beta < -90) beta = -90;
-
+        
         // Toggle LED color
         static int loopCounter = 0;
         loopCounter++;
         if (loopCounter % 2 == 0) {
             led0 = (led0 == "red") ? "white" : "red";
+        }
+
+        // Decrease battery level randomly
+        static int batteryCounter = 0;
+        batteryCounter++;
+        if (batteryCounter % 10 == 0) { // Change battery level every second (10 * 100ms)
+            bat -= (rand() % 3 + 1); // Decrease battery by 1 to 3
+            if (bat <= 0) {
+            bat = 100; // Reset battery to 100 when it reaches 0
+            }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Add delay
     }
@@ -62,7 +66,7 @@ void communicationthread(int serialFd) {
     auto lastStatusTime = std::chrono::steady_clock::now();
 
     while (running) {
-        while (serialDataAvail(serialFd) > 0) {  // Process all available data immediately
+        while (serialDataAvail(serialFd) > 0 && running) {  // Process all available data immediately
             char c = serialGetchar(serialFd);
             if (c == '\n') {
                 std::regex pattern(R"(MC-THETA:(-?\d{1,2})BETA:(-?\d{1,2})LED0:(\w*)BAT:(\d{1,3})MODE:(\d)INPUT:(\d{3}))");
@@ -86,7 +90,7 @@ void communicationthread(int serialFd) {
                               << "LED0: " << led0 << "\n"
                               << "BAT: " << bat << "\n"
                               << "MODE: " << switchstate << "\n"
-                              << "INPUT: " << buttonstate << std::endl;
+                              << "INPUT: " << matches[6].str() << std::endl; // Use matches[6].str() to preserve leading zeros
                 } else {
                     std::cerr << "Received Raw message: " << buffer << std::endl;
                 }
@@ -98,8 +102,8 @@ void communicationthread(int serialFd) {
 
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusTime).count() >= STATUS_INTERVAL) {
-            std::string message = "PI-THETA:" + std::to_string(theta) +
-                                  "BETA:" + std::to_string(beta) +
+            std::string message = "PI-THETA:" + std::to_string(thetachange) +
+                                  "BETA:" + std::to_string(betachange) +
                                   "LED0:" + led0 +
                                   "BAT:" + std::to_string(bat);
             serialPuts(serialFd, (message + '\n').c_str());
@@ -119,7 +123,7 @@ int main() {
     signal(SIGINT, handleCtrlC); // Handle Ctrl+C for clean exit
 
     const char *serialWIREDevice = "/dev/ttyAMA0"; //for wired serial with pin 14 15
-    const char *serialUSBDevice = "/dev/ttyACM0"; // for USB serial
+    
 
     const int baudRate = 115200;
     //115200
@@ -135,30 +139,27 @@ int main() {
         std::cerr << "Failed to open WIRE serial device!" << std::endl;
         return 1;
     }
-    serialUSBFd = serialOpen(serialUSBDevice, baudRate);
-    if (serialUSBFd == -1) {
-        std::cerr << "Failed to open USB serial device!" << std::endl;
-        return 1;
-    }
+    
 
-    // Wait fo the controller to boot
     std::string bootcommand = "BOOT";
     serialPuts(serialWIREFd, (bootcommand + '\n').c_str()); // Send message with newline
-    std::thread communication(communicationthread, serialWIREFd);
-    std::thread work(workthread);
+    
+    // Wait fo the controller to boot
+    communication = std::thread(communicationthread, serialWIREFd);
+    work = std::thread(workthread);
 
     // Wait for both threads to finish
-    work.join();
-    communication.join();
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Add delay
+    if (work.joinable()) {
+        work.join();
+    }
+    if (communication.joinable()) {
+        communication.join();
+    }
 
     std::string reset = "RESET";
     serialPuts(serialWIREFd, (reset + '\n').c_str());
     serialClose(serialWIREFd);
-    serialClose(serialUSBFd);
+    std::cout << std::endl;
     std::cout << "Exiting..." << std::endl;
     return 0;
 }
-
-// Compile with: g++ -o directpi /home/hecke/Code/GitRepositories/Sunspot/serial/src/directpi.cpp -lwiringPi

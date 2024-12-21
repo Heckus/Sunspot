@@ -5,36 +5,36 @@
 #include "buttons.h"
 #include "serial.h"
 
-#define LEDBOARD0 D10 // D10 9
+#define LEDBOARD0_PIN D10
 #define LEDNUM0 1
-#define LEDBOARD1 D9 // D9 8
+#define LEDBOARD1_PIN D9
 #define LEDNUM1 8
-#define LEDBOARD2 D8 // D8 7
+#define LEDBOARD2_PIN D8
 #define LEDNUM2 3
 
 
 #define SERVOthetaPIN D4 // D4 5
 #define SERVObetaPIN D5 // D5 6
 
-#define SWITCHPIN A3 // A3 4
-#define BUTTON1PIN T1 // Touch 1
-#define BUTTON2PIN T2 // Touch 2
-#define BUTTON3PIN T3 // Touch 3
+#define SWITCHPIN A0 // A3 4
+#define BUTTON1PIN T2 // Touch 1
+#define BUTTON2PIN T3 // Touch 2
+#define BUTTON3PIN T4 // Touch 3
 
 /*   OBJECTS  */ 
 
-//LEDBoard statusBoard(LEDBOARD0, LEDNUM0);   // 1 LEDs on pin 7
-//LEDBoard batteryBoard(LEDBOARD1, LEDNUM1);   // 8 LEDs on pin 6
-//LEDBoard buttonBoard(LEDBOARD2,LEDNUM2); // 3 LEDs on pin 5
+Adafruit_NeoPixel LED0(LEDNUM0, LEDBOARD0_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel LED1(LEDNUM1, LEDBOARD1_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel LED2(LEDNUM2, LEDBOARD2_PIN, NEO_GRB + NEO_KHZ800);
 
-// Servo servotheta;
-// Servo servobeta;
+Servo servotheta;
+Servo servobeta;
 
 // ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
-// CapacitiveButton button1(BUTTON1PIN, 500);
-// CapacitiveButton button2(BUTTON2PIN, 500);
-// CapacitiveButton button3(BUTTON3PIN, 500);
+CapacitiveButton button1(BUTTON1PIN, 40000);
+CapacitiveButton button2(BUTTON2PIN, 40000);
+CapacitiveButton button3(BUTTON3PIN, 40000);
 
 
 SerialComm serialComm(115200);
@@ -67,8 +67,11 @@ String led0 = "black";
 int switchState = 1;
 
 int button1State = 0;
-int button2State = 1;
-int button3State = 1;
+int button1debouce = 0;
+int button2State = 0;
+int button2debouce = 0;
+int button3State = 0;
+int button3debouce = 0;
 
 /* FLOW CONTROL */
 
@@ -76,7 +79,20 @@ bool nodata = false;
 
 void setup() {
     serialComm.Begin();
+    LED0.begin();
+    LED1.begin();
+    LED2.begin();
+    LED0.show(); // Initialize all pixels to 'off'
+    LED1.show(); // Initialize all pixels to 'off'
+    LED2.show(); // Initialize all pixels to 'off'
     serialComm.waitTillConnected();
+    servotheta.attach(SERVOthetaPIN);
+    servobeta.attach(SERVObetaPIN);
+    moveServo(servotheta, 0, xaxis);
+    moveServo(servobeta, 0, yaxis);
+    setLEDColor(&LED2, 0, "red");
+    setLEDColor(&LED2, 1, "red");
+    setLEDColor(&LED2, 2, "red");
 }
 
 
@@ -93,15 +109,45 @@ void loop() {
         ESP.restart();
     }
     serialComm.send("ECHO "+serialinput);
-    theta += serialComm.extractIntValue(serialinput, 1);
-    serialComm.debug("THETA "+ String(theta));
-    beta += serialComm.extractIntValue(serialinput, 2);
-    serialComm.debug("BETA "+ String(beta));
+    setTheta(theta + serialComm.extractIntValue(serialinput, 1));
+    moveServo(servotheta, theta, xaxis);
+    setBeta(beta + serialComm.extractIntValue(serialinput, 2));
+    moveServo(servobeta, beta, yaxis);
     led0 = serialComm.extractValue(serialinput, 3);
+    setLEDColor(&LED0, 0, led0);
+    
     batteryLevel = serialComm.extractIntValue(serialinput, 4);
+    setBatteryLevel(&LED1, batteryLevel);
+    }
+
+
+    if (button1.isPressed()) {
+        button1debouce++;
+        if(button1debouce > 2){
+            button1State ^= 1;
+            setLEDColor(&LED2,0, button1State ? "green" : "red");
+            button1debouce = 0;
+        }
+    }
+    if (button2.isPressed()) {
+        button2debouce++;
+        if(button2debouce > 2){
+            button2State ^= 1;
+            setLEDColor(&LED2,1, button2State ? "green" : "red");
+            button2debouce = 0;
+        }
+    }
+    if (button3.isPressed()) {
+        button3debouce++;
+        if(button3debouce > 2){
+            button3State ^= 1;
+            setLEDColor(&LED2,2, button3State ? "green" : "red");
+            button3debouce = 0;
+        }
     }
 
     // send if there received data
+    
     if (nodata == false){
     serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
 

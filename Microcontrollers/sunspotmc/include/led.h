@@ -5,30 +5,9 @@
 #define LED_H
 
 #include <Adafruit_NeoPixel.h>
-
-class LEDBoard {
-private:
-  Adafruit_NeoPixel* boardLEDs;
-  int numLEDs;
-  int dataPin;
-
-public:
-  LEDBoard(int pin, int numLedsOnBoard);
-  ~LEDBoard();
-
-  LEDBoard(const LEDBoard&) = delete;
-  LEDBoard& operator=(const LEDBoard&) = delete;
-
-  void setLED(int index, uint8_t r, uint8_t g, uint8_t b);
-  void setLED(int index, uint32_t color);
-  void show();
-  void clear();
-
-  void handleLowBattery();
-  uint32_t calculateColorGradient(int index);
-  void setBatteryLevel(int percentage);
-
-  uint32_t STC(String color) const; // Add const qualifier
-};
-
+void handleLowBattery(Adafruit_NeoPixel* boardLEDs);
+uint32_t calculateColorGradient(Adafruit_NeoPixel* boardLEDs, int index);
+void setBatteryLevel(Adafruit_NeoPixel* boardLEDs, int percentage);
+void setLEDColor(Adafruit_NeoPixel* boardLEDs, int index, String color);
+uint32_t stringToColor(Adafruit_NeoPixel* boardLEDs, const String& color);
 #endif // LED_H
