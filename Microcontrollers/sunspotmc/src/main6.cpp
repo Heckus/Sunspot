@@ -1,20 +1,14 @@
-// #include "buttons.h"
-// #define BUTTON1PIN T2 // Touch 1
+// #include "switch.h"
+// #define SWITCHPIN A0 // A3 4
 
-// CapacitiveButton button1(BUTTON1PIN, 40000);
+// ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
-// bool Button1 = false;
-
-// void setup() {
+// void setup(){
 //     Serial.begin(115200);
-    
+//     threeWaySwitch.calibrate();
 // }
 
-// void loop() {
-//     if (button1.isPressed()) {
-//         Button1 = true;
-//         Serial.println("Button 1 is pressed");
-//         button1.printSensorValue();
-//     }
-    
+// void loop(){
+//     threeWaySwitch.printState();
+//     delay(1000);
 // }

@@ -30,7 +30,7 @@ Adafruit_NeoPixel LED2(LEDNUM2, LEDBOARD2_PIN, NEO_GRB + NEO_KHZ800);
 Servo servotheta;
 Servo servobeta;
 
-// ThreeWaySwitch threeWaySwitch(SWITCHPIN);
+ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
 CapacitiveButton button1(BUTTON1PIN, 40000);
 CapacitiveButton button2(BUTTON2PIN, 40000);
@@ -108,7 +108,7 @@ void loop() {
     if (serialinput == "RESET"){
         ESP.restart();
     }
-    serialComm.send("ECHO "+serialinput);
+    serialComm.send("ECHO "+serialinput + "switchstate: "+String(switchState));
     setTheta(theta + serialComm.extractIntValue(serialinput, 1));
     moveServo(servotheta, theta, xaxis);
     setBeta(beta + serialComm.extractIntValue(serialinput, 2));
@@ -120,7 +120,8 @@ void loop() {
     setBatteryLevel(&LED1, batteryLevel);
     }
 
-
+    // Read switch state
+    switchState = threeWaySwitch.getPosition();
     if (button1.isPressed()) {
         button1debouce++;
         if(button1debouce > 2){

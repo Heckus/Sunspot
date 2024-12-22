@@ -7,12 +7,12 @@
 class ThreeWaySwitch {
 private:
     const int PIN;
-    const int THRESHOLD_LOWER_1 = 600;
-    const int THRESHOLD_UPPER_1 = 750;
+    const int THRESHOLD_LOWER_1 = 1000;
+    const int THRESHOLD_UPPER_1 = 3000;
     const int THRESHOLD_LOWER_2 = 0;
-    const int THRESHOLD_UPPER_2 = 599;
-    const int THRESHOLD_LOWER_3 = 900;
-    const int THRESHOLD_UPPER_3 = 1023;
+    const int THRESHOLD_UPPER_2 = 999;
+    const int THRESHOLD_LOWER_3 = 3001;
+    const int THRESHOLD_UPPER_3 = 4096;
 
     const unsigned long DEBOUNCE_DELAY = 50;
     int lastStablePosition = -1;

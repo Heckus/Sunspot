@@ -13,7 +13,7 @@ void ThreeWaySwitch::calibrate() {
     for (int pos = 1; pos <= 3; pos++) {
         Serial.print("Move switch to position ");
         Serial.println(pos);
-        delay(2000);  // Give time to move switch
+        delay(5000);  // Give time to move switch
         
         int totalReading = 0;
         const int SAMPLES = 10;
