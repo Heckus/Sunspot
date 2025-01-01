@@ -67,7 +67,7 @@ public:
     void setinputpipline();
     void createcamera();
     void updateframe();
-    void getframe();
+    cv::Mat getframe();
 
 
     void setbaudrate(int baudrate);

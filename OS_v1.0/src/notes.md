@@ -94,6 +94,7 @@ int main() {
     }
 
     std::string output_pipeline = "appsrc ! videoconvert ! x264enc tune=zerolatency ! mp4mux ! filesink location=" + outputlocation;
+    
     cv::VideoWriter writer(output_pipeline, cv::CAP_GSTREAMER, 0, framerate, cv::Size(width, height), true);
     if (!writer.isOpened()) {
         std::cerr << "Error: Could not open the video file for writing" << std::endl;
