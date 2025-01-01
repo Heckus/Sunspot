@@ -1,5 +1,5 @@
-#ifndef DATA_H
-#define DATA_H
+#ifndef OS_TOOLS_H
+#define OS_TOOLS_H
 //Serial
 #include <wiringPi.h>
 #include <wiringSerial.h>
@@ -21,8 +21,11 @@
 #include <iomanip>
 #include <chrono>
 #include <thread>
+//USB
+#include <filesystem>
 //Dependants
 #include "INA219.h"
+
 
 
 class Data {
@@ -59,7 +62,7 @@ public:
     void setBatteryLevel(int level);
     void setMode(int mode);
     void setButtonState(int state);
-    void setLed0Color(string color);
+    void setLed0Color(std::string color);
 
     void setframerate(int framerate);
     void setwidth(int width);
@@ -88,7 +91,6 @@ public:
     std::string reset = "RESET";
 
     INA219 batteryMonitor;
-    void batteryInit();
 private:
     int thetaAngle;
     int betaAngle;
@@ -100,7 +102,7 @@ private:
     int mode;
     bool buttonStates[3]; // Assuming there are 10 buttons
 
-    std::string inputpipline;
+    std::string inputpipeline;
     int width;
     int height;
     int framerate;
@@ -109,10 +111,10 @@ private:
 
     std::string videopaths[4];
     std::string outputpipline[4];
-    cv::VideoWriter writer[4];
+    cv::VideoWriter writers[4];
 
     int baudrate;
-    std::string serialwiredevice = "/dev/ttyAMA0";
+    const char* serialwiredevice = "/dev/ttyAMA0";
     volatile int serialFd;
 
 

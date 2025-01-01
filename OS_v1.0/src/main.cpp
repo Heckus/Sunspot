@@ -1,16 +1,12 @@
-#include "../include/OS_tools.h"
+#include "OS_tools.h"
+
 
 volatile bool running = true;
 void signalHandler(int signum) {
     running = false;
 }
 
-Data OsData = new Data();
-
-OsData.setwidth(640);
-OsData.setheight(480);                       
-OsData.setframerate(30);
-OsData.setbaudrate(115200);
+Data OsData;
 
 std::thread VideoCapture;
 std::thread Videoproccessing;
@@ -22,14 +18,14 @@ void VideoCaptureThread(Data &OsData){
    while(running){
     OsData.updateframe();
     OsData.writeframes();
-    cv::imshow("CurrentFrame", OsData.currentframe);
+    cv::imshow("CurrentFrame", OsData.getframe());
     std::this_thread::sleep_for(std::chrono::milliseconds(1000 / OsData.getframerate()));
    }
 }
 
 void VideoProccessingThread(Data &OsData){
     while(running){
-        frame = OSData.getframe();
+        cv::Mat frame = OsData.getframe();
         if(OsData.getMode() == 1){
             //do nothing
         }
@@ -64,17 +60,7 @@ void SerialThread(Data &OsData){
                         OsData.setMode(std::stoi(matches[5]));
                         OsData.setButtonState(std::stoi(matches[6]));
                     }
-
-                    // Clear terminal (Linux/Unix)
-                    //std::cout << "\033[2J\033[H";
-
-                    // Print updates without buffering
-                    std::cout << "THETA: " << theta << "\n"
-                              << "BETA: " << beta << "\n"
-                              << "LED0: " << led0 << "\n"
-                              << "BAT: " << bat << "\n"
-                              << "MODE: " << switchstate << "\n"
-                              << "INPUT: " << matches[6].str() << std::endl; // Use matches[6].str() to preserve leading zeros
+                    
                 } else {
                     std::cerr << "Received Raw message: " << buffer << std::endl;
                 }
@@ -88,8 +74,8 @@ void SerialThread(Data &OsData){
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusTime).count() >= STATUS_INTERVAL) {
             std::string message = "PI-THETA:" + std::to_string(OsData.getDeltatheta()) +
                                   "BETA:" + std::to_string(OsData.getDeltabeta()) +
-                                  "LED0:" + OsData.getLED0Color() +
-                                  "BAT:" + std::to_string(OsData.getBatteryLevel()) +;
+                                  "LED0:" + OsData.getLed0Color() +
+                                  "BAT:" + std::to_string(OsData.getBatteryLevel());
             serialPuts(OsData.getserialFd(), (message + '\n').c_str());
             fflush(stdout);
             lastStatusTime = now;
@@ -100,7 +86,7 @@ void SerialThread(Data &OsData){
 
 void BatteryThread(Data &OsData){
     while(running){
-        OsData.batteryLevel = int(OsData.batteryMonitor.getBatteryPercentage())+;
+        OsData.setBatteryLevel(int(OsData.batteryMonitor.getBatteryPercentage()));
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
@@ -113,12 +99,15 @@ void ControlThread(Data &OsData){
 
 int main(){
     signal(SIGINT, signalHandler);
-    OsData.batteryInit();
+    OsData.setwidth(640);
+    OsData.setheight(480);                       
+    OsData.setframerate(30);
+    OsData.setbaudrate(115200);
+   
     OsData.setwiringPi();
     OsData.setserialFd();
     OsData.setinputpipline();
     OsData.setvideopaths();
-    OsData.setoutputpipline();
     OsData.createwriters();
     OsData.createcamera();
 

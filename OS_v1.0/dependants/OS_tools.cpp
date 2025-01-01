@@ -1,7 +1,9 @@
 #include "OS_tools.h"
+
+
 namespace fs = std::filesystem;
 
-Data::Data() : thetaAngle(0), betaAngle(0), batteryLevel(0), mode(0), framerate(0), width(0), height(0), baudrate(0), serialWIREFd(-1) {
+Data::Data() : thetaAngle(0), betaAngle(0), batteryLevel(0), mode(0), framerate(0), width(0), height(0), baudrate(0), serialFd(-1), batteryMonitor(1, 0x41) {
     std::fill(std::begin(buttonStates), std::end(buttonStates), false);
 }
 
@@ -59,13 +61,6 @@ void Data::setButtonState(int state) {
 void Data::setLed0Color(std::string color) {
     std::lock_guard<std::mutex> lock(mtx);
     led0Color = color;
-}
-
-
-
-void Data::setoutputpipline(std::string pipline) {
-    std::lock_guard<std::mutex> lock(mtx);
-    this->outputpipline = pipline;
 }
 
 void Data::setframerate(int framerate) {
@@ -169,24 +164,25 @@ void Data::printData() {
     }
     std::cout << std::endl;
     std::cout << "LED0 Color: " << led0Color << std::endl;
-    std::cout << "Input Pipeline: " << inputpipline << std::endl;
-    std::cout << "Output Pipeline: " << outputpipline << std::endl;
+    std::cout << "Input Pipeline: " << inputpipeline << std::endl;
+    std::cout << "Output Pipelines: ";
+    for (const auto& pipeline : outputpipline) {
+        std::cout << pipeline << " ";
+    }
+    std::cout << std::endl;
     std::cout << "Framerate: " << framerate << std::endl;
     std::cout << "Width: " << width << std::endl;
     std::cout << "Height: " << height << std::endl;
-    std::cout << "Video Path: " << videopath << std::endl;
+    std::cout << "Video Paths: ";
+    for (const auto& path : videopaths) {
+        std::cout << path << " ";
+    }
+    std::cout << std::endl;
     std::cout << "Baudrate: " << baudrate << std::endl;
-    std::cout << "Serial Wire FD: " << serialWIREFd << std::endl;
+    std::cout << "Serial Wire FD: " << serialFd << std::endl;
 }
 
-void Data::batteryInit() {
-    std::lock_guard<std::mutex> lock(mtx);
-    try {batteryMonitor = INA219(1,0x41);
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-}
+
 
 void Data::setserialFd() {
     std::lock_guard<std::mutex> lock(mtx);
@@ -199,10 +195,10 @@ void Data::setserialFd() {
 
 void Data::setinputpipline() {
     std::lock_guard<std::mutex> lock(mtx);
-    this->inputpipline = "libcamerasrc ! video/x-raw, format=I420,"
-                       " width=" + width + ","
-                       " height=" + height + "," 
-                       " framerate=" + framerate + 
+    this->inputpipeline = "libcamerasrc ! video/x-raw, format=I420,"
+                       " width=" + std::to_string(width) + ","
+                       " height=" + std::to_string(height) + "," 
+                       " framerate=" + std::to_string(framerate) + 
                        "/1 ! videoconvert "
                        "! appsink";
 }
@@ -273,13 +269,13 @@ void Data::writeframes() {
         std::cout << "Error: VideoCapture not opened" << std::endl;
         std::exit(EXIT_FAILURE);
     }
-    Data.camera = camera;
+    this->camera = camera;
 }
 
 void Data::release() {
     std::lock_guard<std::mutex> lock(mtx);
-    Data.camera.release();
-    SerialClose(serialFd);
+    this->camera.release();
+    serialClose(serialFd);
     for (int i = 0; i < 4; ++i) {
         if (writers[i].isOpened()) {
             writers[i].release();
@@ -289,7 +285,7 @@ void Data::release() {
 
 void Data::updateframe(){
     std::lock_guard<std::mutex> lock(mtx);
-    Data.camera >> Data.currentframe;
+    this->camera >> this->currentframe;
     if (currentframe.empty()) {
         std::cerr << "Error: Frame is empty" << std::endl;
         std::exit(EXIT_FAILURE);
