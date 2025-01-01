@@ -2,6 +2,7 @@
 #define INA219_H
 
 #include <cstdint>
+#include <algorithm>
 
 class INA219 {
 public:
