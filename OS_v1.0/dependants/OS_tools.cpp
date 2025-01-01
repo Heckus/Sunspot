@@ -179,6 +179,15 @@ void Data::printData() {
     std::cout << "Serial Wire FD: " << serialWIREFd << std::endl;
 }
 
+void Data::batteryInit() {
+    std::lock_guard<std::mutex> lock(mtx);
+    try {batteryMonitor = INA219(1,0x41);
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
+
 void Data::setserialFd() {
     std::lock_guard<std::mutex> lock(mtx);
     serialFd = serialOpen(serialwiredevice, baudrate);

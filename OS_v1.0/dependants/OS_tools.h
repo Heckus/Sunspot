@@ -1,13 +1,29 @@
 #ifndef DATA_H
 #define DATA_H
-
-#include <mutex>
+//Serial
+#include <wiringPi.h>
+#include <wiringSerial.h>
 #include <iostream>
 #include <string>
-
-#include <filesystem>
+#include <signal.h>
 #include <thread>
+#include <regex>
+#include <mutex>
+//Vision
+#include <opencv2/opencv.hpp>
+#include <opencv2/highgui.hpp>
+#include <iostream>
+#include <signal.h>
+#include <cstdlib>
+#include <ctime>
+//Battery
+#include <iostream>
+#include <iomanip>
 #include <chrono>
+#include <thread>
+//Dependants
+#include "INA219.h"
+
 
 class Data {
 public:
@@ -70,6 +86,9 @@ public:
 
     std::string boot = "BOOT";
     std::string reset = "RESET";
+
+    INA219 batteryMonitor;
+    void batteryInit();
 private:
     int thetaAngle;
     int betaAngle;
@@ -94,9 +113,9 @@ private:
 
     int baudrate;
     std::string serialwiredevice = "/dev/ttyAMA0";
-   
-
     volatile int serialFd;
+
+
     std::mutex mtx; // Mutex for thread safety
 };
 
