@@ -1,6 +1,6 @@
-^C:\USERS\THECR\DOCUMENTS\ZACH'S STUFF\SUNSPOT\CMAKELISTS.TXT
+^C:\USERS\ZETHR\DOCUMENTS\C_PROJS\SUNSPOT\CMAKELISTS.TXT
 setlocal
-"C:\Program Files\CMake\bin\cmake.exe" "-SC:/Users/thecr/Documents/Zach's Stuff/Sunspot" "-BC:/Users/thecr/Documents/Zach's Stuff/Sunspot/build" --check-stamp-file "C:/Users/thecr/Documents/Zach's Stuff/Sunspot/build/CMakeFiles/generate.stamp"
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/zethr/Documents/c_projs/Sunspot -BC:/Users/zethr/Documents/c_projs/Sunspot/build --check-stamp-file C:/Users/zethr/Documents/c_projs/Sunspot/build/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone

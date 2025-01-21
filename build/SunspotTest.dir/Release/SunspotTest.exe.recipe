@@ -2,10 +2,10 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>C:\Users\thecr\Documents\Zach's Stuff\Sunspot\build\x64\Release\ZERO_CHECK</FullPath>
+      <FullPath>C:\Users\zethr\Documents\c_projs\Sunspot\build\x64\Release\ZERO_CHECK</FullPath>
     </ProjectOutput>
     <ProjectOutput>
-      <FullPath>C:\Users\thecr\Documents\Zach's Stuff\Sunspot\build\Release\SunspotTest.exe</FullPath>
+      <FullPath>C:\Users\zethr\Documents\c_projs\Sunspot\build\Release\SunspotTest.exe</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />
