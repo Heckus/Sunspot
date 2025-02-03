@@ -8,7 +8,7 @@
 #define LEDBOARD0_PIN D10
 #define LEDNUM0 1
 #define LEDBOARD1_PIN D8
-#define LEDNUM1 8
+#define LEDNUM1 7
 #define LEDBOARD2_PIN D9
 #define LEDNUM2 3
 
@@ -60,7 +60,7 @@ void setBeta(int value) {
         beta = value;
     }
 }
-int batteryLevel = 100;
+int batteryLevel = 8;
 
 String led0 = "red";
 
@@ -89,53 +89,28 @@ void setup() {
     servobeta.attach(SERVObetaPIN);
     moveServo(servotheta, 0, xaxis);
     moveServo(servobeta, 0, yaxis);
+    delay(10);
     setLEDColor(&LED2, 0, "red");
     setLEDColor(&LED2, 1, "red");
     setLEDColor(&LED2, 2, "red");
+    
 }
 
 
 
 void loop() {
-    
-    setTheta(theta + random(-4, 5));
+
+
+    setTheta(theta + random(-10, 10));
     moveServo(servotheta, theta, xaxis);
-    delay(100);
-    setBeta(beta + random(-4, 5));
+    setBeta(beta + random(-10, 10));
     moveServo(servobeta, beta, yaxis);
 
-    
     setLEDColor(&LED0, 0, led0);
     led0 = led0 == "red" ? "green" : "red";
     
-    
-    batteryLevel -= 5;
-    if (batteryLevel <= 0) {
-        batteryLevel = 100;
-    }
+    batteryLevel = random(0, 100);
     setBatteryLevel(&LED1, batteryLevel);
-    
-
-    
-
-    if (button1.isPressed()) {
-        button1State ^= 1;
-        setLEDColor(&LED2,0, button1State ? "green" : "red");
-    }
-    if (button2.isPressed()) {
-        button2State ^= 1;
-        setLEDColor(&LED2,1, button2State ? "green" : "red");
-    }
-    if (button3.isPressed()) {
-        button3State ^= 1;
-        setLEDColor(&LED2,2, button3State ? "green" : "red");
-    }
-
-    // Read switch state
-    switchState = threeWaySwitch.getPosition();
-    setLEDColor(&LED2, switchState +1 , "blue");
-    // send if there received data
-    
     delay(500);
 
 

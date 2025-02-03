@@ -32,9 +32,9 @@
 
 // ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
-// CapacitiveButton button1(BUTTON1PIN, 40000);
-// CapacitiveButton button2(BUTTON2PIN, 40000);
-// CapacitiveButton button3(BUTTON3PIN, 40000);
+// CapacitiveButton button1(BUTTON1PIN, 100000);
+// CapacitiveButton button2(BUTTON2PIN, 100000);
+// CapacitiveButton button3(BUTTON3PIN, 1000000);
 
 
 // SerialComm serialComm(115200);
