@@ -7,9 +7,9 @@
 
 // #define LEDBOARD0_PIN D10
 // #define LEDNUM0 1
-// #define LEDBOARD1_PIN D9
-// #define LEDNUM1 8
-// #define LEDBOARD2_PIN D8
+// #define LEDBOARD1_PIN D8
+// #define LEDNUM1 7
+// #define LEDBOARD2_PIN D9
 // #define LEDNUM2 3
 
 
@@ -32,9 +32,9 @@
 
 // ThreeWaySwitch threeWaySwitch(SWITCHPIN);
 
-// CapacitiveButton button1(BUTTON1PIN, 100000);
-// CapacitiveButton button2(BUTTON2PIN, 100000);
-// CapacitiveButton button3(BUTTON3PIN, 1000000);
+// CapacitiveButton button1(BUTTON1PIN, 40000);
+// CapacitiveButton button2(BUTTON2PIN, 40000);
+// CapacitiveButton button3(BUTTON3PIN, 40000);
 
 
 // SerialComm serialComm(115200);
@@ -62,16 +62,16 @@
 // }
 // int batteryLevel = 8;
 
-// String led0 = "black";
+// String led0 = "red";
 
 // int switchState = 1;
 
 // int button1State = 0;
-// int button1debouce = 0;
+
 // int button2State = 0;
-// int button2debouce = 0;
+
 // int button3State = 0;
-// int button3debouce = 0;
+
 
 // /* FLOW CONTROL */
 
@@ -85,78 +85,33 @@
 //     LED0.show(); // Initialize all pixels to 'off'
 //     LED1.show(); // Initialize all pixels to 'off'
 //     LED2.show(); // Initialize all pixels to 'off'
-//     serialComm.waitTillConnected();
 //     servotheta.attach(SERVOthetaPIN);
 //     servobeta.attach(SERVObetaPIN);
 //     moveServo(servotheta, 0, xaxis);
 //     moveServo(servobeta, 0, yaxis);
+//     delay(10);
 //     setLEDColor(&LED2, 0, "red");
 //     setLEDColor(&LED2, 1, "red");
 //     setLEDColor(&LED2, 2, "red");
+    
 // }
 
 
 
 // void loop() {
-//     // Read Pi commands
-//     String serialinput = serialComm.receive();
-//     // Check if there is no data
-//     if(serialinput.length() == 0) {
-//         nodata = true;
-//     }else{
-//     nodata = false;
-//     if (serialinput == "RESET"){
-//         ESP.restart();
-//     }
 
-//     serialComm.send("ECHO "+serialinput + "switchstate: "+String(switchState));
-    
-//     setTheta(theta + serialComm.extractIntValue(serialinput, 1));
+
+//     setTheta(theta + random(-10, 10));
 //     moveServo(servotheta, theta, xaxis);
-//     setBeta(beta + serialComm.extractIntValue(serialinput, 2));
+//     setBeta(beta + random(-10, 10));
 //     moveServo(servobeta, beta, yaxis);
-//     led0 = serialComm.extractValue(serialinput, 3);
+
 //     setLEDColor(&LED0, 0, led0);
+//     led0 = led0 == "red" ? "green" : "red";
     
-//     batteryLevel = serialComm.extractIntValue(serialinput, 4);
+//     batteryLevel = random(0, 100);
 //     setBatteryLevel(&LED1, batteryLevel);
-//     }
-
-//     // Read switch state
-//     switchState = threeWaySwitch.getPosition();
-//     if (button1.isPressed()) {
-//         button1debouce++;
-//         if(button1debouce > 2){
-//             button1State ^= 1;
-//             setLEDColor(&LED2,0, button1State ? "green" : "red");
-//             button1debouce = 0;
-//         }
-//     }
-//     if (button2.isPressed()) {
-//         button2debouce++;
-//         if(button2debouce > 2){
-//             button2State ^= 1;
-//             setLEDColor(&LED2,1, button2State ? "green" : "red");
-//             button2debouce = 0;
-//         }
-//     }
-//     if (button3.isPressed()) {
-//         button3debouce++;
-//         if(button3debouce > 2){
-//             button3State ^= 1;
-//             setLEDColor(&LED2,2, button3State ? "green" : "red");
-//             button3debouce = 0;
-//         }
-//     }
-
-//     // send if there received data
-    
-//     if (nodata == false){
-//     serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
-
-//     }
-
-    
+//     delay(500);
 
 
 // }
