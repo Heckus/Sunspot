@@ -32,6 +32,7 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/usr/share/cmake-3.25/Modules/Compiler/GNU.cmake"
   "/usr/share/cmake-3.25/Modules/FindPackageHandleStandardArgs.cmake"
   "/usr/share/cmake-3.25/Modules/FindPackageMessage.cmake"
+  "/usr/share/cmake-3.25/Modules/FindPkgConfig.cmake"
   "/usr/share/cmake-3.25/Modules/FindThreads.cmake"
   "/usr/share/cmake-3.25/Modules/Internal/CheckSourceCompiles.cmake"
   "/usr/share/cmake-3.25/Modules/Platform/Linux-GNU-C.cmake"
