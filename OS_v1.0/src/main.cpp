@@ -1,9 +1,12 @@
 #include "OS_tools.h"
+#include <gtk/gtk.h>
+
 
 
 volatile bool running = true;
 void signalHandler(int signum) {
     running = false;
+
 }
 
 Data OsData;
@@ -13,12 +16,13 @@ std::thread Videoproccessing;
 std::thread Serial;
 std::thread Battery;
 std::thread USB;
+std::thread Monitoring;
 
 void VideoCaptureThread(Data &OsData){
    while(running){
     OsData.updateframe();
     OsData.writeframes();
-    cv::imshow("CurrentFrame", OsData.getframe());
+    //cv::imshow("CurrentFrame", OsData.getframe());
     std::this_thread::sleep_for(std::chrono::milliseconds(1000 / OsData.getframerate()));
    }
 }
@@ -44,7 +48,7 @@ void SerialThread(Data &OsData){
     std::string buffer;
     const int STATUS_INTERVAL = 500;
     auto lastStatusTime = std::chrono::steady_clock::now();
-
+    serialPuts(OsData.getserialFd(), (OsData.boot + '\n').c_str());
     while (running) {
         while (serialDataAvail(OsData.getserialFd()) > 0 && running) {  // Process all available data immediately
             char c = serialGetchar(OsData.getserialFd());
@@ -55,8 +59,8 @@ void SerialThread(Data &OsData){
                     {
                         OsData.setThetaAngle(std::stoi(matches[1]));
                         OsData.setBetaAngle(std::stoi(matches[2]));
-                        //OsData.setLed0Color(matches[3]);
-                        //OsData.setBatteryLevel(std::stoi(matches[4]));
+                        //OsData.setLed0Color(matches[3]); //the mc doesnt update the color of the led0
+                        //OsData.setBatteryLevel(std::stoi(matches[4])); //the mc doesnt update the battery level
                         OsData.setMode(std::stoi(matches[5]));
                         OsData.setButtonState(std::stoi(matches[6]));
                     }
@@ -91,17 +95,101 @@ void BatteryThread(Data &OsData){
     }
 }
 
+void MonitoringThread(Data &OsData){
+    while(running){
+        GtkWidget *window;
+        GtkWidget *grid;
+        GtkWidget *image;
+        GtkWidget *dataLabel;
+
+        // GTK init must be in this thread
+        gtk_init();
+
+        // Create main window
+        window = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(window), "Camera Monitor");
+        gtk_window_set_default_size(GTK_WINDOW(window), OsData.getwidth(), OsData.getheight());
+        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_window_close), NULL);
+
+        // Create grid layout
+        grid = gtk_grid_new();
+        gtk_window_set_child(GTK_WINDOW(window), grid);
+
+        // Image widget for camera feed
+        image = gtk_image_new();
+        gtk_grid_attach(GTK_GRID(grid), image, 0, 0, 1, 1);
+
+        // Label for data display
+        dataLabel = gtk_label_new("");
+        gtk_grid_attach(GTK_GRID(grid), dataLabel, 1, 0, 1, 1);
+
+        gtk_widget_show(window);
+
+        while(running) {
+            // Convert OpenCV mat to GdkPixbuf
+            cv::Mat frame = OsData.getframe();
+            cv::Mat rgb;
+            cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
+            GdkPixbuf *pixbuf = gdk_pixbuf_new_from_data(
+                rgb.data,
+                GDK_COLORSPACE_RGB,
+                false,
+                8,
+                rgb.cols,
+                rgb.rows,
+                rgb.step,
+                nullptr,
+                nullptr
+            );
+            
+            // Update widgets
+            gtk_image_set_from_pixbuf(GTK_IMAGE(image), pixbuf);
+            g_object_unref(pixbuf);
+
+            std::string data = 
+                "Battery: " + std::to_string(OsData.getBatteryLevel()) + "%\n" +
+                "Mode: " + std::to_string(OsData.getMode()) + "\n" + 
+                "Theta: " + std::to_string(OsData.getThetaAngle()) + "\n" +
+                "Beta: " + std::to_string(OsData.getBetaAngle());
+                
+            gtk_label_set_text(GTK_LABEL(dataLabel), data.c_str());
+            
+            while (g_main_context_pending(NULL))
+                g_main_context_iteration(NULL, TRUE);
+                
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            OsData.printData();
+        }
+
+        gtk_window_destroy(GTK_WINDOW(window));
+    }
+}
+
 void USBThread(Data &OsData){
     while(running){
         
     }
 }
 
-int main(){
+int main(int argc, char *argv[]){
     signal(SIGINT, signalHandler);
-    OsData.setwidth(640);
-    OsData.setheight(480);                       
-    OsData.setframerate(30);
+    if (argc != 4) {
+            std::cerr << "Usage: " << argv[0] << " <width> <height> <framerate>" << std::endl;
+            return 1;
+        }
+
+    int width = std::stoi(argv[1]);
+    int height = std::stoi(argv[2]);
+    int framerate = std::stoi(argv[3]);
+
+    if (width <= 0 || height <= 0 || framerate <= 0) {
+        std::cerr << "Invalid input: width, height, and framerate must be positive integers." << std::endl;
+        return 1;
+    }
+    
+    OsData.setwidth(width);
+    OsData.setheight(height);                       
+    OsData.setframerate(framerate);
     OsData.setbaudrate(115200);
    
     OsData.setwiringPi();
@@ -116,6 +204,7 @@ int main(){
     Serial = std::thread(SerialThread, std::ref(OsData));
     Battery = std::thread(BatteryThread, std::ref(OsData));
     USB = std::thread(USBThread, std::ref(OsData));
+    Monitoring = std::thread(MonitoringThread, std::ref(OsData));
 
     /*
     need to add i/o control(ie use mode switche to determine what to do)
@@ -127,6 +216,7 @@ int main(){
     Serial.join();
     Battery.join();
     USB.join();
+    Monitoring.join();
 
     serialPuts(OsData.getserialFd(), (OsData.reset + '\n').c_str());
     std::cout << std::endl;

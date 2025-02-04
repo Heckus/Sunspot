@@ -12,15 +12,26 @@ add_executable(OS_v1.0 src/main.cpp include/OS_tools.cpp include/INA219.cpp)
 
 # Find OpenCV package
 find_package(OpenCV REQUIRED)
-include_directories(${OpenCV_INCLUDE_DIRS})
-target_link_libraries(OS_v1.0 ${OpenCV_LIBS})
+target_include_directories(OS_v1.0 PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(OS_v1.0 PRIVATE ${OpenCV_LIBS})
 
 # Find Threads package
 find_package(Threads REQUIRED)
-target_link_libraries(OS_v1.0 Threads::Threads)
+target_link_libraries(OS_v1.0 PRIVATE Threads::Threads)
 
 # Link wiringPi library
-target_link_libraries(OS_v1.0 wiringPi)
+find_library(WIRINGPI_LIB wiringPi)
+if(WIRINGPI_LIB)
+    target_link_libraries(OS_v1.0 PRIVATE ${WIRINGPI_LIB})
+else()
+    message(FATAL_ERROR "wiringPi library not found")
+endif()
+
+# Find GTK package
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GTK REQUIRED gtk+-3.0)
+target_include_directories(OS_v1.0 PRIVATE ${GTK_INCLUDE_DIRS})
+target_link_libraries(OS_v1.0 PRIVATE ${GTK_LIBRARIES})
 
 # Include directories
-include_directories(${CMAKE_SOURCE_DIR}/include)
+target_include_directories(OS_v1.0 PRIVATE ${CMAKE_SOURCE_DIR}/include)

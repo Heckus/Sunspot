@@ -25,8 +25,20 @@
 #include <filesystem>
 //Dependants
 #include "INA219.h"
+#include <gtkmm.h>
+#include <gtk/gtk.h>
 
 
+/*
+/usr/local/include/wiringPi
+/usr/include/gtkmm-4.0/
+/usr/include/gtk-4.0/**
+/usr/include/**
+/usr/lib/**
+/usr/include/glibmm-2.4/**
+/usr/include/glib-2.0
+/usr/lib/x86_64-linux-gnu/glib-2.0/include
+*/
 
 class Data {
 public:
