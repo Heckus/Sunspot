@@ -12,7 +12,7 @@ std::thread VideoCapture;
 std::thread Videoproccessing;
 std::thread Serial;
 std::thread Battery;
-std::thread Control;
+std::thread USB;
 
 void VideoCaptureThread(Data &OsData){
    while(running){
@@ -91,7 +91,7 @@ void BatteryThread(Data &OsData){
     }
 }
 
-void ControlThread(Data &OsData){
+void USBThread(Data &OsData){
     while(running){
         
     }
@@ -115,7 +115,7 @@ int main(){
     Videoproccessing = std::thread(VideoProccessingThread, std::ref(OsData));
     Serial = std::thread(SerialThread, std::ref(OsData));
     Battery = std::thread(BatteryThread, std::ref(OsData));
-    Control = std::thread(ControlThread, std::ref(OsData));
+    USB = std::thread(USBThread, std::ref(OsData));
 
     /*
     need to add i/o control(ie use mode switche to determine what to do)
@@ -126,7 +126,7 @@ int main(){
     Videoproccessing.join();
     Serial.join();
     Battery.join();
-    Control.join();
+    USB.join();
 
     serialPuts(OsData.getserialFd(), (OsData.reset + '\n').c_str());
     std::cout << std::endl;
