@@ -7,9 +7,9 @@
 
 #define LEDBOARD0_PIN D10
 #define LEDNUM0 1
-#define LEDBOARD1_PIN D9
+#define LEDBOARD1_PIN D8
 #define LEDNUM1 8
-#define LEDBOARD2_PIN D8
+#define LEDBOARD2_PIN D9
 #define LEDNUM2 3
 
 
@@ -60,7 +60,7 @@ void setBeta(int value) {
         beta = value;
     }
 }
-int batteryLevel = 8;
+int batteryLevel = 100;
 
 String led0 = "black";
 
@@ -72,6 +72,7 @@ int button2State = 0;
 int button2debouce = 0;
 int button3State = 0;
 int button3debouce = 0;
+int buttondebouncereset = 0;
 
 /* FLOW CONTROL */
 
@@ -109,12 +110,10 @@ void loop() {
         ESP.restart();
     }
     
-    //serialComm.send("ECHO "+serialinput + "switchstate: "+String(switchState));
-    
-    // setTheta(theta + serialComm.extractIntValue(serialinput, 1));
-    // moveServo(servotheta, theta, xaxis);
-    // setBeta(beta + serialComm.extractIntValue(serialinput, 2));
-    // moveServo(servobeta, beta, yaxis);
+    setTheta(theta + serialComm.extractIntValue(serialinput, 1));
+    moveServo(servotheta, theta, xaxis);
+    setBeta(beta + serialComm.extractIntValue(serialinput, 2));
+    moveServo(servobeta, beta, yaxis);
 
     led0 = serialComm.extractValue(serialinput, 3);
     setLEDColor(&LED0, 0, led0);
@@ -125,11 +124,11 @@ void loop() {
 
     // Read switch state
     switchState = threeWaySwitch.getPosition();
+
     if (button1.isPressed()) {
         button1debouce++;
         if(button1debouce > 2){
             button1State ^= 1;
-            setLEDColor(&LED2,0, button1State ? "green" : "red");
             button1debouce = 0;
         }
     }
@@ -137,7 +136,6 @@ void loop() {
         button2debouce++;
         if(button2debouce > 2){
             button2State ^= 1;
-            setLEDColor(&LED2,1, button2State ? "green" : "red");
             button2debouce = 0;
         }
     }
@@ -145,21 +143,28 @@ void loop() {
         button3debouce++;
         if(button3debouce > 2){
             button3State ^= 1;
-            setLEDColor(&LED2,2, button3State ? "green" : "red");
             button3debouce = 0;
         }
     }
+    setLEDColor(&LED2,0, button1State ? "green" : "red");
+    setLEDColor(&LED2,1, button2State ? "green" : "red");
+    setLEDColor(&LED2,2, button3State ? "green" : "red");
+
+    buttondebouncereset++;
+    if(buttondebouncereset > 10){
+        button1debouce = 0;
+        button2debouce = 0;
+        button3debouce = 0;
+        buttondebouncereset = 0;
+    }
+    
     }
     // // send if there received data
-    
     if (nodata == false){
     serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
     }
-
-    
-
-
 }
+
   
   
   
