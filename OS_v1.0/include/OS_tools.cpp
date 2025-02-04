@@ -205,21 +205,35 @@ void Data::setinputpipline() {
 
 void Data::setvideopaths() {
     std::lock_guard<std::mutex> lock(mtx);
-    while (true) {
-        int index = 0;
-        for (auto& path : fs::directory_iterator("/media/pi")) {
-            if (index < 4 && fs::is_directory(path)) {
-                videopaths[index] = path.path().string();
-                index++;
+    int usbCount = 0;
+
+    try {
+        if (!fs::exists("/media/hecke") || !fs::is_directory("/media/hecke")) {
+            std::cerr << "Error: /media/hecke directory not found" << std::endl;
+            std::exit(EXIT_FAILURE);
+        }
+
+        for (const auto& entry : fs::directory_iterator("/media/hecke")) {
+            if (usbCount >= 4) break;
+            
+            if (fs::is_directory(entry)) {
+                videopaths[usbCount] = entry.path().string();
+                usbCount++;
             }
         }
-        for (; index < 4; index++) {
-            videopaths[index] = "empty";
+
+        if (usbCount == 0) {
+            std::cerr << "Error: No USB drives found in /media" << std::endl;
+            std::exit(EXIT_FAILURE);
         }
-        if (index > 0) {
-            break;
+
+        // Fill remaining slots with "empty"
+        while (usbCount < 4) {
+            videopaths[usbCount++] = "empty";
         }
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    } catch (const fs::filesystem_error& e) {
+        std::cerr << "Filesystem error: " << e.what() << std::endl;
+        std::exit(EXIT_FAILURE);
     }
 }
 

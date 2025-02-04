@@ -1,5 +1,4 @@
 #include "OS_tools.h"
-#include <gtk/gtk.h>
 
 
 
@@ -103,17 +102,17 @@ void MonitoringThread(Data &OsData){
         GtkWidget *dataLabel;
 
         // GTK init must be in this thread
-        gtk_init();
+        gtk_init(NULL, NULL);
 
         // Create main window
-        window = gtk_window_new();
+        window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
         gtk_window_set_title(GTK_WINDOW(window), "Camera Monitor");
         gtk_window_set_default_size(GTK_WINDOW(window), OsData.getwidth(), OsData.getheight());
-        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_window_close), NULL);
+        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
         // Create grid layout
         grid = gtk_grid_new();
-        gtk_window_set_child(GTK_WINDOW(window), grid);
+        gtk_container_add(GTK_CONTAINER(window), grid);
 
         // Image widget for camera feed
         image = gtk_image_new();
@@ -161,7 +160,7 @@ void MonitoringThread(Data &OsData){
             OsData.printData();
         }
 
-        gtk_window_destroy(GTK_WINDOW(window));
+        gtk_widget_destroy(window);
     }
 }
 
@@ -192,11 +191,25 @@ int main(int argc, char *argv[]){
     OsData.setframerate(framerate);
     OsData.setbaudrate(115200);
    
+    std::cout << "Setting up WiringPi..." << std::endl;
     OsData.setwiringPi();
+    
+    std::cout << "Setting up Serial connection..." << std::endl;
     OsData.setserialFd();
+    
+    std::cout << "Setting up input pipeline..." << std::endl;
     OsData.setinputpipline();
+    
+    std::cout << "Setting video paths..." << std::endl;
     OsData.setvideopaths();
+    
+    std::cout << "Setting up output pipeline..." << std::endl;
+    OsData.setoutputpipline();
+
+    std::cout << "Creating video writers..." << std::endl;
     OsData.createwriters();
+    
+    std::cout << "Setting up camera..." << std::endl;
     OsData.createcamera();
 
     VideoCapture = std::thread(VideoCaptureThread, std::ref(OsData));

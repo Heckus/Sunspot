@@ -27,11 +27,11 @@ else()
     message(FATAL_ERROR "wiringPi library not found")
 endif()
 
-# Find GTK package
+# Find GTKMM package
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(GTK REQUIRED gtk+-3.0)
-target_include_directories(OS_v1.0 PRIVATE ${GTK_INCLUDE_DIRS})
-target_link_libraries(OS_v1.0 PRIVATE ${GTK_LIBRARIES})
+pkg_check_modules(GTKMM REQUIRED gtkmm-3.0)
+target_include_directories(OS_v1.0 PRIVATE ${GTKMM_INCLUDE_DIRS})
+target_link_libraries(OS_v1.0 PRIVATE ${GTKMM_LIBRARIES})
 
 # Include directories
 target_include_directories(OS_v1.0 PRIVATE ${CMAKE_SOURCE_DIR}/include)
