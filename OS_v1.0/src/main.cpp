@@ -2,6 +2,7 @@
 
 
 
+
 volatile bool running = true;
 void signalHandler(int signum) {
     running = false;
@@ -21,7 +22,7 @@ void VideoCaptureThread(Data &OsData){
    while(running){
     OsData.updateframe();
     OsData.writeframes();
-    //cv::imshow("CurrentFrame", OsData.getframe());
+    cv::imshow("CurrentFrame", OsData.getframe());
     std::this_thread::sleep_for(std::chrono::milliseconds(1000 / OsData.getframerate()));
    }
 }
@@ -29,15 +30,29 @@ void VideoCaptureThread(Data &OsData){
 void VideoProccessingThread(Data &OsData){
     while(running){
         cv::Mat frame = OsData.getframe();
-        if(OsData.getMode() == 1){
-            //do nothing
+        cv::CascadeClassifier face_cascade;
+        if (!face_cascade.load(cv::samples::findFile("haarcascade_frontalface_default.xml"))) {
+            std::cerr << "Error loading face cascade" << std::endl;
+            return;
         }
-        else if(OsData.getMode() == 2){
-            //do something
+
+        std::vector<cv::Rect> faces;
+        face_cascade.detectMultiScale(frame, faces);
+
+        if (!faces.empty()) {
+            cv::Rect face = faces[0]; // Assuming the first detected face is the one we want
+            cv::Point frame_center(frame.cols / 2, frame.rows / 2);
+            cv::Point face_center(face.x + face.width / 2, face.y + face.height / 2);
+
+            double x_diff = face_center.x - frame_center.x;
+            double y_diff = face_center.y - frame_center.y;
+
+            double x_angle = (x_diff / frame.cols) * 160.0; // 160 degrees field of view
+            double y_angle = (y_diff / frame.rows) * 160.0; // 160 degrees field of view
+
+            OsData.setDeltatheta(x_angle);
+            OsData.setDeltabeta(y_angle);
         }
-        else if(OsData.getMode() == 3){
-            //do something else
-        }         
     }
 }
 
@@ -101,14 +116,16 @@ void MonitoringThread(Data &OsData){
         GtkWidget *image;
         GtkWidget *dataLabel;
 
-        // GTK init must be in this thread
-        gtk_init(NULL, NULL);
+        int argc = 0;
+        char **argv = nullptr;
+        gtk_init(&argc, &argv);
+        window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 
         // Create main window
-        window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_main_quit), NULL);
         gtk_window_set_title(GTK_WINDOW(window), "Camera Monitor");
         gtk_window_set_default_size(GTK_WINDOW(window), OsData.getwidth(), OsData.getheight());
-        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_main_quit), NULL);
+        gtk_container_add(GTK_CONTAINER(window), grid);
 
         // Create grid layout
         grid = gtk_grid_new();
@@ -122,7 +139,7 @@ void MonitoringThread(Data &OsData){
         dataLabel = gtk_label_new("");
         gtk_grid_attach(GTK_GRID(grid), dataLabel, 1, 0, 1, 1);
 
-        gtk_widget_show(window);
+        gtk_widget_show_all(window);
 
         while(running) {
             // Convert OpenCV mat to GdkPixbuf
@@ -157,7 +174,6 @@ void MonitoringThread(Data &OsData){
                 g_main_context_iteration(NULL, TRUE);
                 
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            OsData.printData();
         }
 
         gtk_widget_destroy(window);
