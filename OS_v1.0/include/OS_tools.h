@@ -77,6 +77,8 @@ public:
     void setButtonState(int state);
     void setLed0Color(std::string color);
 
+    void setTrackingState(int state);
+
     void setframerate(int framerate);
     void setwidth(int width);
     void setheight(int height);
@@ -130,6 +132,7 @@ private:
     const char* serialwiredevice = "/dev/ttyAMA0";
     volatile int serialFd;
 
+    int trackingstate;
 
     std::mutex mtx; // Mutex for thread safety
 };

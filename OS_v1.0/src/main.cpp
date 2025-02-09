@@ -3,6 +3,7 @@
 
 
 
+
 volatile bool running = true;
 void signalHandler(int signum) {
     running = false;
@@ -28,18 +29,19 @@ void VideoCaptureThread(Data &OsData){
 }
 
 void VideoProccessingThread(Data &OsData){
+    cv::CascadeClassifier face_cascade;
+    if (!face_cascade.load(cv::samples::findFile("haarcascade_frontalface_default.xml"))) {
+        std::cerr << "Error loading face cascade" << std::endl;
+        return;
+    }
     while(running){
         cv::Mat frame = OsData.getframe();
-        cv::CascadeClassifier face_cascade;
-        if (!face_cascade.load(cv::samples::findFile("haarcascade_frontalface_default.xml"))) {
-            std::cerr << "Error loading face cascade" << std::endl;
-            return;
-        }
 
         std::vector<cv::Rect> faces;
         face_cascade.detectMultiScale(frame, faces);
 
         if (!faces.empty()) {
+            OsData.setTrackingState(1);
             cv::Rect face = faces[0]; // Assuming the first detected face is the one we want
             cv::Point frame_center(frame.cols / 2, frame.rows / 2);
             cv::Point face_center(face.x + face.width / 2, face.y + face.height / 2);
@@ -52,6 +54,9 @@ void VideoProccessingThread(Data &OsData){
 
             OsData.setDeltatheta(x_angle);
             OsData.setDeltabeta(y_angle);
+        }
+        else {
+            OsData.setTrackingState(0);
         }
     }
 }
@@ -109,74 +114,11 @@ void BatteryThread(Data &OsData){
     }
 }
 
+
 void MonitoringThread(Data &OsData){
     while(running){
-        GtkWidget *window;
-        GtkWidget *grid;
-        GtkWidget *image;
-        GtkWidget *dataLabel;
-
-        int argc = 0;
-        char **argv = nullptr;
-        gtk_init(&argc, &argv);
-        window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-
-        // Create main window
-        g_signal_connect(G_OBJECT(window), "destroy", G_CALLBACK(gtk_main_quit), NULL);
-        gtk_window_set_title(GTK_WINDOW(window), "Camera Monitor");
-        gtk_window_set_default_size(GTK_WINDOW(window), OsData.getwidth(), OsData.getheight());
-        gtk_container_add(GTK_CONTAINER(window), grid);
-
-        // Create grid layout
-        grid = gtk_grid_new();
-        gtk_container_add(GTK_CONTAINER(window), grid);
-
-        // Image widget for camera feed
-        image = gtk_image_new();
-        gtk_grid_attach(GTK_GRID(grid), image, 0, 0, 1, 1);
-
-        // Label for data display
-        dataLabel = gtk_label_new("");
-        gtk_grid_attach(GTK_GRID(grid), dataLabel, 1, 0, 1, 1);
-
-        gtk_widget_show_all(window);
-
-        while(running) {
-            // Convert OpenCV mat to GdkPixbuf
-            cv::Mat frame = OsData.getframe();
-            cv::Mat rgb;
-            cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
-            GdkPixbuf *pixbuf = gdk_pixbuf_new_from_data(
-                rgb.data,
-                GDK_COLORSPACE_RGB,
-                false,
-                8,
-                rgb.cols,
-                rgb.rows,
-                rgb.step,
-                nullptr,
-                nullptr
-            );
-            
-            // Update widgets
-            gtk_image_set_from_pixbuf(GTK_IMAGE(image), pixbuf);
-            g_object_unref(pixbuf);
-
-            std::string data = 
-                "Battery: " + std::to_string(OsData.getBatteryLevel()) + "%\n" +
-                "Mode: " + std::to_string(OsData.getMode()) + "\n" + 
-                "Theta: " + std::to_string(OsData.getThetaAngle()) + "\n" +
-                "Beta: " + std::to_string(OsData.getBetaAngle());
-                
-            gtk_label_set_text(GTK_LABEL(dataLabel), data.c_str());
-            
-            while (g_main_context_pending(NULL))
-                g_main_context_iteration(NULL, TRUE);
-                
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
-        }
-
-        gtk_widget_destroy(window);
+        OsData.printData();
+        system("clear");
     }
 }
 
@@ -233,7 +175,7 @@ int main(int argc, char *argv[]){
     Serial = std::thread(SerialThread, std::ref(OsData));
     Battery = std::thread(BatteryThread, std::ref(OsData));
     USB = std::thread(USBThread, std::ref(OsData));
-    Monitoring = std::thread(MonitoringThread, std::ref(OsData));
+    //Monitoring = std::thread(MonitoringThread, std::ref(OsData));
 
     /*
     need to add i/o control(ie use mode switche to determine what to do)
@@ -245,7 +187,7 @@ int main(int argc, char *argv[]){
     Serial.join();
     Battery.join();
     USB.join();
-    Monitoring.join();
+    //Monitoring.join();
 
     serialPuts(OsData.getserialFd(), (OsData.reset + '\n').c_str());
     std::cout << std::endl;
