@@ -1,8 +1,10 @@
 #include "servo.h"
 
 // Servo pins
-const int X_MIN = 790;
-const int X_MAX = 2180;
+// const int X_MIN = 790; For DS
+// const int X_MAX = 2180;
+const int X_MIN = 780;
+const int X_MAX = 2250;
 const int Y_MIN = 780;
 const int Y_MAX = 2250;
 const int inputmin = -90;

@@ -65,14 +65,14 @@ int batteryLevel = 100;
 String led0 = "black";
 
 int switchState = 1;
-
 int button1State = 0;
-int button1debouce = 0;
 int button2State = 0;
-int button2debouce = 0;
 int button3State = 0;
-int button3debouce = 0;
-int buttondebouncereset = 0;
+
+// int button1debouce = 0;
+// int button2debouce = 0;
+// int button3debouce = 0;
+// int buttondebouncereset = 0;
 
 /* FLOW CONTROL */
 
@@ -126,37 +126,19 @@ void loop() {
     switchState = threeWaySwitch.getPosition();
 
     if (button1.isPressed()) {
-        button1debouce++;
-        if(button1debouce > 2){
-            button1State ^= 1;
-            button1debouce = 0;
-        }
+        button1State ^= 1;   
     }
     if (button2.isPressed()) {
-        button2debouce++;
-        if(button2debouce > 2){
-            button2State ^= 1;
-            button2debouce = 0;
-        }
+        button2State ^= 1; 
     }
     if (button3.isPressed()) {
-        button3debouce++;
-        if(button3debouce > 2){
-            button3State ^= 1;
-            button3debouce = 0;
-        }
+        button3State ^= 1;  
     }
     setLEDColor(&LED2,0, button1State ? "green" : "red");
     setLEDColor(&LED2,1, button2State ? "green" : "red");
     setLEDColor(&LED2,2, button3State ? "green" : "red");
 
-    buttondebouncereset++;
-    if(buttondebouncereset > 10){
-        button1debouce = 0;
-        button2debouce = 0;
-        button3debouce = 0;
-        buttondebouncereset = 0;
-    }
+    
     
     }
     // // send if there received data
