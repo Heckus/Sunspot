@@ -273,7 +273,7 @@ void Data::writeframes() {
     std::lock_guard<std::mutex> lock(mtx);
     for (int i = 0; i < 4; ++i) {
         if (videopaths[i] != "empty") {
-            writers[i] << currentframe;
+            writers[i].write(currentframe);
         }
     }
 }
