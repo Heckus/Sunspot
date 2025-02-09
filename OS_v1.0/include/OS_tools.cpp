@@ -156,8 +156,8 @@ void Data::printData() {
     std::lock_guard<std::mutex> lock(mtx);
     std::cout << "\n--- System Status ---\n\n"
               << "Angles:\n"
-              << "  Theta: " << thetaAngle << "°\n"
-              << "  Beta:  " << betaAngle  << "°\n\n"
+              << "  Theta: " << thetaAngle << "\n"
+              << "  Beta:  " << betaAngle  << "\n\n"
               << "System:\n"
               << "  Battery Level: " << batteryLevel << "%\n"
               << "  Mode:          " << mode << "\n"
@@ -180,7 +180,7 @@ void Data::printData() {
     
     std::cout << "\nVideo Paths:\n";
     for (const auto& path : videopaths) {
-        std::cout << "  • " << path << "\n";
+        std::cout << "-" << path << "\n";
     }
     std::cout << "\n------------------------\n";
 }
