@@ -17,6 +17,8 @@ std::thread USB;
 std::thread Monitoring;
 
 void VideoCaptureThread(Data &OsData){
+    auto last_write_time = std::chrono::high_resolution_clock::now(); // Time of last written frame
+
     while(running){
         if (!OsData.camera.isOpened()) {
             std::cerr << "Error: Camera is not opened. Exiting VideoCaptureThread." << std::endl;
@@ -24,21 +26,28 @@ void VideoCaptureThread(Data &OsData){
         }
 
         OsData.updateframe();
-        
-        // Check if frame is empty before displaying
-        cv::Mat frame = OsData.getframe(); 
+        cv::Mat frame = OsData.getframe();
+
         if (!frame.empty()) {
-            OsData.writeframes(); 
+            // Control writing rate *independently* of display rate
+            auto now = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_write_time);
+            int delay = 1000 / OsData.getframerate();
+
+            if (duration.count() >= delay) {
+                OsData.writeframes();
+                last_write_time = now;
+            }
+
+            // Display the frame at a separate, possibly lower rate
             cv::imshow("CurrentFrame", frame);
-            cv::waitKey(1000 / OsData.getframerate());  
+            cv::waitKey(1); // Or a small delay if needed for display responsiveness
         } else {
             std::cerr << "Warning: Frame is empty. Skipping display and write." << std::endl;
-            // Optionally, add a short delay here to prevent busy-waiting
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10)); // Prevent busy-waiting
         }
     }
-    
-    // Cleanup
+
     cv::destroyWindow("CurrentFrame");
 }
 
