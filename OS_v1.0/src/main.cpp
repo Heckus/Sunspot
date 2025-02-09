@@ -1,9 +1,6 @@
 #include "OS_tools.h"
 
 
-
-
-
 volatile bool running = true;
 void signalHandler(int signum) {
     running = false;
@@ -21,13 +18,23 @@ std::thread Monitoring;
 
 void VideoCaptureThread(Data &OsData){
     while(running){
+        if (!OsData.camera.isOpened()) {
+            std::cerr << "Error: Camera is not opened. Exiting VideoCaptureThread." << std::endl;
+            break; 
+        }
+
         OsData.updateframe();
-        OsData.writeframes();
         
         // Check if frame is empty before displaying
-        if (!OsData.getframe().empty()) {
-            cv::imshow("CurrentFrame", OsData.getframe());
-            cv::waitKey(1000 / OsData.getframerate());  // Wait time in milliseconds based on framerate
+        cv::Mat frame = OsData.getframe(); 
+        if (!frame.empty()) {
+            OsData.writeframes(); 
+            cv::imshow("CurrentFrame", frame);
+            cv::waitKey(1000 / OsData.getframerate());  
+        } else {
+            std::cerr << "Warning: Frame is empty. Skipping display and write." << std::endl;
+            // Optionally, add a short delay here to prevent busy-waiting
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
     
