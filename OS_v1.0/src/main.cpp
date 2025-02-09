@@ -30,7 +30,7 @@ void VideoCaptureThread(Data &OsData){
 
 void VideoProccessingThread(Data &OsData){
     cv::CascadeClassifier face_cascade;
-    if (!face_cascade.load(cv::samples::findFile("haarcascade_frontalface_default.xml"))) {
+    if (!face_cascade.load("/usr/local/share/opencv4/haarcascades/haarcascade_frontalface_default.xml")) {
         std::cerr << "Error loading face cascade" << std::endl;
         return;
     }
@@ -118,7 +118,8 @@ void BatteryThread(Data &OsData){
 void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
-        system("clear");
+        std::this_thread::sleep_for(std::chrono::seconds(100));
+
     }
 }
 

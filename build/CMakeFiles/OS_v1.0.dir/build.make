@@ -134,6 +134,7 @@ OS_v1.0: /usr/local/lib/libopencv_dnn_objdetect.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_dnn_superres.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_dpm.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_face.so.4.10.0
+OS_v1.0: /usr/local/lib/libopencv_freetype.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_fuzzy.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_hfs.so.4.10.0
 OS_v1.0: /usr/local/lib/libopencv_img_hash.so.4.10.0

@@ -321,6 +321,11 @@
 			},
 			{
 				"backtrace" : 2,
+				"fragment" : "/usr/local/lib/libopencv_freetype.so.4.10.0",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 2,
 				"fragment" : "/usr/local/lib/libopencv_fuzzy.so.4.10.0",
 				"role" : "libraries"
 			},
