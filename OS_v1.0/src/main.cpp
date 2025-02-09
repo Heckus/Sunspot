@@ -20,12 +20,23 @@ std::thread USB;
 std::thread Monitoring;
 
 void VideoCaptureThread(Data &OsData){
-   while(running){
-    OsData.updateframe();
-    OsData.writeframes();
-    cv::imshow("CurrentFrame", OsData.getframe());
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / OsData.getframerate()));
-   }
+    while(running){
+        if (!OsData.updateframe()) {  // Add error checking for frame capture
+            std::cerr << "Failed to capture frame" << std::endl;
+            continue;
+        }
+        
+        OsData.writeframes();
+        
+        // Check if frame is empty before displaying
+        if (!OsData.getframe().empty()) {
+            cv::imshow("CurrentFrame", OsData.getframe());
+            cv::waitKey(1000 / OsData.getframerate());  // Wait time in milliseconds based on framerate
+        }
+    }
+    
+    // Cleanup
+    cv::destroyWindow("CurrentFrame");
 }
 
 void VideoProccessingThread(Data &OsData){
@@ -118,6 +129,7 @@ void BatteryThread(Data &OsData){
 void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
+        system("clear");
         std::this_thread::sleep_for(std::chrono::seconds(100));
 
     }
@@ -176,7 +188,7 @@ int main(int argc, char *argv[]){
     Serial = std::thread(SerialThread, std::ref(OsData));
     Battery = std::thread(BatteryThread, std::ref(OsData));
     USB = std::thread(USBThread, std::ref(OsData));
-    //Monitoring = std::thread(MonitoringThread, std::ref(OsData));
+    Monitoring = std::thread(MonitoringThread, std::ref(OsData));
 
     /*
     need to add i/o control(ie use mode switche to determine what to do)
@@ -188,8 +200,9 @@ int main(int argc, char *argv[]){
     Serial.join();
     Battery.join();
     USB.join();
-    //Monitoring.join();
+    Monitoring.join();
 
+    OsData.release();
     serialPuts(OsData.getserialFd(), (OsData.reset + '\n').c_str());
     std::cout << std::endl;
     std::cout << "Exiting..." << std::endl;
