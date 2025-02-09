@@ -154,42 +154,35 @@ int Data::getserialFd() {
 
 void Data::printData() {
     std::lock_guard<std::mutex> lock(mtx);
-    std::cout << "\n══════════════════ System Status ══════════════════\n\n"
-              << "╔═══════════ Angles ═══════════╗\n"
-              << "║  Theta: " << std::setw(20) << thetaAngle << "° ║\n"
-              << "║  Beta:  " << std::setw(20) << betaAngle  << "° ║\n"
-              << "╚═══════════════════════════════╝\n\n"
-              << "╔═══════════ System ═══════════╗\n"
-              << "║  Battery Level: " << std::setw(13) << batteryLevel << "% ║\n"
-              << "║  Mode:          " << std::setw(13) << mode << " ║\n"
-              << "║  LED Color:     " << std::setw(13) << led0Color << " ║\n"
-              << "╚═══════════════════════════════╝\n\n"
-              << "╔═══════════ Camera ═══════════╗\n"
-              << "║  Framerate: " << std::setw(16) << framerate << " ║\n"
-              << "║  Width:     " << std::setw(16) << width << " ║\n"
-              << "║  Height:    " << std::setw(16) << height << " ║\n"
-              << "╚═══════════════════════════════╝\n\n"
-              << "╔═══════════ Serial ═══════════╗\n"
-              << "║  Baudrate:  " << std::setw(15) << baudrate << " ║\n"
-              << "║  Serial FD: " << std::setw(15) << serialFd << " ║\n"
-              << "╚═══════════════════════════════╝\n\n"
-              << "╔═══════════ Tracking ═══════════╗\n"
-              << "║  State: " << std::setw(19) << trackingstate << " ║\n"
-              << "╚═══════════════════════════════╝\n\n"
-              << "╔═══════════ Pipelines ═══════════╗\n"
-              << "║  Input:  " << inputpipeline << " ║\n";
+    std::cout << "\n--- System Status ---\n\n"
+              << "Angles:\n"
+              << "  Theta: " << thetaAngle << "°\n"
+              << "  Beta:  " << betaAngle  << "°\n\n"
+              << "System:\n"
+              << "  Battery Level: " << batteryLevel << "%\n"
+              << "  Mode:          " << mode << "\n"
+              << "  LED Color:     " << led0Color << "\n\n"
+              << "Camera:\n"
+              << "  Framerate: " << framerate << "\n"
+              << "  Width:     " << width << "\n"
+              << "  Height:    " << height << "\n\n"
+              << "Serial:\n"
+              << "  Baudrate:  " << baudrate << "\n"
+              << "  Serial FD: " << serialFd << "\n\n"
+              << "Tracking:\n"
+              << "  State: " << trackingstate << "\n\n"
+              << "Pipelines:\n"
+              << "  Input:  " << inputpipeline << "\n";
     
     for (int i = 0; i < 4; i++) {
-        std::cout << "║  Output" << i << ": " << outputpipline[i] << " ║\n";
+        std::cout << "  Output" << i << ": " << outputpipline[i] << "\n";
     }
-    std::cout << "╚════════════════════════════════╝\n\n";
-
-    std::cout << "╔═══════════ Video Paths ═══════════╗\n";
+    
+    std::cout << "\nVideo Paths:\n";
     for (const auto& path : videopaths) {
-        std::cout << "║  • " << path << "\n";
+        std::cout << "  • " << path << "\n";
     }
-    std::cout << "╚════════════════════════════════════╝\n";
-    std::cout << "\n═══════════════════════════════════════════════════\n";
+    std::cout << "\n------------------------\n";
 }
 
 

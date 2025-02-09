@@ -125,7 +125,6 @@ void BatteryThread(Data &OsData){
 void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
-        system("clear");
         std::this_thread::sleep_for(std::chrono::seconds(100));
 
     }
