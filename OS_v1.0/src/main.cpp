@@ -21,11 +21,7 @@ std::thread Monitoring;
 
 void VideoCaptureThread(Data &OsData){
     while(running){
-        if (!OsData.updateframe()) {  // Add error checking for frame capture
-            std::cerr << "Failed to capture frame" << std::endl;
-            continue;
-        }
-        
+        OsData.updateframe();
         OsData.writeframes();
         
         // Check if frame is empty before displaying
