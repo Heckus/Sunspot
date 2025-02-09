@@ -20,11 +20,6 @@ void VideoCaptureThread(Data &OsData){
     auto last_write_time = std::chrono::high_resolution_clock::now(); // Time of last written frame
 
     while(running){
-        if (!OsData.camera.isOpened()) {
-            std::cerr << "Error: Camera is not opened. Exiting VideoCaptureThread." << std::endl;
-            break; 
-        }
-
         OsData.updateframe();
         cv::Mat frame = OsData.getframe();
 
