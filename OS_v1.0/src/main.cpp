@@ -117,7 +117,7 @@ void SerialThread(Data &OsData){
 void BatteryThread(Data &OsData){
     while(running){
         OsData.setBatteryLevel(int(OsData.batteryMonitor.getBatteryPercentage()));
-        std::this_thread::sleep_for(std::chrono::seconds(0.5));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
 
@@ -125,7 +125,7 @@ void BatteryThread(Data &OsData){
 void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
-        std::this_thread::sleep_for(std::chrono::seconds(0.1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         system("clear");
 
     }
