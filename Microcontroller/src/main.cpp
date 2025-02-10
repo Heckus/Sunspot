@@ -90,18 +90,7 @@ void setup() {
     servotheta.attach(SERVOthetaPIN);
     servobeta.attach(SERVObetaPIN);
     
-    for (size_t i = -45; i < 45; i++)
-    {
-        moveServo(servotheta, i, xaxis);
-        delay(100);
-    }
     moveServo(servotheta, 0, xaxis);
-    delay(500);
-    for (size_t i = -45; i < 45; i++)
-    {
-        moveServo(servobeta, i, yaxis);
-        delay(100);
-    }
     moveServo(servobeta, 0, yaxis);
 
     setLEDColor(&LED2, 0, "red");

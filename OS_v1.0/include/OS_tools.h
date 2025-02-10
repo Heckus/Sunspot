@@ -107,11 +107,12 @@ public:
     std::string reset = "RESET";
 
     INA219 batteryMonitor;
+    
 private:
-    int thetaAngle;
-    int betaAngle;
-    int deltatheta;
-    int deltabeta;
+    int thetaAngle = 0;
+    int betaAngle = 0;
+    int deltatheta = 0;
+    int deltabeta = 0;
 
     std::string led0Color;
     int batteryLevel;

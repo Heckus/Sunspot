@@ -74,6 +74,8 @@ void VideoProccessingThread(Data &OsData){
             OsData.setDeltabeta(y_angle);
         }
         else {
+            OsData.setDeltatheta(0-(OsData.getThetaAngle()));
+            OsData.setDeltabeta(0-(OsData.getBetaAngle()));
             OsData.setTrackingState(0);
         }
     }
