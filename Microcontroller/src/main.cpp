@@ -91,6 +91,7 @@ void setup() {
     servobeta.attach(SERVObetaPIN);
     
     moveServo(servotheta, 0, xaxis);
+    delay(1000);
     moveServo(servobeta, 0, yaxis);
 
     setLEDColor(&LED2, 0, "red");
@@ -114,6 +115,7 @@ void loop() {
     
     setTheta(theta + serialComm.extractIntValue(serialinput, 1));
     moveServo(servotheta, theta, xaxis);
+    
     setBeta(beta + serialComm.extractIntValue(serialinput, 2));
     moveServo(servobeta, beta, yaxis);
 
@@ -146,7 +148,7 @@ void loop() {
     // // send if there is no received data
     if (nodata == false){
     serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
-    serialComm.send("MCdebugdata: Threshold = 100000 T1 = " + String(button1.returnsensorvalue()) + " T2 = " + String(button2.returnsensorvalue()) + " T3 = " + String(button3.returnsensorvalue()) + "+ A1:" + String(theta) + " A2:" + String(beta));
+    serialComm.send("MCdebugdata: Threshold = 100000 T1 = " + String(button1.returnsensorvalue()) + " T2 = " + String(button2.returnsensorvalue()) + " T3 = " + String(button3.returnsensorvalue()) + " A1:" + String(theta) + " A2:" + String(beta));
     }
 }
 

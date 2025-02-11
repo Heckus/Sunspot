@@ -85,11 +85,21 @@ void Data::setbaudrate(int baudrate) {
 
 int Data::getDeltatheta() {
     std::lock_guard<std::mutex> lock(mtx);
+    if (deltatheta > 10) {
+        deltatheta = 10;
+    } else if (deltatheta < -10) {
+        deltatheta = -10;
+    }
     return deltatheta;
 }
 
 int Data::getDeltabeta() {
     std::lock_guard<std::mutex> lock(mtx);
+    if (deltabeta > 10) {
+        deltabeta = 10;
+    } else if (deltabeta < -10) {
+        deltabeta = -10;
+    }
     return deltabeta;
 }
 
@@ -328,3 +338,41 @@ void Data::setTrackingState(int state) {
     std::lock_guard<std::mutex> lock(mtx);
     trackingstate = state;
 }
+
+
+
+
+
+class FrameQueue {
+public:
+    void enqueue(cv::UMat frame) {
+        std::unique_lock<std::mutex> lock(mutex);
+        frameQueue.push(frame.clone()); // Enqueue a copy
+        lock.unlock();
+        condition.notify_one();
+    }
+
+    cv::UMat dequeue() {
+        std::unique_lock<std::mutex> lock(mutex);
+        condition.wait(lock, [this]{ return !frameQueue.empty() || !running; });
+        if (!running && frameQueue.empty()) {
+            return cv::UMat(); // Return an empty Mat if the queue is empty and we are no longer running
+        }
+        cv::UMat frame = frameQueue.front();
+        frameQueue.pop();
+        return frame;
+    }
+
+    void stop() {
+        std::unique_lock<std::mutex> lock(mutex);
+        running = false;
+        lock.unlock();
+        condition.notify_all();
+    }
+
+private:
+    std::queue<cv::UMat> frameQueue;
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool running = true;
+};

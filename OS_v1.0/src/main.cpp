@@ -24,6 +24,7 @@ void VideoCaptureThread(Data &OsData){
         cv::UMat frame = OsData.getframe();
 
         if (!frame.empty()) {
+            OsData.frameQueue.enqueue(frame); // Enqueue the frame
             // Control writing rate *independently* of display rate
             auto now = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_write_time);
@@ -44,6 +45,7 @@ void VideoCaptureThread(Data &OsData){
     }
 
     cv::destroyWindow("CurrentFrame");
+    OsData.frameQueue.stop(); // Stop the queue before exiting
 }
 
 void VideoProccessingThread(Data &OsData) {
@@ -58,7 +60,7 @@ void VideoProccessingThread(Data &OsData) {
     const double vertical_fov = 160.0;
 
     while (running) {
-        cv::UMat frame = OsData.getframe();
+        cv::UMat frame = OsData.frameQueue.dequeue(); // Dequeue the frame
         if (frame.empty()) {
             std::cerr << "Warning: Empty frame received in processing thread." << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Avoid busy-waiting
