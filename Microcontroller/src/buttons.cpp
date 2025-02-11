@@ -8,13 +8,17 @@ CapacitiveButton::CapacitiveButton(int sendPin, long thresholdValue)
 }
 
 
-void CapacitiveButton::printSensorValue() {
+void CapacitiveButton::printSensorValue(void) {
     long sensorValue = touchRead(pinSend);
     Serial.print("Sensor value: ");
     Serial.println(sensorValue);
 }
 
-bool CapacitiveButton::isPressed() {
+long CapacitiveButton::returnsensorvalue(void){
+    return touchRead(pinSend);
+}
+
+bool CapacitiveButton::isPressed(void) {
     uint16_t sensorValue = touchRead(pinSend);
     return sensorValue > threshold;
 }

@@ -46,34 +46,59 @@ void VideoCaptureThread(Data &OsData){
     cv::destroyWindow("CurrentFrame");
 }
 
-void VideoProccessingThread(Data &OsData){
+void VideoProccessingThread(Data &OsData) {
     cv::CascadeClassifier face_cascade;
     if (!face_cascade.load("/usr/local/share/opencv4/haarcascades/haarcascade_frontalface_default.xml")) {
         std::cerr << "Error loading face cascade" << std::endl;
         return;
     }
-    while(running){
+
+    // Camera field of view in degrees
+    const double horizontal_fov = 160.0;
+    const double vertical_fov = 160.0;
+
+    while (running) {
         cv::Mat frame = OsData.getframe();
+        if (frame.empty()) {
+            std::cerr << "Warning: Empty frame received in processing thread." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Avoid busy-waiting
+            continue;
+        }
 
         std::vector<cv::Rect> faces;
-        face_cascade.detectMultiScale(frame, faces);
+        face_cascade.detectMultiScale(frame, faces, 1.1, 3, cv::CASCADE_SCALE_IMAGE, cv::Size(30, 30));
 
         if (!faces.empty()) {
             OsData.setTrackingState(1);
-            cv::Rect face = faces[0]; // Assuming the first detected face is the one we want
+            cv::Rect best_face = faces[0];
+            //Find the largest face
+            if (faces.size() > 1) {
+                int max_area = 0;
+                for (const auto& face : faces) {
+                    int area = face.width * face.height;
+                    if (area > max_area) {
+                        best_face = face;
+                        max_area = area;
+                    }
+                }
+            }
+
             cv::Point frame_center(frame.cols / 2, frame.rows / 2);
-            cv::Point face_center(face.x + face.width / 2, face.y + face.height / 2);
+            cv::Point face_center(best_face.x + best_face.width / 2, best_face.y + best_face.height / 2);
 
-            double x_diff = face_center.x - frame_center.x;
-            double y_diff = face_center.y - frame_center.y;
+            // Calculate normalized distances from the center
+            double x_diff_norm = (double)(face_center.x - frame_center.x) / (frame.cols / 2);
+            double y_diff_norm = (double)(face_center.y - frame_center.y) / (frame.rows / 2);
 
-            double x_angle = (x_diff / frame.cols) * 160.0; // 160 degrees field of view
-            double y_angle = (y_diff / frame.rows) * 160.0; // 160 degrees field of view
+            // Map normalized distances to angles, clamping to the FOV
+            double x_angle = x_diff_norm * (horizontal_fov / 2);
+            double y_angle = y_diff_norm * (vertical_fov / 2);
 
+            // Set the deltas
             OsData.setDeltatheta(x_angle);
             OsData.setDeltabeta(y_angle);
-        }
-        else {
+        } else {
+            //if no face is found, return to zero
             OsData.setDeltatheta(0-(OsData.getThetaAngle()));
             OsData.setDeltabeta(0-(OsData.getBetaAngle()));
             OsData.setTrackingState(0);
@@ -139,7 +164,7 @@ void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        system("clear");
+        
 
     }
 }

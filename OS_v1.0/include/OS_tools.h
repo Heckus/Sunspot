@@ -117,14 +117,14 @@ private:
     std::string led0Color;
     int batteryLevel;
     int mode;
-    bool buttonStates[3]; // Assuming there are 10 buttons
+    bool buttonStates[3]; 
 
     std::string inputpipeline;
     int width;
     int height;
     int framerate;
     cv::VideoCapture camera;
-    cv::Mat currentframe;
+    cv::UMat currentframe;
 
     std::string videopaths[4];
     std::string outputpipline[4];

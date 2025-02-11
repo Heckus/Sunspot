@@ -12,8 +12,9 @@ private:
 
 public:
     CapacitiveButton(int sendPin,long thresholdValue);
-    void printSensorValue();
-    bool isPressed();
+    void printSensorValue(void);
+    long returnsensorvalue(void);
+    bool isPressed(void);
 };
 
 class RegularButton {

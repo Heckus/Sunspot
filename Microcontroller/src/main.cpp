@@ -143,9 +143,10 @@ void loop() {
     
     
     }
-    // // send if there received data
+    // // send if there is no received data
     if (nodata == false){
     serialComm.send(theta, beta, led0, batteryLevel, switchState, button1State, button2State, button3State);
+    serialComm.send("MCdebugdata: Threshold = 100000 T1 = " + String(button1.returnsensorvalue()) + " T2 = " + String(button2.returnsensorvalue()) + " T3 = " + String(button3.returnsensorvalue()) + "+ A1:" + String(theta) + " A2:" + String(beta));
     }
 }
 
