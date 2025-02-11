@@ -26,6 +26,7 @@
 #include <filesystem>
 //Dependants
 #include "INA219.h"
+#include "FrameQueue.h"
 #include <gtkmm.h>
 #include <gtk/gtk.h>
 
@@ -97,6 +98,8 @@ public:
     void setvideopaths();
     void createwriters();
     void writeframes();
+
+    FrameQueue frameQueue;
 
     void release();
  
