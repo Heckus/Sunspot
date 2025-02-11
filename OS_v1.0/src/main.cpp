@@ -21,7 +21,7 @@ void VideoCaptureThread(Data &OsData){
 
     while(running){
         OsData.updateframe();
-        cv::Mat frame = OsData.getframe();
+        cv::UMat frame = OsData.getframe();
 
         if (!frame.empty()) {
             // Control writing rate *independently* of display rate
@@ -58,7 +58,7 @@ void VideoProccessingThread(Data &OsData) {
     const double vertical_fov = 160.0;
 
     while (running) {
-        cv::Mat frame = OsData.getframe();
+        cv::UMat frame = OsData.getframe();
         if (frame.empty()) {
             std::cerr << "Warning: Empty frame received in processing thread." << std::endl;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));  // Avoid busy-waiting

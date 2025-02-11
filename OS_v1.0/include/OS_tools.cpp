@@ -311,7 +311,7 @@ void Data::updateframe(){
     }
 }
 
-cv::Mat Data::getframe(){
+cv::UMat Data::getframe(){
     std::lock_guard<std::mutex> lock(mtx);
     return currentframe;
 }
