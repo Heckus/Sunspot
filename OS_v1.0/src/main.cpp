@@ -173,7 +173,10 @@ void MonitoringThread(Data &OsData){
 
 void USBThread(Data &OsData){
     while(running){
-        delay(100);
+        OsData.setLed0Color("GREEN");
+        delay(1000);
+        OsData.setLed0Color("RED");
+        delay(1000);
     }
 }
 

@@ -1,4 +1,6 @@
 file(REMOVE_RECURSE
+  "CMakeFiles/OS_v1.0.dir/include/FrameQueue.cpp.o"
+  "CMakeFiles/OS_v1.0.dir/include/FrameQueue.cpp.o.d"
   "CMakeFiles/OS_v1.0.dir/include/INA219.cpp.o"
   "CMakeFiles/OS_v1.0.dir/include/INA219.cpp.o.d"
   "CMakeFiles/OS_v1.0.dir/include/OS_tools.cpp.o"

@@ -85,20 +85,20 @@ void Data::setbaudrate(int baudrate) {
 
 int Data::getDeltatheta() {
     std::lock_guard<std::mutex> lock(mtx);
-    if (deltatheta > 10) {
-        deltatheta = 10;
-    } else if (deltatheta < -10) {
-        deltatheta = -10;
+    if (deltatheta > 5) {
+        deltatheta = 5;
+    } else if (deltatheta < -5) {
+        deltatheta = -5;
     }
     return deltatheta;
 }
 
 int Data::getDeltabeta() {
     std::lock_guard<std::mutex> lock(mtx);
-    if (deltabeta > 10) {
-        deltabeta = 10;
-    } else if (deltabeta < -10) {
-        deltabeta = -10;
+    if (deltabeta > 5) {
+        deltabeta = 5;
+    } else if (deltabeta < -5) {
+        deltabeta = -5;
     }
     return deltabeta;
 }

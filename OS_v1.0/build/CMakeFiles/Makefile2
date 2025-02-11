@@ -81,12 +81,12 @@ clean: CMakeFiles/OS_v1.0.dir/clean
 CMakeFiles/OS_v1.0.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/OS_v1.0/build/CMakeFiles --progress-num=1,2,3,4 "Built target OS_v1.0"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/home/hecke/Code/GitRepositories/Sunspot/OS_v1.0/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target OS_v1.0"
 .PHONY : CMakeFiles/OS_v1.0.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/OS_v1.0.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/OS_v1.0/build/CMakeFiles 4
+	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/OS_v1.0/build/CMakeFiles 5
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/OS_v1.0.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /home/hecke/Code/GitRepositories/Sunspot/OS_v1.0/build/CMakeFiles 0
 .PHONY : CMakeFiles/OS_v1.0.dir/rule

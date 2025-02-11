@@ -129,6 +129,30 @@ OS_v1.0/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/build
 .PHONY : OS_v1.0/fast
 
+include/FrameQueue.o: include/FrameQueue.cpp.o
+.PHONY : include/FrameQueue.o
+
+# target to build an object file
+include/FrameQueue.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/include/FrameQueue.cpp.o
+.PHONY : include/FrameQueue.cpp.o
+
+include/FrameQueue.i: include/FrameQueue.cpp.i
+.PHONY : include/FrameQueue.i
+
+# target to preprocess a source file
+include/FrameQueue.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/include/FrameQueue.cpp.i
+.PHONY : include/FrameQueue.cpp.i
+
+include/FrameQueue.s: include/FrameQueue.cpp.s
+.PHONY : include/FrameQueue.s
+
+# target to generate assembly for a file
+include/FrameQueue.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/OS_v1.0.dir/build.make CMakeFiles/OS_v1.0.dir/include/FrameQueue.cpp.s
+.PHONY : include/FrameQueue.cpp.s
+
 include/INA219.o: include/INA219.cpp.o
 .PHONY : include/INA219.o
 
@@ -210,6 +234,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... OS_v1.0"
+	@echo "... include/FrameQueue.o"
+	@echo "... include/FrameQueue.i"
+	@echo "... include/FrameQueue.s"
 	@echo "... include/INA219.o"
 	@echo "... include/INA219.i"
 	@echo "... include/INA219.s"
