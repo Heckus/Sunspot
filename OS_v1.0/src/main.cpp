@@ -101,8 +101,8 @@ void VideoProccessingThread(Data &OsData) {
             OsData.setDeltabeta(y_angle);
         } else {
             //if no face is found, return to zero
-            OsData.setDeltatheta(0-(OsData.getThetaAngle()));
-            OsData.setDeltabeta(0-(OsData.getBetaAngle()));
+            OsData.setDeltatheta(0);
+            OsData.setDeltabeta(0);
             OsData.setTrackingState(0);
         }
     }
@@ -142,7 +142,8 @@ void SerialThread(Data &OsData){
 
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - lastStatusTime).count() >= STATUS_INTERVAL) {
-            std::string message = "PI-THETA:" + std::to_string(OsData.getDeltatheta()) +
+            std::string message = "PI-"+
+                                  "THETA:" + std::to_string(OsData.getDeltatheta()) +
                                   "BETA:" + std::to_string(OsData.getDeltabeta()) +
                                   "LED0:" + OsData.getLed0Color() +
                                   "BAT:" + std::to_string(OsData.getBatteryLevel());
@@ -166,17 +167,21 @@ void MonitoringThread(Data &OsData){
     while(running){
         OsData.printData();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        
-
     }
 }
 
 void USBThread(Data &OsData){
     while(running){
+        if(OsData.getMode == 2){
         OsData.setLed0Color("GREEN");
-        delay(1000);
+        }
+        if(OsData.getMode == 3){
         OsData.setLed0Color("RED");
-        delay(1000);
+        }
+        else{
+            OsData.setLed0Color("BLUE");
+        }
+
     }
 }
 
@@ -241,9 +246,10 @@ int main(int argc, char *argv[]){
     USB.join();
     Monitoring.join();
 
-    OsData.release();
+    
     serialPuts(OsData.getserialFd(), (OsData.reset + '\n').c_str());
     std::cout << std::endl;
     std::cout << "Exiting..." << std::endl;
+    OsData.release();
     return 0;
 }

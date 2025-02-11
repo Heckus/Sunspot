@@ -112,11 +112,17 @@ void loop() {
     if (serialinput == "RESET"){
         ESP.restart();
     }
-    
-    setTheta(theta + serialComm.extractIntValue(serialinput, 1));
+    setLEDColor(&LED2,0,"red");
+    setLEDColor(&LED2,1,"red");
+    setLEDColor(&LED2,2,"red");
+    button1State = 0;
+    button2State = 0;
+    button3State = 0;
+
+    setTheta(serialComm.extractIntValue(serialinput, 1));
     moveServo(servotheta, theta, xaxis);
     
-    setBeta(beta + serialComm.extractIntValue(serialinput, 2));
+    setBeta(serialComm.extractIntValue(serialinput, 2));
     moveServo(servobeta, beta, yaxis);
 
     led0 = serialComm.extractValue(serialinput, 3);
@@ -130,17 +136,19 @@ void loop() {
     switchState = threeWaySwitch.getPosition();
 
     if (button1.isPressed()) {
-        button1State ^= 1;   
+        button1State = 1;
+        setLEDColor(&LED2,0,"green");   
     }
     if (button2.isPressed()) {
-        button2State ^= 1; 
+        setLEDColor(&LED2,1,"green");
+        button2State = 1; 
     }
     if (button3.isPressed()) {
-        button3State ^= 1;  
+        button3State = 1;  
+        setLEDColor(&LED2,2,"green");
     }
-    setLEDColor(&LED2,0, button1State ? "green" : "red");
-    setLEDColor(&LED2,1, button2State ? "green" : "red");
-    setLEDColor(&LED2,2, button3State ? "green" : "red");
+    
+    
 
     
     
