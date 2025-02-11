@@ -8,10 +8,6 @@
 // Class declaration for FrameQueue
 class FrameQueue {
 public:
-    // Constructor/Destructor declarations
-    FrameQueue();
-    ~FrameQueue();
-
     void enqueue(cv::UMat frame);
     cv::UMat dequeue();
     void stop();

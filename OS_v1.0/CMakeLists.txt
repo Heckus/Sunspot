@@ -7,8 +7,13 @@ project(OS_v1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-# Add the executable
-add_executable(OS_v1.0 src/main.cpp include/OS_tools.cpp include/INA219.cpp)
+# Add the executable - include FrameQueue.cpp if it exists
+add_executable(OS_v1.0 
+    src/main.cpp 
+    include/OS_tools.cpp 
+    include/INA219.cpp
+    include/FrameQueue.cpp  # Add this line
+)
 
 # Find OpenCV package
 find_package(OpenCV REQUIRED)
