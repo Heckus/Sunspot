@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#https://www.donskytech.com/raspberry-pi-how-to-start-python-script-on-boot/ for use
 import subprocess
 import smtplib
 from socket import gaierror
