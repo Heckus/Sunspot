@@ -413,10 +413,10 @@ def initialize_camera(target_width, target_height):
                 # Explicitly set Auto White Balance mode
                 # Try different modes if 'Auto' gives a tint (e.g., Daylight, Cloudy, Tungsten)
                 "AwbEnable": True,
-                "AwbMode": controls.AwbModeEnum.Auto, # Options: Auto, Tungsten, Fluorescent, Indoor, Daylight, Cloudy
+                "AwbMode": controls.AwbModeEnum.Indoor, # Options: Auto, Tungsten, Fluorescent, Indoor, Daylight, Cloudy
                 # --- Denoising ---
                 # Options: Off, Fast, HighQuality. 'Fast' preferred for lower latency.
-                "NoiseReductionMode": controls.NoiseReductionModeEnum.Fast,
+                #"NoiseReductionMode": controls.NoiseReductionMode.Fast,
                 # --- Other Adjustments (Optional - Experiment) ---
                 # Range 0.0 to 1.0 typically. Default 0.0
                 "Brightness": 0.0,
