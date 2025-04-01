@@ -10,7 +10,6 @@ from gpiozero import Button, Device
 from gpiozero.pins.native import NativeFactory
 import logging
 from picamera2 import Picamera2 # Import picamera2
-from picamera2.tuning import Tuning # <--- IMPORT Tuning
 # Import controls for AWB, Denoise, etc.:
 from libcamera import controls
 import smbus # For battery monitor
@@ -37,7 +36,7 @@ WEB_PORT = 8000
 # Path to the standard NoIR tuning file for the IMX219 sensor
 # Use this if your camera behaves like a NoIR (lacks IR filter)
 USE_NOIR_TUNING = True # Set to False to use default tuning
-NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/vc4/imx219_noir.json"
+NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json"
 # --- End Tuning File Configuration ---
 
 # --- Battery Monitor Configuration ---
@@ -306,7 +305,7 @@ def initialize_camera(target_width, target_height):
         if USE_NOIR_TUNING:
             if os.path.exists(NOIR_TUNING_FILE_PATH):
                 try:
-                    tuning = Tuning.load_file(NOIR_TUNING_FILE_PATH)
+                    tuning = Picamera2.load_tuning_file(NOIR_TUNING_FILE_PATH)
                     logging.info(f"Loading NoIR tuning from: {NOIR_TUNING_FILE_PATH}")
                 except Exception as e:
                     logging.error(f"!!! Failed to load tuning file '{NOIR_TUNING_FILE_PATH}': {e}. Using default tuning.", exc_info=True)
@@ -324,7 +323,7 @@ def initialize_camera(target_width, target_height):
         # Set AWB back to Auto initially when using specific tuning,
         # as the tuning file heavily influences colour/monochrome output.
         config = picam2.create_video_configuration(
-            main={"size": (target_width, target_height), "format": "BGR888"},
+            main={"size": (target_width, target_height), "format": "RGB888"},
             controls={
                 "FrameRate": float(FRAME_RATE),
                 "AwbEnable": True,
