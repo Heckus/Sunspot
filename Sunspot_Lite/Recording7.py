@@ -324,7 +324,6 @@ def initialize_camera(target_width, target_height):
                 "FrameRate": float(FRAME_RATE),
                 "AwbEnable": True,
                 "AwbMode": controls.AwbModeEnum.Auto,
-                "NoiseReductionMode": controls.NoiseReductionModeEnum.Fast,
                 "Brightness": 0.0,
                 "Contrast": 1.0,
                 "Saturation": 1.0,
