@@ -37,7 +37,7 @@ INA219_I2C_ADDRESS = 0x41       # Set to None to disable
 BATTERY_READ_INTERVAL = 30.0
 BATTERY_MAX_VOLTAGE = 12.6      # Voltage when fully charged (e.g., 3S LiPo)
 BATTERY_MIN_VOLTAGE = 9.0       # Voltage when empty (e.g., 3S LiPo cut-off)
-# SHUTDOWN_WAIT_SECONDS = 15    # No longer needed here, handled by main thread wait/join
+# SHUTDOWN_WAIT_SECONDS = 15    # No longer needed here, main thread handles wait via join/sleep
 AP_PROFILE_NAME = "PiCamAP"     # NetworkManager profile name for the AP (used in main shutdown)
 
 # --- Global Variables ---
@@ -792,8 +792,7 @@ def index():
                onerror="handleStreamError()" onload="handleStreamLoad()"> </div>
 
         <script>
-          // --- JavaScript (Keep exactly the same as previous version) ---
-          // This includes the powerDown() function which sends the request to /power_down
+          // --- JavaScript (Restored to Readable Format) ---
           const statusElement = document.getElementById('status');
           const resolutionElement = document.getElementById('resolution');
           const errorElement = document.getElementById('error');
@@ -812,7 +811,7 @@ def index():
           let statusUpdateInterval;
           let streamErrorTimeout = null;
 
-          function updateRecordButtonState() { /* ... same ... */
+          function updateRecordButtonState() {
               if (currentDigitalRecordState) {
                   btnRecord.textContent = "Stop Rec (Web)";
                   btnRecord.classList.remove('recording-inactive');
@@ -823,7 +822,8 @@ def index():
                   btnRecord.classList.remove('recording-active');
               }
           }
-          function updateStatus() { /* ... same ... */
+
+          function updateStatus() {
                if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
                fetch('/status')
                   .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
@@ -834,45 +834,68 @@ def index():
                       if (data.resolution && resolutionElement.textContent !== data.resolution) {
                           resolutionElement.textContent = data.resolution;
                           const [w, h] = data.resolution.split('x');
-                           if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) { streamImage.setAttribute('width', w); streamImage.setAttribute('height', h); }
+                           if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {
+                               streamImage.setAttribute('width', w);
+                               streamImage.setAttribute('height', h);
+                           }
                       }
                       if (data.error) { errorElement.textContent = data.error; errorElement.style.display = 'block'; }
                       else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
-                      if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) { currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); }
-                      if (data.battery_percent !== null && data.battery_percent !== undefined) { batteryLevelElement.textContent = data.battery_percent.toFixed(1); }
-                      else { batteryLevelElement.textContent = "--"; }
+                      if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {
+                           currentDigitalRecordState = data.digital_recording_active;
+                           updateRecordButtonState();
+                      }
+                      if (data.battery_percent !== null && data.battery_percent !== undefined) {
+                           batteryLevelElement.textContent = data.battery_percent.toFixed(1);
+                       } else {
+                           batteryLevelElement.textContent = "--";
+                       }
                   })
                   .catch(err => { console.error("Error fetching status:", err); statusElement.textContent = "Error fetching status"; errorElement.textContent = `Failed to fetch status: ${err.message}. Check server connection.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Unknown"; batteryLevelElement.textContent = "Err"; });
           }
-          function disableControls(poweringDown = false) { /* ... same ... */
+
+          function disableControls(poweringDown = false) {
               btnUp.disabled = true; btnDown.disabled = true; btnRecord.disabled = true; btnPowerdown.disabled = true;
               if(poweringDown) { document.body.style.opacity = '0.7'; }
           }
-          function enableControls() { /* ... same ... */
+
+          function enableControls() {
               if (!isPoweringDown) { btnUp.disabled = false; btnDown.disabled = false; btnRecord.disabled = false; btnPowerdown.disabled = false; document.body.style.opacity = '1'; }
           }
-          function changeResolution(direction) { /* ... same ... */
+
+          function changeResolution(direction) {
               if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
               isChangingResolution = true; disableControls(); statusElement.textContent = 'Changing resolution... Please wait.'; errorElement.textContent = ''; errorElement.style.display = 'none';
               fetch(`/set_resolution/${direction}`, { method: 'POST' })
                   .then(response => response.json().then(data => ({ status: response.status, body: data })))
                   .then(({ status, body }) => {
-                      if (status === 200 && body.success) { statusElement.textContent = 'Resolution change initiated. Stream will update.'; resolutionElement.textContent = body.new_resolution; const [w, h] = body.new_resolution.split('x'); streamImage.setAttribute('width', w); streamImage.setAttribute('height', h); console.log("Resolution change request sent..."); }
-                      else { errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed.'; isChangingResolution = false; enableControls(); updateStatus(); }
+                      if (status === 200 && body.success) {
+                          statusElement.textContent = 'Resolution change initiated. Stream will update.'; resolutionElement.textContent = body.new_resolution; const [w, h] = body.new_resolution.split('x'); streamImage.setAttribute('width', w); streamImage.setAttribute('height', h); console.log("Resolution change request sent...");
+                      } else {
+                          errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed.'; isChangingResolution = false; enableControls(); updateStatus();
+                      }
                   })
                   .catch(err => { console.error("Network error sending resolution change:", err); errorElement.textContent = `Network error changing resolution: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed (Network).'; isChangingResolution = false; enableControls(); updateStatus(); })
                   .finally(() => { if (isChangingResolution) { setTimeout(() => { if (isChangingResolution) { isChangingResolution = false; enableControls(); updateStatus(); } }, 7000); } });
           }
-          function toggleRecording() { /* ... same ... */
+
+          function toggleRecording() {
               if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
               isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
               fetch('/toggle_recording', { method: 'POST' })
                   .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
-                  .then(data => { if (data.success) { currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${currentDigitalRecordState ? 'enabled' : 'disabled'}. State updating...`; setTimeout(updateStatus, 1500); } else { errorElement.textContent = `Error toggling recording: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000); } })
+                  .then(data => {
+                      if (data.success) {
+                          currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${currentDigitalRecordState ? 'enabled' : 'disabled'}. State updating...`; setTimeout(updateStatus, 1500);
+                      } else {
+                          errorElement.textContent = `Error toggling recording: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000);
+                      }
+                   })
                   .catch(err => { console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); })
                   .finally(() => { isTogglingRecording = false; enableControls(); });
           }
-          function powerDown() { /* ... same ... */
+
+          function powerDown() {
               if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
               if (!confirm("Are you sure you want to power down the Raspberry Pi? This will stop the camera service and reboot.")) { return; }
               isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down... Signalling service to stop.'; errorElement.textContent = ''; errorElement.style.display = 'none';
@@ -882,16 +905,20 @@ def index():
                   .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; /* Backend handles reboot after cleanup */ } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); } })
                   .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); });
           }
-          function handleStreamError() { /* ... same ... */
-              console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => { streamImage.src = "{{ url_for('video_feed') }}?" + new Date().getTime(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }, 3000);
+
+          function handleStreamError() {
+              console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => { streamImage.src = "{{ url_for('video_feed') }}?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }, 3000);
           }
-          function handleStreamLoad() { /* ... same ... */
+
+          function handleStreamLoad() {
               if (streamErrorTimeout) { clearTimeout(streamErrorTimeout); streamErrorTimeout = null; if (!isPoweringDown) statusElement.textContent = 'Stream active.'; }
           }
-          document.addEventListener('DOMContentLoaded', () => { /* ... same ... */
+
+          document.addEventListener('DOMContentLoaded', () => {
               updateRecordButtonState(); updateStatus(); statusUpdateInterval = setInterval(() => { if (!isChangingResolution && !isTogglingRecording && !isPoweringDown) { updateStatus(); } }, 5000);
           });
-          window.addEventListener('beforeunload', () => { /* ... same ... */
+
+          window.addEventListener('beforeunload', () => {
               if (statusUpdateInterval) clearInterval(statusUpdateInterval);
           });
         </script>
@@ -910,54 +937,88 @@ def video_feed():
 
 @app.route("/status")
 def status():
-    # ... (Keep status function exactly the same) ...
     global last_error, digital_recording_active, is_recording, battery_percentage, config_lock
     global video_writers, recording_paths
+
     status_text = "Streaming"
     rec_stat_detail = ""
     current_w, current_h = get_current_resolution()
     batt_perc = None
     current_digital_state = False
+
     with config_lock:
         current_digital_state = digital_recording_active
         batt_perc = battery_percentage
         current_is_recording = is_recording
         current_recording_paths = list(recording_paths)
+
     if current_is_recording:
-        if current_recording_paths: rec_stat_detail = f" (Recording to {len(current_recording_paths)} USB(s))"
-        else: rec_stat_detail = " (ERROR: Recording active but no paths!)"; logging.warning("Status check found is_recording=True but recording_paths is empty."); last_error = last_error or "Inconsistent State: Recording active but no paths."
+        if current_recording_paths:
+             rec_stat_detail = f" (Recording to {len(current_recording_paths)} USB(s))"
+        else:
+             rec_stat_detail = " (ERROR: Recording active but no paths!)"
+             logging.warning("Status check found is_recording=True but recording_paths is empty.")
+             if not last_error: last_error = "Inconsistent State: Recording active but no paths."
         status_text += rec_stat_detail
+
     err_msg = last_error if last_error else ""
-    if output_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg): logging.info("Auto-clearing previous camera/capture error..."); last_error = None; err_msg = ""
-    if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg): logging.info("Auto-clearing previous battery monitor error..."); last_error = None; err_msg = ""
-    return jsonify({'is_recording': current_is_recording, 'digital_recording_active': current_digital_state, 'resolution': f"{current_w}x{current_h}", 'status_text': status_text, 'error': err_msg, 'active_recordings': current_recording_paths, 'battery_percent': batt_perc })
+
+    # Auto-clear errors logic
+    if output_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg):
+         logging.info("Auto-clearing previous camera/capture error as frames are being received.")
+         last_error = None; err_msg = ""
+    if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
+         logging.info("Auto-clearing previous battery monitor error as a reading was successful.")
+         last_error = None; err_msg = ""
+
+    return jsonify({
+        'is_recording': current_is_recording,
+        'digital_recording_active': current_digital_state,
+        'resolution': f"{current_w}x{current_h}",
+        'status_text': status_text,
+        'error': err_msg,
+        'active_recordings': current_recording_paths,
+        'battery_percent': batt_perc
+    })
 
 
 @app.route("/set_resolution/<direction>", methods=['POST'])
 def set_resolution(direction):
-    # ... (Keep set_resolution function exactly the same) ...
     global current_resolution_index, reconfigure_resolution_index, last_error, config_lock
     with config_lock:
-        if reconfigure_resolution_index is not None: return jsonify({'success': False, 'message': 'Reconfiguration already in progress.'}), 429
-        if not (0 <= current_resolution_index < len(SUPPORTED_RESOLUTIONS)): logging.error(f"Internal Error: Invalid current res index {current_resolution_index}!"); return jsonify({'success': False, 'message': 'Internal state error.'}), 500
-        original_index = current_resolution_index; new_index = current_resolution_index
+        if reconfigure_resolution_index is not None:
+            return jsonify({'success': False, 'message': 'Reconfiguration already in progress.'}), 429 # Too Many Requests
+        if not (0 <= current_resolution_index < len(SUPPORTED_RESOLUTIONS)):
+             logging.error(f"Internal Error: Invalid current resolution index {current_resolution_index} before change!")
+             return jsonify({'success': False, 'message': 'Internal state error: Invalid current resolution.'}), 500
+        original_index = current_resolution_index
+        new_index = current_resolution_index
         if direction == 'up': new_index += 1
         elif direction == 'down': new_index -= 1
-        else: return jsonify({'success': False, 'message': 'Invalid direction specified.'}), 400
+        else:
+            return jsonify({'success': False, 'message': 'Invalid direction specified.'}), 400
         new_index = max(0, min(len(SUPPORTED_RESOLUTIONS) - 1, new_index))
-        if new_index == original_index: msg = 'Already at highest resolution.' if direction == 'up' else 'Already at lowest resolution.'; return jsonify({'success': False, 'message': msg}), 400
-        new_w, new_h = SUPPORTED_RESOLUTIONS[new_index]; logging.info(f"Web request: change res index {original_index} -> {new_index} ({new_w}x{new_h})"); reconfigure_resolution_index = new_index; last_error = None
+        if new_index == original_index:
+            msg = 'Already at highest resolution.' if direction == 'up' else 'Already at lowest resolution.'
+            return jsonify({'success': False, 'message': msg}), 400
+        new_w, new_h = SUPPORTED_RESOLUTIONS[new_index]
+        logging.info(f"Web request: change resolution index {original_index} -> {new_index} ({new_w}x{new_h})")
+        reconfigure_resolution_index = new_index
+        last_error = None
         return jsonify({'success': True, 'message': 'Resolution change requested.', 'new_resolution': f"{new_w}x{new_h}"})
+
 
 @app.route('/toggle_recording', methods=['POST'])
 def toggle_recording():
-    # ... (Keep toggle_recording function exactly the same) ...
     global digital_recording_active, last_error, config_lock
     new_state = False
     with config_lock:
-        digital_recording_active = not digital_recording_active; new_state = digital_recording_active
+        digital_recording_active = not digital_recording_active
+        new_state = digital_recording_active
         logging.info(f"Digital recording trigger toggled via web UI to: {'ON' if new_state else 'OFF'}")
-        if last_error and ("Recording" in last_error or "writers" in last_error or "USB" in last_error or "sync" in last_error): logging.info(f"Clearing previous recording error: '{last_error}'"); last_error = None
+        if last_error and ("Recording" in last_error or "writers" in last_error or "USB" in last_error or "sync" in last_error):
+             logging.info(f"Clearing previous recording error: '{last_error}'")
+             last_error = None
     return jsonify({'success': True, 'digital_recording_active': new_state})
 
 
@@ -974,8 +1035,9 @@ def power_down():
     last_error = "Shutdown initiated via web UI..." # Update status
 
     # Set flags for the main thread
-    reboot_requested = True
-    shutdown_event.set()
+    with config_lock: # Ensure thread safety setting flag
+        reboot_requested = True
+    shutdown_event.set() # Signal all threads to stop
 
     # Return success immediately to the client
     # The actual reboot happens later in the main thread's cleanup phase
@@ -988,18 +1050,25 @@ def power_down():
 
 # --- Signal Handling ---
 def signal_handler(sig, frame):
-    global shutdown_event
+    global shutdown_event, reboot_requested # Access reboot flag
     if shutdown_event.is_set():
         logging.warning("Shutdown already in progress, ignoring additional signal.")
         return
     logging.warning(f"Received signal {sig}. Initiating graceful shutdown...")
-    shutdown_event.set() # Set event, but don't set reboot_requested for external signals
+    # reboot_requested = False # Ensure external signal doesn't trigger reboot
+    shutdown_event.set() # Set event
 
 
 # --- Main Execution (with Debug Logs and Final Commands Moved to End) ---
 def main():
     global last_error, capture_thread, flask_thread, picam2, shutdown_event, reboot_requested
     global AP_PROFILE_NAME # Access AP profile name for final commands
+
+    # IMPORTANT: sudoers configuration needed for power down!
+    # The user running this script (e.g., 'hecke') needs these lines via `sudo visudo`:
+    # hecke ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down PiCamAP
+    # hecke ALL=(ALL) NOPASSWD: /sbin/reboot
+    # Replace 'hecke' and 'PiCamAP' if necessary.
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -1010,8 +1079,10 @@ def main():
     logging.info(f"--- Recording to {USB_BASE_PATH} using {RECORDING_FORMAT}{RECORDING_EXTENSION} ---")
     logging.info(f"--- Web UI on port {WEB_PORT} ---")
     if USE_NOIR_TUNING: logging.info(f"--- Attempting to use NoIR Tuning: {NOIR_TUNING_FILE_PATH} ---")
-    if INA219_I2C_ADDRESS: logging.info(f"--- Battery Monitor Enabled (INA219 @ 0x{INA219_I2C_ADDRESS:X}) ---")
-    if SWITCH_GPIO_PIN: logging.info(f"--- Physical Record Switch Enabled (GPIO {SWITCH_GPIO_PIN}) ---")
+    if INA219_I2C_ADDRESS is not None: logging.info(f"--- Battery Monitor Enabled (INA219 @ 0x{INA219_I2C_ADDRESS:X}) ---")
+    else: logging.info("--- Battery Monitor Disabled ---")
+    if SWITCH_GPIO_PIN is not None: logging.info(f"--- Physical Record Switch Enabled (GPIO {SWITCH_GPIO_PIN}) ---")
+    else: logging.info("--- Physical Record Switch Disabled ---")
     # Updated log message for power down method
     logging.info(f"--- Power Down Method: Web UI sets flag, Main thread reboots ---")
     logging.info(f"--- Power Down AP Profile Deactivation: '{AP_PROFILE_NAME}' (if set) ---")
@@ -1031,7 +1102,7 @@ def main():
         last_error = None
         capture_thread = None
         flask_thread = None
-        # DO NOT reset reboot_requested here
+        # reboot_requested persists across restarts until handled or script exits
 
         # Pre-loop cleanup for picam2
         logging.info(f"MAIN: Checking picam2 pre-loop cleanup block (picam2 is {'set' if picam2 else 'None'})...")
@@ -1068,7 +1139,7 @@ def main():
             logging.info("Starting frame capture thread...")
             capture_thread = threading.Thread(target=capture_and_process_loop, name="CaptureThread", daemon=True)
             capture_thread.start()
-            time.sleep(4.0)
+            time.sleep(4.0) # Give capture thread time to init camera
             if not capture_thread.is_alive(): raise RuntimeError(f"Capture thread failed startup: {last_error or 'Unknown'}")
             if last_error and ("Init Error" in last_error or "failed fatally" in last_error): raise RuntimeError(f"Camera init failed: {last_error}")
             logging.info("Capture thread appears running.")
@@ -1077,7 +1148,7 @@ def main():
             logging.info(f"Starting Flask web server on 0.0.0.0:{WEB_PORT}...")
             flask_thread = threading.Thread(target=lambda: app.run(host='0.0.0.0', port=WEB_PORT, debug=False, use_reloader=False, threaded=True), name="FlaskThread", daemon=True)
             flask_thread.start()
-            time.sleep(1.5)
+            time.sleep(1.5) # Give flask time to start
             if not flask_thread.is_alive(): raise RuntimeError("Flask thread failed startup.")
 
             # System Running
@@ -1098,7 +1169,7 @@ def main():
 
             logging.info("MAIN: Exited inner monitoring loop (shutdown_event received).")
             # Outer loop condition 'while not shutdown_event.is_set()' is now false
-            # No 'break' needed here
+            # No 'break' needed here, loop condition handles it.
 
         # Exception handling for setup/runtime errors
         except RuntimeError as e:
@@ -1107,7 +1178,7 @@ def main():
             shutdown_event.set() # Signal threads if possible
             if capture_thread and capture_thread.is_alive(): capture_thread.join(timeout=3.0)
             shutdown_event.clear(); # Reset flags for restart
-            # reboot_requested = False # Reset reboot flag on generic restart
+            # Keep reboot_requested flag if set before error
             time.sleep(10.0)
             # Continue to next iteration of outer while loop for restart
         except Exception as e:
@@ -1116,7 +1187,7 @@ def main():
             shutdown_event.set();
             if capture_thread and capture_thread.is_alive(): capture_thread.join(timeout=3.0)
             shutdown_event.clear(); # Reset flags for restart
-            # reboot_requested = False # Reset reboot flag on generic restart
+            # Keep reboot_requested flag if set before error
             time.sleep(10.0)
             # Continue to next iteration of outer while loop for restart
 
@@ -1125,17 +1196,17 @@ def main():
     logging.info("--- Shutdown initiated ---")
     # shutdown_event is already set
 
-    # Wait for capture thread (handles its own cleanup)
+    # Wait for capture thread (handles its own cleanup including sync)
     if capture_thread and capture_thread.is_alive():
         logging.info("Waiting for capture thread to exit...")
-        capture_thread.join(timeout=10.0) # Give it a reasonable fixed time (e.g., 10s)
+        capture_thread.join(timeout=15.0) # Give it ample time (adjust if sync takes longer)
         if capture_thread.is_alive(): logging.warning("Capture thread did not exit cleanly within timeout.")
         else: logging.info("Capture thread finished.")
 
     # Flask thread is daemon, will exit automatically when main thread exits.
 
-    # Ensure recording stopped / camera closed (belt-and-braces)
-    if is_recording: logging.warning("Force stopping recording during final shutdown."); stop_recording() # Includes sync
+    # Ensure recording stopped / camera closed (belt-and-braces, capture thread should handle)
+    if is_recording: logging.warning("Force stopping recording during final shutdown (should already be stopped)."); stop_recording() # Includes sync
     if picam2:
         try:
             logging.info("Ensuring Picamera2 closed...");
@@ -1148,41 +1219,60 @@ def main():
     if SWITCH_GPIO_PIN is not None: cleanup_gpio()
 
     # --- Execute final commands IF reboot was requested from web UI ---
-    logging.info(f"MAIN: Checking if reboot was requested: {reboot_requested}")
-    if reboot_requested:
+    # Read flag safely (though not strictly necessary here as threads should be stopped)
+    with config_lock:
+        reboot_flag = reboot_requested
+
+    logging.info(f"MAIN: Checking if reboot was requested: {reboot_flag}")
+    if reboot_flag:
+        # IMPORTANT: Requires passwordless sudo for the user running this script:
+        # Replace 'your_username' and 'PiCamAP' (use value of AP_PROFILE_NAME)
+        # your_username ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down PiCamAP
+        # your_username ALL=(ALL) NOPASSWD: /sbin/reboot
         logging.warning("Reboot requested via web UI. Executing final commands...")
 
         # Step 1 (Optional): Deactivate AP
         if AP_PROFILE_NAME:
-            # Requires sudoers: your_username ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down YourAPProfileName
             ap_deactivate_command = ["sudo", "/usr/bin/nmcli", "connection", "down", AP_PROFILE_NAME]
             logging.info(f"MAIN: Attempting final AP deactivation: {' '.join(ap_deactivate_command)}")
             try:
-                # Run the command, don't require success, capture output
-                result = subprocess.run(ap_deactivate_command, check=False, capture_output=True, text=True, timeout=5)
-                if result.returncode == 0: logging.info("MAIN: AP profile deactivated.")
-                else: logging.warning(f"MAIN: nmcli connection down failed (Code {result.returncode}): {result.stderr.strip()}")
-            except Exception as e: logging.warning(f"MAIN: Error during final AP deactivation: {e}", exc_info=True)
+                # Run command, wait for it (short timeout), check result
+                # Using subprocess.run ensures we wait for nmcli
+                result = subprocess.run(ap_deactivate_command, check=False, capture_output=True, text=True, timeout=7) # Waits up to 7s
+                if result.returncode == 0:
+                    logging.info("MAIN: AP profile deactivated successfully (or was inactive).")
+                    # Add a small delay ONLY if nmcli succeeded, to allow network stack time
+                    logging.info("MAIN: Short pause (2s) after AP deactivation...")
+                    time.sleep(2)
+                else:
+                    # Log nmcli failure details
+                    logging.warning(f"MAIN: nmcli connection down failed (Code {result.returncode}). Stderr: {result.stderr.strip()}")
+                    # Don't add delay if it failed
+            except subprocess.TimeoutExpired:
+                 logging.warning("MAIN: Timeout trying to deactivate AP profile. Continuing...")
+            except Exception as e:
+                 # Log any other errors during nmcli execution
+                 logging.warning(f"MAIN: Error during final AP deactivation: {e}", exc_info=True)
         else:
             logging.info("MAIN: AP_PROFILE_NAME not set, skipping final AP deactivation.")
 
         # Step 2: Reboot
-        # Requires sudoers: your_username ALL=(ALL) NOPASSWD: /sbin/reboot
         reboot_command = ["sudo", "/sbin/reboot"]
         logging.info(f"MAIN: Executing reboot command: {' '.join(reboot_command)}")
         try:
             subprocess.Popen(reboot_command) # Fire and forget reboot command
             logging.warning("MAIN: Reboot command issued. Script will now exit.")
             # Give reboot command a moment to process before script fully exits
-            time.sleep(2)
+            time.sleep(3) # Slightly longer pause before Python process ends
         except Exception as e:
             logging.critical(f"!!! MAIN: FAILED TO EXECUTE REBOOT COMMAND: {e}", exc_info=True)
             last_error = f"Final Reboot Failed: {e}" # Set error state just before exit
 
     # Only log Program Exit if reboot wasn't issued (or failed)
-    if not reboot_requested:
+    if not reboot_flag:
         logging.info("--- Program Exit (Shutdown Complete) ---")
     else:
+         # This might not always be logged if reboot is fast
          logging.info("--- Program Exit (Rebooting) ---")
 
 
