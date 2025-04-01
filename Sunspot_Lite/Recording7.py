@@ -25,19 +25,20 @@ SUPPORTED_RESOLUTIONS = [
 ]
 DEFAULT_RESOLUTION_INDEX = 1
 FRAME_RATE = 30
-SWITCH_GPIO_PIN = 17
+SWITCH_GPIO_PIN = 17            # Set to None to disable
 SWITCH_BOUNCE_TIME = 0.1
-USB_BASE_PATH = "/media/hecke/" # <<< CHANGE this if your mount point base is different
+USB_BASE_PATH = "/media/hecke/" # CHANGE this if your mount point base is different
 RECORDING_FORMAT = "mp4v"
 RECORDING_EXTENSION = ".mp4"
 WEB_PORT = 8000
 USE_NOIR_TUNING = True
 NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json"
-INA219_I2C_ADDRESS = 0x41 # <<< CHANGE THIS if your sensor address is different
+INA219_I2C_ADDRESS = 0x41       # Set to None to disable
 BATTERY_READ_INTERVAL = 30.0
-BATTERY_MAX_VOLTAGE = 12.6 # Voltage when fully charged (e.g., 3S LiPo)
-BATTERY_MIN_VOLTAGE = 9.0  # Voltage when empty (e.g., 3S LiPo cut-off)
-SHUTDOWN_WAIT_SECONDS = 15 # Time (seconds) to wait after signaling stop before rebooting
+BATTERY_MAX_VOLTAGE = 12.6      # Voltage when fully charged (e.g., 3S LiPo)
+BATTERY_MIN_VOLTAGE = 9.0       # Voltage when empty (e.g., 3S LiPo cut-off)
+SHUTDOWN_WAIT_SECONDS = 15      # Time (seconds) to wait after signaling stop before rebooting
+AP_PROFILE_NAME = "PiCamAP"     # NetworkManager profile name for the AP (used in power_down)
 
 # --- Global Variables ---
 app = Flask(__name__)
@@ -246,7 +247,7 @@ def read_battery_level():
         bus_voltage = ina219_sensor.getBusVoltage_V()
         voltage_range = BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE
         if voltage_range <= 0:
-             logging.warning("Battery min/max voltages invalid (max <= min). Cannot calculate percentage.")
+             # logging.warning("Battery min/max voltages invalid (max <= min). Cannot calculate percentage.") # Reduce log spam
              percent = None
         else:
             percent = ((bus_voltage - BATTERY_MIN_VOLTAGE) / voltage_range) * 100.0
@@ -256,6 +257,8 @@ def read_battery_level():
             battery_percentage = percent
 
     except OSError as e:
+        # Log less verbosely on I2C errors after first occurrence?
+        # For now, log every time.
         logging.error(f"!!! I2C Error reading INA219 sensor: {e}")
         with config_lock:
             battery_percentage = None
@@ -320,23 +323,22 @@ def initialize_camera(target_width, target_height):
                 "FrameRate": float(FRAME_RATE),
                 "AwbEnable": True,
                 "AwbMode": controls.AwbModeEnum.Auto,
-                "NoiseReductionMode": controls.NoiseReductionModeEnum.Fast, # <-- Re-enabled this based on log output showing it worked
+                "NoiseReductionMode": controls.NoiseReductionModeEnum.Fast,
                 "Brightness": 0.0,
                 "Contrast": 1.0,
                 "Saturation": 1.0,
             }
         )
         logging.info(f"Configuring Picamera2 with: {config}")
-        # Log adjustment message only if configure modifies the config dict
         original_config_str = str(config)
         picam2.configure(config)
         new_config_str = str(picam2.camera_configuration()) # Use actual applied config
         if original_config_str != new_config_str:
-             logging.info("Camera configuration may have been adjusted by the driver.") # More general message
-        logging.info("Configuration successful!") # Log this regardless
+             logging.info("Camera configuration may have been adjusted by the driver.")
+        logging.info("Configuration successful!")
 
         picam2.start()
-        logging.info("Camera started") # Keep both 'Camera started' logs if desired
+        logging.info("Camera started")
         time.sleep(2.0)
 
         actual_config = picam2.camera_configuration()
@@ -727,7 +729,7 @@ def generate_stream_frames():
     logging.info("Stream generator thread exiting.")
 
 
-# --- MODIFIED index() function with Jinja raw block ---
+# --- index() function with Jinja raw block fix ---
 @app.route("/")
 def index():
     global last_error, digital_recording_active, battery_percentage, config_lock
@@ -1011,7 +1013,7 @@ def index():
                   });
           }
 
-          // --- NEW Power Down Function ---
+          // --- Power Down Function (using Option 1 logic) ---
           function powerDown() {
               if (isChangingResolution || isTogglingRecording || isPoweringDown) return; // Prevent overlap
 
@@ -1047,7 +1049,7 @@ def index():
                           statusElement.textContent = 'Reboot command sent. Connection will be lost.';
                           // No need to re-enable controls here
                       } else {
-                          // This case might happen if toggle.sh fails but reboot isn't reached
+                          // This case might happen if nmcli fails but reboot isn't reached, or reboot fails
                           errorElement.textContent = `Power down command failed: ${data.message || 'Unknown server error.'}`;
                           errorElement.style.display = 'block';
                           statusElement.textContent = 'Power down failed.';
@@ -1058,7 +1060,7 @@ def index():
                   .catch(err => {
                       // Network errors are expected if reboot happens quickly
                       // But log other potential errors
-                      if (err.name !== 'TypeError') { // TypeError often means connection closed
+                      if (err.name !== 'TypeError') { // TypeError often means connection closed due to reboot
                         console.error("Error sending power down command:", err);
                         errorElement.textContent = `Error during power down: ${err.message}. Manual reboot may be required.`;
                         errorElement.style.display = 'block';
@@ -1128,6 +1130,7 @@ def index():
 @app.route("/video_feed")
 def video_feed():
     logging.info("Client connected to video feed.")
+    # Ensure generate_stream_frames is defined correctly elsewhere
     return Response(generate_stream_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -1167,6 +1170,10 @@ def status():
     if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
          logging.info("Auto-clearing previous battery monitor error as a reading was successful.")
          last_error = None; err_msg = ""
+
+    # Don't auto-clear power down errors from status
+    # if err_msg and "Power Down Failed" in err_msg:
+    #    last_error = None; err_msg = ""
 
     return jsonify({
         'is_recording': current_is_recording,
@@ -1234,100 +1241,81 @@ def toggle_recording():
     return jsonify({'success': True, 'digital_recording_active': new_state})
 
 
-# --- Power Down Route (with dynamic path) ---
+# --- MODIFIED Power Down Route (Option 1 - Manual Signal) ---
 @app.route('/power_down', methods=['POST'])
 def power_down():
     """
-    Handles the power down request. Dynamically finds toggle.sh.
-    Assumes 'sudo ./toggle.sh disable' sends SIGINT/SIGTERM to this service.
-    Waits for cleanup, then initiates reboot.
-    Requires passwordless sudo configuration for the specific toggle.sh script and reboot.
+    Handles the power down request. Manually signals shutdown, waits,
+    optionally deactivates AP, then reboots.
+    Requires passwordless sudo configuration for nmcli and reboot.
     """
-    global shutdown_event, last_error
+    global shutdown_event, last_error, AP_PROFILE_NAME # Access profile name
 
-    logging.warning("Received request for power down via web UI.")
-    last_error = "Power down initiated..." # Update status for any remaining status checks
+    # Add comment explaining required sudoers config for this route
+    # IMPORTANT: Requires passwordless sudo for the user running this script:
+    # Replace 'your_username' and 'YourAPProfileName'
+    # your_username ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down YourAPProfileName
+    # your_username ALL=(ALL) NOPASSWD: /sbin/reboot
 
-    # --- Step 0: Determine the path to toggle.sh dynamically ---
-    try:
-        # Get the directory where this Python script is located
-        # __file__ is the path to the current script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        # Construct the full path to toggle.sh within that directory
-        toggle_script_full_path = os.path.join(script_dir, "toggle.sh")
-        logging.info(f"Dynamically determined toggle script path: {toggle_script_full_path}")
+    logging.warning("Received request for power down via web UI (Manual Signal Method).")
+    last_error = "Power down initiated..." # Update status immediately
 
-        # Check if the script actually exists before trying to run it
-        if not os.path.isfile(toggle_script_full_path):
-            logging.error(f"!!! POWER DOWN FAILED: Toggle script not found at determined path: {toggle_script_full_path}")
-            last_error = "Power Down Failed: toggle.sh not found in script directory."
-            return jsonify({'success': False, 'message': f"toggle.sh not found at {toggle_script_full_path}"}), 404 # Not Found
+    # --- Step 1: Signal the script's own threads to shut down ---
+    logging.info("Setting shutdown_event to trigger graceful exit...")
+    shutdown_event.set() # Signal capture thread etc. to stop
 
-    except Exception as e:
-        logging.error(f"!!! POWER DOWN FAILED: Could not determine toggle script path: {e}", exc_info=True)
-        last_error = "Power Down Failed: Error finding toggle.sh path."
-        return jsonify({'success': False, 'message': f"Error determining toggle script path: {e}"}), 500
+    # --- Step 2: Wait for Graceful Shutdown ---
+    # Allows time for stop_recording() including os.system('sync')
+    logging.warning(f"Waiting {SHUTDOWN_WAIT_SECONDS} seconds for service cleanup before network changes/reboot...")
+    time.sleep(SHUTDOWN_WAIT_SECONDS)
+    logging.info("Wait finished. Proceeding with network deactivation and reboot.")
 
-    # --- Step 1: Signal the service to stop using toggle.sh ---
-    # Use the dynamically determined absolute path
-    # !! User MUST configure sudoers for this *specific absolute path* !!
-    toggle_command = ["sudo", toggle_script_full_path, "disable"]
-    logging.info(f"Executing command: {' '.join(toggle_command)}")
-    try:
-        # Using subprocess.run to execute the command
-        result = subprocess.run(toggle_command, check=True, capture_output=True, text=True, timeout=10)
-        logging.info(f"Toggle script ({toggle_script_full_path} disable) executed successfully.")
-        logging.debug(f"Toggle script stdout:\n{result.stdout}")
-        logging.debug(f"Toggle script stderr:\n{result.stderr}")
-
-        # --- Step 2: Wait for Graceful Shutdown ---
-        # Allows time for stop_recording() including os.system('sync')
-        logging.warning(f"Waiting {SHUTDOWN_WAIT_SECONDS} seconds for service cleanup before reboot...")
-        time.sleep(SHUTDOWN_WAIT_SECONDS)
-
-        # --- Step 3: Initiate Reboot ---
-        reboot_command = ["sudo", "/sbin/reboot"] # Use full path for reboot
-        logging.info(f"Executing command: {' '.join(reboot_command)}")
+    # --- Step 3 (Optional): Deactivate AP ---
+    # This might help clean up, but reboot will kill it anyway.
+    # Check if AP_PROFILE_NAME is set
+    if AP_PROFILE_NAME:
+        # Requires sudoers: your_username ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down YourAPProfileName
+        ap_deactivate_command = ["sudo", "/usr/bin/nmcli", "connection", "down", AP_PROFILE_NAME]
+        logging.info(f"Attempting to deactivate AP: {' '.join(ap_deactivate_command)}")
         try:
-            # Use Popen for reboot as we don't wait for it to finish
-            subprocess.Popen(reboot_command)
-            logging.warning("Reboot command issued.")
-            # Return success, though client may not receive it
-            return jsonify({'success': True, 'message': 'Reboot initiated.'})
-
+            # Use subprocess.run, but don't require success (check=False)
+            # Capture output to see potential errors from nmcli
+            result = subprocess.run(ap_deactivate_command, check=False, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                logging.info(f"AP profile '{AP_PROFILE_NAME}' deactivated successfully (or was inactive).")
+            else:
+                # Log warning but continue to reboot
+                logging.warning(f"nmcli connection down {AP_PROFILE_NAME} failed (Code {result.returncode}). Continuing with reboot.")
+                logging.warning(f"nmcli stderr: {result.stderr.strip()}")
         except FileNotFoundError:
-            logging.critical("!!! FAILED TO EXECUTE REBOOT: '/sbin/reboot' command not found.")
-            last_error = "Power Down Failed: Reboot command not found."
-            return jsonify({'success': False, 'message': "Reboot command not found."}), 500
+            logging.warning(f"Could not run nmcli command (not found?). Skipping AP deactivation.")
+        except subprocess.TimeoutExpired:
+            logging.warning(f"Timeout trying to deactivate AP profile. Continuing with reboot.")
         except Exception as e:
-            logging.critical(f"!!! FAILED TO EXECUTE REBOOT: {e}", exc_info=True)
-            last_error = f"Power Down Failed: Error executing reboot: {e}"
-            return jsonify({'success': False, 'message': f"Error executing reboot command: {e}"}), 500
+            logging.warning(f"Error trying to deactivate AP profile: {e}. Continuing with reboot.", exc_info=True)
+    else:
+        logging.info("AP_PROFILE_NAME not set, skipping AP deactivation.")
 
-    # Error handling specifically for the toggle script execution
+
+    # --- Step 4: Initiate Reboot ---
+    reboot_command = ["sudo", "/sbin/reboot"]
+    logging.info(f"Executing command: {' '.join(reboot_command)}")
+    try:
+        # Use Popen for reboot as we don't wait for it to finish and connection will drop
+        subprocess.Popen(reboot_command)
+        logging.warning("Reboot command issued.")
+        # Return success, though client may not receive it
+        return jsonify({'success': True, 'message': 'Reboot initiated.'})
+
     except FileNotFoundError:
-        # This case might happen if 'sudo' isn't found, or if the script vanishes between check and run
-        logging.error(f"!!! FAILED TO EXECUTE TOGGLE COMMAND: 'sudo' or '{toggle_script_full_path}' not found.")
-        last_error = f"Power Down Failed: Sudo or toggle script not found."
-        return jsonify({'success': False, 'message': f"sudo or toggle script not found."}), 500
-    except subprocess.CalledProcessError as e:
-        # This means the script ran but returned a non-zero exit code
-        logging.error(f"!!! TOGGLE SCRIPT FAILED (Exit Code {e.returncode}): {toggle_script_full_path} disable")
-        logging.error(f"Toggle script stdout:\n{e.stdout}")
-        logging.error(f"Toggle script stderr:\n{e.stderr}")
-        last_error = f"Power Down Failed: Toggle script returned error {e.returncode}."
-        # Still attempt reboot? Or stop? Let's stop here to allow debugging.
-        return jsonify({'success': False, 'message': f"Toggle script failed with code {e.returncode}. Reboot aborted. Check logs."}), 500
-    except subprocess.TimeoutExpired:
-        logging.error(f"!!! TIMEOUT executing toggle script: {toggle_script_full_path} disable")
-        last_error = "Power Down Failed: Timeout executing toggle script."
-        # If the script timed out, stopping the service might be incomplete. Abort reboot.
-        return jsonify({'success': False, 'message': "Timeout executing toggle script. Reboot aborted."}), 500
+        logging.critical("!!! FAILED TO EXECUTE REBOOT: '/sbin/reboot' command not found.")
+        last_error = "Power Down Failed: Reboot command not found."
+        return jsonify({'success': False, 'message': "Reboot command not found."}), 500
     except Exception as e:
-        # Catch other potential errors like permission denied if sudoers isn't right
-        logging.error(f"!!! FAILED TO EXECUTE TOGGLE SCRIPT: {e}", exc_info=True)
-        last_error = f"Power Down Failed: Error executing toggle script: {e}"
-        return jsonify({'success': False, 'message': f"Error executing toggle script: {e}. Check permissions/sudoers."}), 500
+        # Catch potential permission errors if sudoers isn't right for reboot
+        logging.critical(f"!!! FAILED TO EXECUTE REBOOT: {e}", exc_info=True)
+        last_error = f"Power Down Failed: Error executing reboot: {e}"
+        return jsonify({'success': False, 'message': f"Error executing reboot command: {e}"}), 500
 
 
 # ===========================================================
@@ -1343,7 +1331,7 @@ def signal_handler(sig, frame):
     logging.warning(f"Received signal {sig}. Initiating graceful shutdown...")
     shutdown_event.set()
 
-# --- Main Execution ---
+# --- Main Execution (with Debug Logs) ---
 def main():
     global last_error, capture_thread, flask_thread, picam2, shutdown_event
 
@@ -1358,27 +1346,60 @@ def main():
     if USE_NOIR_TUNING: logging.info(f"--- Attempting to use NoIR Tuning: {NOIR_TUNING_FILE_PATH} ---")
     if INA219_I2C_ADDRESS: logging.info(f"--- Battery Monitor Enabled (INA219 @ 0x{INA219_I2C_ADDRESS:X}) ---")
     if SWITCH_GPIO_PIN: logging.info(f"--- Physical Record Switch Enabled (GPIO {SWITCH_GPIO_PIN}) ---")
-    # Updated log message for dynamic path finding
-    logging.info(f"--- Power Down will look for toggle.sh in script directory ---")
-    logging.info(f"--- Power Down wait time: {SHUTDOWN_WAIT_SECONDS} seconds ---")
+    # Removed log about toggle.sh path
+    logging.info(f"--- Power Down Method: Manual Signal + Wait ({SHUTDOWN_WAIT_SECONDS}s) + Reboot ---")
+    logging.info(f"--- Power Down AP Profile Deactivation: '{AP_PROFILE_NAME}' (if set) ---")
 
+
+    # --- ADDED DEBUG LOG ---
+    logging.info(f"MAIN: Initial shutdown_event state: {shutdown_event.is_set()}")
+
+    run_counter = 0 # Counter for loop iterations
 
     while not shutdown_event.is_set():
-        last_error = None; capture_thread = None; flask_thread = None
-        if picam2:
-            try:
-                if picam2.started: picam2.stop()
-                picam2.close()
-            except Exception: pass
-            picam2 = None
+        run_counter += 1
+        # --- ADDED DEBUG LOG ---
+        logging.info(f"MAIN: Entering main while loop (Iteration {run_counter})...")
 
+        # Reset state variables for this run attempt
+        last_error = None
+        capture_thread = None
+        flask_thread = None
+
+        # --- Pre-loop cleanup ---
+        # --- ADDED DEBUG LOG ---
+        logging.info(f"MAIN: Checking picam2 pre-loop cleanup block (picam2 is {'set' if picam2 else 'None'})...")
+        if picam2:
+            logging.warning("MAIN: Found existing picam2 object - attempting cleanup.")
+            try:
+                if picam2.started:
+                    logging.info("MAIN: Stopping existing picam2...")
+                    picam2.stop()
+                    logging.info("MAIN: Existing picam2 stopped.")
+                logging.info("MAIN: Closing existing picam2...")
+                picam2.close()
+                logging.info("MAIN: Existing picam2 closed.")
+            except Exception as e:
+                 logging.error(f"MAIN: Error during picam2 pre-loop cleanup: {e}", exc_info=True)
+            finally:
+                 picam2 = None # Ensure it's cleared
+                 logging.info("MAIN: picam2 object cleared after cleanup attempt.")
+        # --- ADDED DEBUG LOG ---
+        logging.info("MAIN: Finished picam2 pre-loop cleanup block.")
+
+        # --- Start of main try block ---
         try:
-            logging.info("Initializing Hardware Components...")
-            if SWITCH_GPIO_PIN:
+            # --- ADDED DEBUG LOG ---
+            logging.info("MAIN: Entering main setup try block...")
+
+            # --- Initialize Hardware ---
+            logging.info("Initializing Hardware Components...") # <--- Point previously not reached
+
+            if SWITCH_GPIO_PIN is not None: # Check if pin is configured
                 if not setup_gpio(): logging.error(f"GPIO setup failed: {last_error}. Physical switch will be unavailable.")
             else: logging.info("Physical switch disabled (SWITCH_GPIO_PIN not set).")
 
-            if INA219_I2C_ADDRESS:
+            if INA219_I2C_ADDRESS is not None: # Check if address is configured
                 if not setup_battery_monitor(): logging.warning(f"Battery monitor setup failed: {last_error}. Battery level will be unavailable.")
             else: logging.info("Battery monitor disabled (INA219_I2C_ADDRESS not set).")
 
@@ -1408,17 +1429,27 @@ def main():
                 # Attempt to find local IP for user convenience
                 import socket
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80)); local_ip = s.getsockname()[0]; s.close()
+                # Connect to a known external address to determine the outbound IP
+                s.connect(("8.8.8.8", 80));
+                local_ip = s.getsockname()[0]
+                s.close()
                 logging.info(f"Access web interface at: http://{local_ip}:{WEB_PORT} (or use Pi's IP/hostname)")
-            except Exception:
+            except Exception as ip_e:
+                logging.warning(f"Could not determine local IP: {ip_e}")
                 logging.info(f"Access web interface at: http://<YOUR_PI_IP>:{WEB_PORT}")
 
             # Main monitoring loop
+            logging.info("MAIN: Entering inner monitoring loop...") # <-- ADDED DEBUG LOG
             while not shutdown_event.is_set():
                 if not capture_thread.is_alive(): raise RuntimeError(last_error or "Capture thread terminated unexpectedly.")
                 if not flask_thread.is_alive(): raise RuntimeError(last_error or "Flask web server thread terminated unexpectedly.")
+                # --- ADDED DEBUG LOG ---
+                # logging.debug("MAIN: Inner loop wait...") # Can be too verbose
                 shutdown_event.wait(timeout=5.0) # Wait for shutdown or check threads every 5s
-            break # Exit outer loop if shutdown_event set cleanly
+
+            # --- ADDED DEBUG LOG ---
+            logging.info("MAIN: Exited inner monitoring loop.")
+            break # Exit outer while loop if shutdown_event set cleanly
 
         except RuntimeError as e:
             logging.error(f"!!! Runtime Error in Main Loop: {e}")
@@ -1458,7 +1489,7 @@ def main():
             picam2.close()
             logging.info("Picamera2 closed.")
         except Exception as e: logging.warning(f"Error during final Picamera2 close: {e}")
-    if SWITCH_GPIO_PIN: cleanup_gpio() # Cleanup GPIO
+    if SWITCH_GPIO_PIN is not None: cleanup_gpio() # Cleanup GPIO if enabled
     logging.info("--- Program Exit ---")
 
 if __name__ == '__main__':
