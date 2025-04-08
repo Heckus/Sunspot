@@ -703,7 +703,7 @@ def generate_stream_frames():
             continue
 
         try:
-            (flag, encodedImage) = cv2.imencode(".jpg", frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            (flag, encodedImage) = cv2.imencode(".jpg", frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if not flag:
                 logging.warning("Stream generator: Could not encode frame to JPEG.")
                 time.sleep(0.1)
