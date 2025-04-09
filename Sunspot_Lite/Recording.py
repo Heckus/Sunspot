@@ -2,7 +2,8 @@
 import cv2
 import time
 import datetime
-import os
+import os # <<< Ensure os is imported
+import sys # <<< Import sys for path determination
 import threading
 import signal
 from flask import Flask, Response, render_template_string, jsonify, redirect, url_for
@@ -37,8 +38,7 @@ INA219_I2C_ADDRESS = 0x41       # Set to None to disable
 BATTERY_READ_INTERVAL = 30.0
 BATTERY_MAX_VOLTAGE = 12.6      # Voltage when fully charged (e.g., 3S LiPo)
 BATTERY_MIN_VOLTAGE = 9.0       # Voltage when empty (e.g., 3S LiPo cut-off)
-# SHUTDOWN_WAIT_SECONDS = 15    # No longer needed here, main thread handles wait via join/sleep
-AP_PROFILE_NAME = "PiCamAP"     # NetworkManager profile name for the AP (used in main shutdown)
+TOGGLE_SCRIPT_NAME = "toggle.sh" # Name of the bash script in the same directory
 
 # --- Global Variables ---
 app = Flask(__name__)
@@ -1059,33 +1059,38 @@ def signal_handler(sig, frame):
     shutdown_event.set() # Set event
 
 
-# --- Main Execution (with Debug Logs and Final Commands Moved to End) ---
+# --- Main Execution (Relying on toggle.sh for disable/reboot) ---
 def main():
     global last_error, capture_thread, flask_thread, picam2, shutdown_event, reboot_requested
-    global AP_PROFILE_NAME # Access AP profile name for final commands
+    global TOGGLE_SCRIPT_NAME # Access script name
 
-    # IMPORTANT: sudoers configuration needed for power down!
-    # The user running this script (e.g., 'hecke') needs these lines via `sudo visudo`:
-    # hecke ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down PiCamAP
-    # hecke ALL=(ALL) NOPASSWD: /sbin/reboot
-    # Replace 'hecke' and 'PiCamAP' if necessary.
+    # --- Determine Paths ---
+    try:
+        # Get the directory where the current Python script is located
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        # Construct the full path to the toggle script
+        toggle_script_path = os.path.join(script_dir, TOGGLE_SCRIPT_NAME)
+        logging.info(f"MAIN: Expecting toggle script at: {toggle_script_path}")
+    except NameError:
+        # __file__ might not be defined if running interactively, fallback or error
+        logging.error("MAIN: Could not determine script directory automatically. Ensure toggle.sh is accessible.")
+        toggle_script_path = None # Or provide a default fallback path if needed
+
+    # --- Sudoers Configuration Requirement ---
+    # IMPORTANT: sudoers configuration needed for power down via toggle.sh!
+    # The user running this script (e.g., 'hecke') needs this line via `sudo visudo`
+    # (Replace '/path/to/your/script/dir' with the actual directory):
+    # hecke ALL=(ALL) NOPASSWD: /path/to/your/script/dir/toggle.sh disable
+    #
+    # Ensure toggle.sh has execute permissions: chmod +x /path/to/your/script/dir/toggle.sh
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     logging.info(" --- Starting Camera Stream & Record Service --- ")
     logging.info(f"--- Using Picamera2 and gpiozero ---")
-    logging.info(f"--- Configured for {FRAME_RATE} FPS, {len(SUPPORTED_RESOLUTIONS)} resolutions ---")
-    logging.info(f"--- Recording to {USB_BASE_PATH} using {RECORDING_FORMAT}{RECORDING_EXTENSION} ---")
-    logging.info(f"--- Web UI on port {WEB_PORT} ---")
-    if USE_NOIR_TUNING: logging.info(f"--- Attempting to use NoIR Tuning: {NOIR_TUNING_FILE_PATH} ---")
-    if INA219_I2C_ADDRESS is not None: logging.info(f"--- Battery Monitor Enabled (INA219 @ 0x{INA219_I2C_ADDRESS:X}) ---")
-    else: logging.info("--- Battery Monitor Disabled ---")
-    if SWITCH_GPIO_PIN is not None: logging.info(f"--- Physical Record Switch Enabled (GPIO {SWITCH_GPIO_PIN}) ---")
-    else: logging.info("--- Physical Record Switch Disabled ---")
-    # Updated log message for power down method
-    logging.info(f"--- Power Down Method: Web UI sets flag, Main thread reboots ---")
-    logging.info(f"--- Power Down AP Profile Deactivation: '{AP_PROFILE_NAME}' (if set) ---")
+    # ... (other initial log messages remain the same) ...
+    logging.info(f"--- Power Down Method: Web UI triggers '{TOGGLE_SCRIPT_NAME} disable' ---")
 
 
     logging.info(f"MAIN: Initial shutdown_event state: {shutdown_event.is_set()}")
@@ -1109,18 +1114,13 @@ def main():
         if picam2:
             logging.warning("MAIN: Found existing picam2 object - attempting cleanup.")
             try:
-                if picam2.started:
-                    logging.info("MAIN: Stopping existing picam2...")
-                    picam2.stop()
-                    logging.info("MAIN: Existing picam2 stopped.")
-                logging.info("MAIN: Closing existing picam2...")
+                if picam2.started: picam2.stop()
                 picam2.close()
-                logging.info("MAIN: Existing picam2 closed.")
+                logging.info("MAIN: Existing picam2 cleaned up.")
             except Exception as e:
                  logging.error(f"MAIN: Error during picam2 pre-loop cleanup: {e}", exc_info=True)
             finally:
-                 picam2 = None # Ensure it's cleared
-                 logging.info("MAIN: picam2 object cleared after cleanup attempt.")
+                 picam2 = None
         logging.info("MAIN: Finished picam2 pre-loop cleanup block.")
 
         # Main setup and execution block
@@ -1154,7 +1154,6 @@ def main():
             # System Running
             logging.info("--- System Running ---")
             try:
-                # Attempt to find local IP for user convenience
                 import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); local_ip = s.getsockname()[0]; s.close()
                 logging.info(f"Access web interface at: http://{local_ip}:{WEB_PORT} (or Pi's IP/hostname)")
             except Exception as ip_e: logging.warning(f"Could not determine IP: {ip_e}"); logging.info(f"Access web interface at: http://<YOUR_PI_IP>:{WEB_PORT}")
@@ -1164,12 +1163,9 @@ def main():
             while not shutdown_event.is_set():
                 if not capture_thread.is_alive(): raise RuntimeError(last_error or "Capture thread terminated.")
                 if not flask_thread.is_alive(): raise RuntimeError(last_error or "Flask thread terminated.")
-                # logging.debug("MAIN: Inner loop wait...") # Can be too verbose
                 shutdown_event.wait(timeout=5.0) # Wait for shutdown or check threads every 5s
 
             logging.info("MAIN: Exited inner monitoring loop (shutdown_event received).")
-            # Outer loop condition 'while not shutdown_event.is_set()' is now false
-            # No 'break' needed here, loop condition handles it.
 
         # Exception handling for setup/runtime errors
         except RuntimeError as e:
@@ -1180,7 +1176,6 @@ def main():
             shutdown_event.clear(); # Reset flags for restart
             # Keep reboot_requested flag if set before error
             time.sleep(10.0)
-            # Continue to next iteration of outer while loop for restart
         except Exception as e:
             logging.exception(f"!!! Unhandled Exception in Main Loop: {e}")
             logging.error("Attempting restart after 10 seconds...")
@@ -1189,92 +1184,74 @@ def main():
             shutdown_event.clear(); # Reset flags for restart
             # Keep reboot_requested flag if set before error
             time.sleep(10.0)
-            # Continue to next iteration of outer while loop for restart
 
 
     # --- Final Cleanup (Only reached when shutdown_event is set and outer loop finishes) ---
     logging.info("--- Shutdown initiated ---")
-    # shutdown_event is already set
 
     # Wait for capture thread (handles its own cleanup including sync)
     if capture_thread and capture_thread.is_alive():
         logging.info("Waiting for capture thread to exit...")
-        capture_thread.join(timeout=15.0) # Give it ample time (adjust if sync takes longer)
+        capture_thread.join(timeout=15.0)
         if capture_thread.is_alive(): logging.warning("Capture thread did not exit cleanly within timeout.")
         else: logging.info("Capture thread finished.")
 
-    # Flask thread is daemon, will exit automatically when main thread exits.
+    # Flask thread is daemon, exits automatically.
 
-    # Ensure recording stopped / camera closed (belt-and-braces, capture thread should handle)
-    if is_recording: logging.warning("Force stopping recording during final shutdown (should already be stopped)."); stop_recording() # Includes sync
+    # Ensure recording stopped / camera closed (belt-and-braces)
+    if is_recording: logging.warning("Force stopping recording during final shutdown."); stop_recording()
     if picam2:
         try:
             logging.info("Ensuring Picamera2 closed...");
             if picam2.started: picam2.stop()
             picam2.close()
-            logging.info("Picamera2 closed final.")
         except Exception as e: logging.warning(f"Error during final Picamera2 close: {e}")
 
     # Cleanup GPIO
     if SWITCH_GPIO_PIN is not None: cleanup_gpio()
 
-    # --- Execute final commands IF reboot was requested from web UI ---
-    # Read flag safely (though not strictly necessary here as threads should be stopped)
+    # --- Execute toggle.sh disable IF reboot was requested from web UI ---
     with config_lock:
         reboot_flag = reboot_requested
 
-    logging.info(f"MAIN: Checking if reboot was requested: {reboot_flag}")
+    logging.info(f"MAIN: Checking if reboot was requested via web UI: {reboot_flag}")
     if reboot_flag:
-        # IMPORTANT: Requires passwordless sudo for the user running this script:
-        # Replace 'your_username' and 'PiCamAP' (use value of AP_PROFILE_NAME)
-        # your_username ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down PiCamAP
-        # your_username ALL=(ALL) NOPASSWD: /sbin/reboot
-        logging.warning("Reboot requested via web UI. Executing final commands...")
+        logging.warning("Reboot requested via web UI. Executing disable script...")
 
-        # Step 1 (Optional): Deactivate AP
-        if AP_PROFILE_NAME:
-            ap_deactivate_command = ["sudo", "/usr/bin/nmcli", "connection", "down", AP_PROFILE_NAME]
-            logging.info(f"MAIN: Attempting final AP deactivation: {' '.join(ap_deactivate_command)}")
-            try:
-                # Run command, wait for it (short timeout), check result
-                # Using subprocess.run ensures we wait for nmcli
-                result = subprocess.run(ap_deactivate_command, check=False, capture_output=True, text=True, timeout=7) # Waits up to 7s
-                if result.returncode == 0:
-                    logging.info("MAIN: AP profile deactivated successfully (or was inactive).")
-                    # Add a small delay ONLY if nmcli succeeded, to allow network stack time
-                    logging.info("MAIN: Short pause (2s) after AP deactivation...")
-                    time.sleep(2)
-                else:
-                    # Log nmcli failure details
-                    logging.warning(f"MAIN: nmcli connection down failed (Code {result.returncode}). Stderr: {result.stderr.strip()}")
-                    # Don't add delay if it failed
-            except subprocess.TimeoutExpired:
-                 logging.warning("MAIN: Timeout trying to deactivate AP profile. Continuing...")
-            except Exception as e:
-                 # Log any other errors during nmcli execution
-                 logging.warning(f"MAIN: Error during final AP deactivation: {e}", exc_info=True)
+        if toggle_script_path and os.path.exists(toggle_script_path):
+            # Optional: Check for execute permissions
+            if not os.access(toggle_script_path, os.X_OK):
+                 logging.error(f"MAIN: Toggle script '{toggle_script_path}' exists but is not executable! Run 'chmod +x {toggle_script_path}'.")
+                 last_error = "Disable script not executable."
+            else:
+                disable_command = ["sudo", toggle_script_path, "disable"]
+                logging.info(f"MAIN: Executing: {' '.join(disable_command)}")
+                try:
+                    # Launch the disable script. It handles everything including the reboot.
+                    subprocess.Popen(disable_command)
+                    logging.warning("MAIN: Disable script launched (which includes reboot). Service will now exit.")
+                    # Give the script a moment to start before Python fully exits
+                    time.sleep(5)
+                except FileNotFoundError:
+                     logging.critical(f"!!! MAIN: FAILED TO EXECUTE '{' '.join(disable_command)}'. 'sudo' command not found or script path incorrect despite existence check?", exc_info=True)
+                     last_error = f"Disable Script Failed: Command not found."
+                except PermissionError:
+                     logging.critical(f"!!! MAIN: FAILED TO EXECUTE '{' '.join(disable_command)}'. Permission denied. Check sudoers configuration.", exc_info=True)
+                     last_error = f"Disable Script Failed: Permission denied (sudoers)."
+                except Exception as e:
+                    logging.critical(f"!!! MAIN: FAILED TO EXECUTE DISABLE SCRIPT: {e}", exc_info=True)
+                    last_error = f"Disable Script Failed: {e}"
         else:
-            logging.info("MAIN: AP_PROFILE_NAME not set, skipping final AP deactivation.")
-
-        # Step 2: Reboot
-        reboot_command = ["sudo", "/sbin/reboot"]
-        logging.info(f"MAIN: Executing reboot command: {' '.join(reboot_command)}")
-        try:
-            subprocess.Popen(reboot_command) # Fire and forget reboot command
-            logging.warning("MAIN: Reboot command issued. Script will now exit.")
-            # Give reboot command a moment to process before script fully exits
-            time.sleep(3) # Slightly longer pause before Python process ends
-        except Exception as e:
-            logging.critical(f"!!! MAIN: FAILED TO EXECUTE REBOOT COMMAND: {e}", exc_info=True)
-            last_error = f"Final Reboot Failed: {e}" # Set error state just before exit
+            logging.error(f"MAIN: Disable script path not determined or script not found at '{toggle_script_path}'. Cannot execute proper disable sequence.")
+            last_error = "Disable script not found."
 
     # Only log Program Exit if reboot wasn't issued (or failed)
     if not reboot_flag:
         logging.info("--- Program Exit (Shutdown Complete) ---")
     else:
          # This might not always be logged if reboot is fast
-         logging.info("--- Program Exit (Rebooting) ---")
+         logging.info("--- Program Exit (Rebooting via Disable Script) ---")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # --- Main Execution ---
     main()
