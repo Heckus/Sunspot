@@ -61,9 +61,22 @@ digital_recording_active = False
 ina219_sensor = None
 battery_percentage = None
 last_battery_read_time = 0.0
-AVAILABLE_AWB_MODES = [m.name for m in controls.AwbModeEnum] # Get available modes dynamically
+
+AVAILABLE_AWB_MODES = [m.name for m in list(controls.AwbModeEnum)] # Use list()
 DEFAULT_AWB_MODE_NAME = "Auto"
-current_awb_mode = controls.AwbModeEnum.Auto # Store the actual enum value
+current_awb_mode = controls.AwbModeEnum.Auto
+
+AVAILABLE_AE_MODES = [m.name for m in list(controls.AeExposureModeEnum)] # Use list()
+DEFAULT_AE_MODE_NAME = "Normal"
+current_ae_mode = controls.AeExposureModeEnum.Normal
+
+AVAILABLE_METERING_MODES = [m.name for m in list(controls.AeMeteringModeEnum)] # Use list()
+DEFAULT_METERING_MODE_NAME = "CentreWeighted"
+current_metering_mode = controls.AeMeteringModeEnum.CentreWeighted
+
+AVAILABLE_NOISE_REDUCTION_MODES = [m.name for m in list(controls.NoiseReductionModeEnum)] # Use list()
+DEFAULT_NOISE_REDUCTION_MODE_NAME = "Fast"
+current_noise_reduction_mode = controls.NoiseReductionModeEnum.Fast
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
