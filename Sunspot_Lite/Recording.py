@@ -81,11 +81,36 @@ if DEFAULT_METERING_MODE_NAME not in AVAILABLE_METERING_MODES:
      DEFAULT_METERING_MODE_NAME = AVAILABLE_METERING_MODES[0] if AVAILABLE_METERING_MODES else "CentreWeighted"
 current_metering_mode = getattr(controls.AeMeteringModeEnum, DEFAULT_METERING_MODE_NAME)
 
-AVAILABLE_NOISE_REDUCTION_MODES = list(controls.NoiseReductionModeEnum.__members__.keys()) # Use __members__.keys()
-DEFAULT_NOISE_REDUCTION_MODE_NAME = "Fast"
-if DEFAULT_NOISE_REDUCTION_MODE_NAME not in AVAILABLE_NOISE_REDUCTION_MODES:
-     DEFAULT_NOISE_REDUCTION_MODE_NAME = AVAILABLE_NOISE_REDUCTION_MODES[0] if AVAILABLE_NOISE_REDUCTION_MODES else "Fast"
-current_noise_reduction_mode = getattr(controls.NoiseReductionModeEnum, DEFAULT_NOISE_REDUCTION_MODE_NAME)
+#this causes issues like it doesnt exist. may need to look into dependances before implementing
+# AVAILABLE_NOISE_REDUCTION_MODES = list(controls.NoiseReductionModeEnum.__members__.keys()) # Use __members__.keys()
+# DEFAULT_NOISE_REDUCTION_MODE_NAME = "Fast"
+# if DEFAULT_NOISE_REDUCTION_MODE_NAME not in AVAILABLE_NOISE_REDUCTION_MODES:
+#      DEFAULT_NOISE_REDUCTION_MODE_NAME = AVAILABLE_NOISE_REDUCTION_MODES[0] if AVAILABLE_NOISE_REDUCTION_MODES else "Fast"
+# current_noise_reduction_mode = getattr(controls.NoiseReductionModeEnum, DEFAULT_NOISE_REDUCTION_MODE_NAME)
+
+DEFAULT_BRIGHTNESS = 0.0
+current_brightness = DEFAULT_BRIGHTNESS
+MIN_BRIGHTNESS = -1.0
+MAX_BRIGHTNESS = 1.0
+STEP_BRIGHTNESS = 0.1
+
+DEFAULT_CONTRAST = 1.0
+current_contrast = DEFAULT_CONTRAST
+MIN_CONTRAST = 0.0
+MAX_CONTRAST = 2.0 # Allow a bit more range
+STEP_CONTRAST = 0.1
+
+DEFAULT_SATURATION = 1.0
+current_saturation = DEFAULT_SATURATION
+MIN_SATURATION = 0.0
+MAX_SATURATION = 2.0 # Allow a bit more range
+STEP_SATURATION = 0.1
+
+DEFAULT_SHARPNESS = 1.0
+current_sharpness = DEFAULT_SHARPNESS
+MIN_SHARPNESS = 0.0
+MAX_SHARPNESS = 2.0 # Allow a bit more range
+STEP_SHARPNESS = 0.1
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
