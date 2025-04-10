@@ -1152,9 +1152,7 @@ def index():
                      </div>
                  </div>
 
-             </div> 
-
-             <div id="error" {'style="display: block;"' if err_msg else ''}>{err_msg}</div>
+             </div> <div id="error" {'style="display: block;"' if err_msg else ''}>{err_msg}</div>
              <img id="stream" src="{{{{ url_for('video_feed') }}}}" width="{current_w}" height="{current_h}" alt="Loading stream..."
                     onerror="handleStreamError()" onload="handleStreamLoad()">
         </div>
@@ -1202,7 +1200,17 @@ def index():
             let streamErrorTimeout = null;
 
             // --- UI Update Functions ---
-            function updateRecordButtonState() {{ /* ... (same as before) ... */ }}
+            function updateRecordButtonState() {{ 
+                if (currentDigitalRecordState) {{
+                    btnRecord.textContent = "Stop Rec (Web)";
+                    btnRecord.classList.remove('recording-inactive');
+                    btnRecord.classList.add('recording-active');
+                }} else {{
+                    btnRecord.textContent = "Start Rec (Web)";
+                    btnRecord.classList.add('recording-inactive');
+                    btnRecord.classList.remove('recording-active');
+                }}
+             }}
 
             function updateStatus() {{
                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
@@ -1243,16 +1251,15 @@ def index():
                              batteryLevelElement.textContent = "--";
                          }}
                     }})
-                    .catch(err => {{ /* ... (error handling same as before, update all statuses to Err) ... */
+                    .catch(err => {{ 
                         console.error("Error fetching status:", err); statusElement.textContent = "Error"; errorElement.textContent = `Status fetch failed: ${{err.message}}.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Err"; batteryLevelElement.textContent = "Err";
                         awbStatusElement.textContent = "Err"; aeStatusElement.textContent = "Err"; meteringStatusElement.textContent = "Err"; nrStatusElement.textContent = "Err";
-                        // maybe disable controls here?
-                     }});
+                    }});
             }}
 
             // Helper to update status text and control element value if needed
             function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) {{
-                 if (newValue === undefined || newValue === null) return; // No value from status
+                 if (newValue === undefined || newValue === null) return; 
 
                  let currentUIValue = controlEl ? controlEl.value : null;
                  let formattedNewValue = newValue;
@@ -1269,16 +1276,14 @@ def index():
                      statusEl.textContent = newValue.toString();
                  }}
 
-                 // Only update control element if it doesn't match and we aren't currently changing it
-                 if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl) {{
+                 if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution) {{ // Added !isChangingResolution check
                     console.log(`Status update forcing UI for ${{controlKey}}: UI='${{currentUIValue}}' -> Status='${{formattedNewValue}}'`);
-                    controlEl.value = newValue; // Directly use newValue for sliders, formattedValue for display/select
+                    controlEl.value = newValue; 
                  }}
             }}
 
 
             function disableControls(poweringDown = false) {{
-                // Disable all buttons, selects, and sliders
                 [btnUp, btnDown, btnRecord, btnPowerdown,
                  awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
                  brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
@@ -1297,45 +1302,92 @@ def index():
             }}
 
             // --- Action Functions ---
-            function changeResolution(direction) {{
+            function changeResolution(direction) {
                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
-                isChangingResolution = true; disableControls(); statusElement.textContent = 'Changing resolution...'; errorElement.textContent = ''; errorElement.style.display = 'none';
-                // ... (fetch /set_resolution/ same as before) ...
-                 fetch(`/set_resolution/${{direction}}`, {{ method: 'POST' }})
-                    .then(response => response.json().then(data => ({{ status: response.status, body: data }})))
-                    .then(({{ status, body }}) => {{ /* ... (handle success/failure same as before) ... */ }})
-                    .catch(err => {{ /* ... (handle network error same as before) ... */ }})
-                    .finally(() => {{ /* ... (set timeout to re-enable controls same as before) ... */ }});
-            }}
+                
+                isChangingResolution = true; 
+                disableControls(); 
+                statusElement.textContent = 'Changing resolution... Please wait.'; 
+                errorElement.textContent = ''; 
+                errorElement.style.display = 'none';
+                
+                // --- Define Cleanup Function ---
+                const cleanupResolutionChange = (isSuccess = false) => {
+                    console.log(`CleanupResolutionChange called (success=${isSuccess}).`);
+                    if (isChangingResolution) { 
+                        isChangingResolution = false; 
+                        enableControls();
+                        if (!isSuccess) { 
+                             setTimeout(updateStatus, 500); 
+                        } else {
+                            setTimeout(updateStatus, 500); // Refresh status after success timeout too
+                        }
+                    }
+                };
+
+                // --- Set Fallback Timeout ---
+                const resolutionTimeoutId = setTimeout(() => {
+                    console.warn("Resolution change timeout reached. Forcing cleanup."); 
+                    console.log("Attempting cleanupResolutionChange from timeout..."); // <<< LOG FOR TESTING
+                    cleanupResolutionChange(false); 
+                 }, 8000); // 8 second timeout
+
+                // --- Send Request ---
+                fetch(`/set_resolution/${direction}`, { method: 'POST' })
+                    .then(response => response.json().then(data => ({ status: response.status, body: data })))
+                    .then(({ status, body }) => {
+                        if (status === 200 && body.success) {
+                            statusElement.textContent = 'Resolution change initiated. Reloading stream...';
+                            resolutionElement.textContent = body.new_resolution;
+                            const [w, h] = body.new_resolution.split('x');
+                            streamImage.setAttribute('width', w); 
+                            streamImage.setAttribute('height', h);
+                            console.log("Resolution change request successful, forcing stream reload...");
+                            streamImage.src = "{{{{ url_for('video_feed') }}}}?" + Date.now(); 
+                            // Rely on the timeout to call cleanupResolutionChange
+                        } else {
+                            // Handle failure from backend
+                            errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; 
+                            errorElement.style.display = 'block'; 
+                            statusElement.textContent = 'Resolution change failed.';
+                            clearTimeout(resolutionTimeoutId); // Stop the timeout
+                            cleanupResolutionChange(false); // Cleanup immediately 
+                        }
+                    })
+                    .catch(err => {
+                         // Handle network error
+                         console.error("Network error sending resolution change:", err); 
+                         errorElement.textContent = `Network error changing resolution: ${err.message}`; 
+                         errorElement.style.display = 'block'; 
+                         statusElement.textContent = 'Resolution change failed (Network).';
+                         clearTimeout(resolutionTimeoutId); // Stop the timeout
+                         cleanupResolutionChange(false); // Cleanup immediately
+                     });
+            }
+
 
             function toggleRecording() {{
                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
                 isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
-                 // ... (fetch /toggle_recording same as before) ...
                  fetch('/toggle_recording', {{ method: 'POST' }})
-                    .then(response => {{ /* ... */ }})
-                    .then(data => {{ /* ... */ }})
-                    .catch(err => {{ /* ... */ }})
-                    .finally(() => {{ isTogglingRecording = false; enableControls(); }});
+                    .then(response => {{ if (!response.ok) {{ throw new Error(`HTTP error! Status: ${{response.status}}`); }} return response.json(); }})
+                    .then(data => {{
+                        if (data.success) {{
+                            currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${{currentDigitalRecordState ? 'enabled' : 'disabled'}}. State updating...`; setTimeout(updateStatus, 1500); 
+                        }} else {{
+                            errorElement.textContent = `Error toggling recording: ${{data.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000); 
+                        }}
+                    }})
+                    .catch(err => {{ console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${{err.message}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); }})
+                    .finally(() => {{ isTogglingRecording = false; enableControls(); }}); 
             }}
 
-            function powerDown() {{
-                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
-                 if (!confirm("Are you sure you want to power down?")) {{ return; }}
-                 isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down...'; errorElement.textContent = ''; errorElement.style.display = 'none';
-                 if (statusUpdateInterval) clearInterval(statusUpdateInterval);
-                 // ... (fetch /power_down same as before) ...
-                 fetch('/power_down', {{ method: 'POST' }})
-                     .then(response => {{ /* ... */ }})
-                     .then(data => {{ /* ... */ }})
-                     .catch(err => {{ /* ... */ }});
-            }}
 
              // Consolidated function to change any camera control
              function changeCameraControl(controlName, controlValue) {{
                  if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
                  console.log(`Requesting control change: ${{controlName}} = ${{controlValue}}`);
-                 isChangingControl = true; disableControls(); // Disable all during change
+                 isChangingControl = true; disableControls(); 
                  statusElement.textContent = `Setting ${{controlName}}...`;
                  errorElement.textContent = ''; errorElement.style.display = 'none';
 
@@ -1348,22 +1400,20 @@ def index():
                  .then(({{ status, body }}) => {{
                      if (status === 200 && body.success) {{
                          statusElement.textContent = `${{controlName}} set.`;
-                         // Update the specific status span immediately for feedback
-                         updateStatus(); // Full update soon
+                         // Update status to refresh UI state soon
+                         setTimeout(updateStatus, 500); 
                      }} else {{
                          errorElement.textContent = `Error setting ${{controlName}}: ${{body.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = `${{controlName}} change failed.`;
-                         updateStatus(); // Fetch current status to maybe reset the control UI
+                         setTimeout(updateStatus, 500); // Update status to potentially reset control UI
                      }}
                  }})
                  .catch(err => {{
                      console.error(`Network error setting ${{controlName}}:`, err); errorElement.textContent = `Network error: ${{err.message}}`; errorElement.style.display = 'block'; statusElement.textContent = `${{controlName}} change failed (Network).`;
-                     updateStatus(); // Fetch current status
+                     setTimeout(updateStatus, 500); 
                  }})
                  .finally(() => {{
                      isChangingControl = false;
                      enableControls();
-                     // Optionally schedule another status update soon
-                     setTimeout(updateStatus, 1000);
                  }});
              }}
 
@@ -1375,21 +1425,43 @@ def index():
                     spanElement.textContent = parseFloat(value).toFixed(1);
                 }}
              }}
+             
+            function powerDown() {{
+                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                 if (!confirm("Are you sure you want to power down?")) {{ return; }}
+                 isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                 if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+                 fetch('/power_down', {{ method: 'POST' }}) 
+                     .then(response => {{ if (!response.ok) {{ return response.json().then(data => {{ throw new Error(data.message || `HTTP error! Status: ${{response.status}}`); }}).catch(() => {{ throw new Error(`HTTP error! Status: ${{response.status}}`); }}); }} return response.json(); }})
+                     .then(data => {{ if (data.success) {{ statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; }} else {{ errorElement.textContent = `Shutdown request failed: ${{data.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); }} }}) 
+                     .catch(err => {{ console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${{err.message}}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); }}); 
+            }}
 
             // --- Stream Handling ---
-            function handleStreamError() {{ /* ... (same as before) ... */ }}
-            function handleStreamLoad() {{ /* ... (same as before, including re-enabling controls after resolution change) ... */ }}
+            function handleStreamError() {{
+                console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => {{ streamImage.src = "{{{{ url_for('video_feed') }}}}?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }}, 3000);
+            }}
+
+            function handleStreamLoad() {{
+                 if (streamErrorTimeout) {{
+                     clearTimeout(streamErrorTimeout);
+                     streamErrorTimeout = null;
+                     if (!isPoweringDown && !isChangingResolution && !isChangingControl) {{ 
+                        // statusElement.textContent = 'Stream active.'; // Avoid changing status here
+                     }}
+                 }}
+                console.log("Stream image onload fired."); 
+             }}
 
             // --- Initialization ---
             document.addEventListener('DOMContentLoaded', () => {{
                 updateRecordButtonState();
-                updateStatus(); // Initial status fetch
+                updateStatus(); 
                 statusUpdateInterval = setInterval(() => {{
-                    // Only update if no major action is in progress
                     if (!isChangingResolution && !isTogglingRecording && !isChangingControl && !isPoweringDown) {{
                         updateStatus();
                     }}
-                 }}, 5000); // Update status every 5 seconds
+                 }}, 5000); 
             }});
 
             window.addEventListener('beforeunload', () => {{
