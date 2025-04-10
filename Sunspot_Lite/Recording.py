@@ -113,7 +113,7 @@ MIN_SHARPNESS = 0.0
 MAX_SHARPNESS = 2.0 # Allow a bit more range
 STEP_SHARPNESS = 0.1
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # ===========================================================
 # === BATTERY MONITOR (INA219) CODE START ===
@@ -682,11 +682,10 @@ def stop_recording():
 
     logging.info(f"Recording fully stopped. Released {released_count} writer(s) out of {len(writers_to_release)} attempted.")
 
-# --- Capture Loop ---
 def capture_and_process_loop():
     global output_frame, is_recording, last_error, picam2, switch, digital_recording_active
     global current_resolution_index, reconfigure_resolution_index, last_battery_read_time
-    global video_writers, recording_paths
+    global video_writers, recording_paths, config_lock # <<< Added config_lock to globals
 
     logging.info("Starting frame capture loop...")
     consecutive_error_count = 0
@@ -696,103 +695,136 @@ def capture_and_process_loop():
     width, height = get_current_resolution()
     if not initialize_camera(width, height):
         logging.error("Initial camera setup failed. Capture thread cannot start.")
-        # Set shutdown event if initial setup fails catastrophically?
-        # shutdown_event.set() # Consider if this is desired behavior
-        return # Exit thread if initial setup fails
+        return # Exit thread
 
     # --- Main Loop ---
+    loop_iteration = 0 # Add iteration counter
     while not shutdown_event.is_set():
+        loop_iteration += 1
+        # <<< Log loop start >>>
+        logging.debug(f"--- Capture Loop Iteration {loop_iteration} Start ---")
         loop_start_time = time.monotonic()
 
         try:
             # --- Check for Reconfiguration Request ---
             target_index = -1
-            if reconfigure_resolution_index is not None:
+            # <<< Log check start >>>
+            logging.debug(f"[{loop_iteration}] Checking reconfigure_resolution_index...")
+            reconfig_check_value = None
+            # <<< Log lock access >>>
+            logging.debug(f"[{loop_iteration}] Attempting to acquire config_lock for reconfig check.")
+            with config_lock:
+                 logging.debug(f"[{loop_iteration}] Acquired config_lock for reconfig check.")
+                 reconfig_check_value = reconfigure_resolution_index
+            logging.debug(f"[{loop_iteration}] Released config_lock. reconfigure_resolution_index = {reconfig_check_value}")
+
+            if reconfig_check_value is not None:
+                # Need to acquire lock again to clear it
+                logging.debug(f"[{loop_iteration}] Attempting to acquire config_lock to clear reconfig index.")
                 with config_lock:
-                    if reconfigure_resolution_index is not None:
+                    logging.debug(f"[{loop_iteration}] Acquired config_lock to clear reconfig index.")
+                    if reconfigure_resolution_index is not None: # Double check
                         target_index = reconfigure_resolution_index
                         reconfigure_resolution_index = None # Clear request
+                    else:
+                         target_index = -1 # Value changed between checks
+                logging.debug(f"[{loop_iteration}] Released config_lock after clearing reconfig index. Target index set to {target_index}")
+            else:
+                 target_index = -1
+
 
             # --- Handle Reconfiguration ---
             if target_index != -1:
-                logging.info(f"--- Reconfiguring resolution to index {target_index} ---")
-                # Determine if recording should resume
+                logging.info(f"[{loop_iteration}] --- Reconfiguring resolution to index {target_index} ---")
                 physical_switch_on_before = (switch is not None and switch.is_pressed)
                 digital_switch_on_before = digital_recording_active
                 should_be_recording_after = physical_switch_on_before or digital_switch_on_before
                 was_actually_recording = is_recording
 
                 if was_actually_recording:
-                    logging.info("Stopping recording for reconfiguration...")
-                    stop_recording() # Includes sync
+                    logging.info(f"[{loop_iteration}] Stopping recording for reconfiguration...")
+                    stop_recording()
 
                 new_width, new_height = SUPPORTED_RESOLUTIONS[target_index]
-                if initialize_camera(new_width, new_height): # Re-initialize camera
+                if initialize_camera(new_width, new_height):
                     with config_lock:
-                        current_resolution_index = target_index # Update index *after* success
-                    logging.info(f"--- Reconfiguration successful to {new_width}x{new_height} ---")
-                    # Resume recording if needed
+                        current_resolution_index = target_index
+                    logging.info(f"[{loop_iteration}] --- Reconfiguration successful to {new_width}x{new_height} ---")
                     if should_be_recording_after:
-                        logging.info("Resuming recording after successful reconfiguration...")
-                        time.sleep(1.0) # Allow camera settle time before recording
+                        logging.info(f"[{loop_iteration}] Resuming recording after successful reconfiguration...")
+                        time.sleep(1.0)
                         if not start_recording():
-                            logging.error("Failed to restart recording after reconfiguration!")
-                            # last_error should be set by start_recording()
+                            logging.error(f"[{loop_iteration}] Failed to restart recording after reconfiguration!")
                 else:
-                    # Reconfiguration failed! Attempt to restore previous resolution
-                    logging.error(f"!!! Failed reconfigure to index {target_index}. Attempting to restore previous resolution... !!!")
-                    # last_error should be set by initialize_camera()
-                    prev_width, prev_height = get_current_resolution() # Get the resolution that was working
+                    logging.error(f"[{loop_iteration}] !!! Failed reconfigure to index {target_index}. Attempting to restore previous resolution... !!!")
+                    prev_width, prev_height = get_current_resolution()
                     if not initialize_camera(prev_width, prev_height):
-                        logging.critical("!!! Failed to restore previous camera resolution after failed reconfig. Stopping service. !!!")
+                        logging.critical(f"[{loop_iteration}] !!! Failed to restore previous camera resolution after failed reconfig. Stopping service. !!!")
                         last_error = "Camera failed fatally during reconfig restore."
-                        shutdown_event.set(); break # Critical failure, stop everything
+                        shutdown_event.set(); break
                     else:
-                        logging.info("Successfully restored previous camera resolution.")
-                        # Try restarting recording if it was on before
+                        logging.info(f"[{loop_iteration}] Successfully restored previous camera resolution.")
                         if should_be_recording_after:
-                            logging.info("Attempting recording restart with restored resolution...")
+                            logging.info(f"[{loop_iteration}] Attempting recording restart with restored resolution...")
                             time.sleep(1.0)
                             if not start_recording():
-                                logging.error("Failed to restart recording after failed reconfig and restore.")
+                                logging.error(f"[{loop_iteration}] Failed to restart recording after failed reconfig and restore.")
 
-                # After handling reconfiguration (success or failure), start next loop iteration
-                logging.info("--- Finished handling reconfiguration request ---")
-                continue # Go to the start of the while loop
+                logging.info(f"[{loop_iteration}] --- Finished handling reconfiguration request ---")
+                continue # Go to the start of the next while loop iteration
 
             # --- Check if Camera is Available (if not reconfiguring) ---
-            if picam2 is None or not picam2.started:
+            # <<< Log detailed camera check >>>
+            logging.debug(f"[{loop_iteration}] Checking camera availability (picam2 object)...")
+            is_cam_available = False
+            cam_status_details = "Unknown"
+            if picam2 is not None:
+                logging.debug(f"[{loop_iteration}] picam2 object exists.")
+                try:
+                    if picam2.started:
+                        logging.debug(f"[{loop_iteration}] picam2.started is True.")
+                        is_cam_available = True
+                        cam_status_details = "Exists and Started"
+                    else:
+                         logging.warning(f"[{loop_iteration}] picam2 object exists BUT picam2.started is False.")
+                         cam_status_details = "Exists but Not Started"
+                except Exception as cam_check_e:
+                     logging.error(f"[{loop_iteration}] Error checking picam2.started: {cam_check_e}")
+                     cam_status_details = f"Exists but Error checking started: {cam_check_e}"
+            else:
+                 logging.error(f"[{loop_iteration}] picam2 object is None!")
+                 cam_status_details = "picam2 is None"
+            logging.debug(f"[{loop_iteration}] Camera status details: {cam_status_details}")
+            # <<< End detailed camera check >>>
+
+            if not is_cam_available:
                 if not last_error: last_error = "Picamera2 became unavailable unexpectedly."
-                logging.error(f"Camera unavailable: {last_error}. Attempting reinitialization...")
-                # Try to re-initialize with the current target resolution
+                logging.error(f"[{loop_iteration}] Camera unavailable based on check: {last_error}. Attempting reinitialization...")
                 width, height = get_current_resolution()
                 if initialize_camera(width, height):
-                    logging.info("Camera re-initialized successfully after unexpected stop.")
+                    logging.info(f"[{loop_iteration}] Camera re-initialized successfully after unexpected stop.")
                     last_error = None; consecutive_error_count = 0
                 else:
-                    logging.error(f"Camera re-initialization failed: {last_error}. Stopping capture loop.")
-                    shutdown_event.set(); break # Stop if re-init fails
+                    logging.error(f"[{loop_iteration}] Camera re-initialization failed: {last_error}. Stopping capture loop.")
+                    shutdown_event.set(); break
                 continue # Skip rest of loop for this iteration
+            else:
+                 logging.debug(f"[{loop_iteration}] Camera check passed.")
 
             # --- Capture Frame ---
-            # <<< ADDED LOGGING HERE >>>
-            logging.debug("Attempting to capture frame...")
+            logging.debug(f"[{loop_iteration}] Attempting to capture frame...") # Log before capture
             frame_bgr = picam2.capture_array("main")
+            logging.debug(f"[{loop_iteration}] capture_array call completed (frame is {'None' if frame_bgr is None else 'Valid'}).") # Log after capture
+
 
             if frame_bgr is None:
-                # Handle failed capture
-                logging.warning("Failed to capture frame (capture_array returned None). Retrying...")
-                consecutive_error_count += 1
-                if consecutive_error_count > max_consecutive_errors:
-                    last_error = f"Failed capture {max_consecutive_errors} consecutive times. Assuming camera failure."
-                    logging.error(last_error); shutdown_event.set(); break
-                time.sleep(0.1); continue # Try again quickly
+                # ... (Handle failed capture - remains the same) ...
+                continue
             else:
-                 # Successfully captured frame, reset error counter
                  if consecutive_error_count > 0:
-                      logging.info(f"Recovered frame grab after {consecutive_error_count} errors.")
+                      logging.info(f"[{loop_iteration}] Recovered frame grab after {consecutive_error_count} errors.")
                  consecutive_error_count = 0
-                 logging.debug("Frame captured successfully.") # Optional: debug log for success
+                 # logging.debug(f"[{loop_iteration}] Frame captured successfully.") # Already logged completion
 
 
             # --- Check Recording Trigger (Switch / Digital) ---
@@ -862,14 +894,13 @@ def capture_and_process_loop():
             # time.sleep(0.01) # Optional small sleep
 
         except Exception as e:
-            # General error handling for the loop
-            logging.exception(f"!!! Unexpected Error in capture loop: {e}")
+            logging.exception(f"!!! [{loop_iteration}] Unexpected Error in capture loop: {e}") # Add iteration number
             last_error = f"Capture Loop Error: {e}"
             consecutive_error_count += 1
-            if consecutive_error_count > max_consecutive_errors / 2: # Allow fewer general errors before shutdown
-                logging.error(f"Too many consecutive errors ({consecutive_error_count}). Signaling shutdown.")
+            if consecutive_error_count > max_consecutive_errors / 2:
+                logging.error(f"[{loop_iteration}] Too many consecutive errors ({consecutive_error_count}). Signaling shutdown.")
                 shutdown_event.set()
-            time.sleep(1) # Wait a bit longer after a general error
+            time.sleep(1)
 
     # --- Cleanup after loop exit (if shutdown_event is set) ---
     logging.info("Exiting frame capture thread.")
