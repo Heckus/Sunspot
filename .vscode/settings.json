@@ -1,5 +1,5 @@
 {
-    "cmake.sourceDirectory": "/home/hecke/Github/Sunspot/OS_v1.0",
+    "cmake.sourceDirectory": "/home/hecke/GitHubRepos/Sunspot/Sunspot_V1.0/OS_v1.0",
     "files.associations": {
         "array": "cpp",
         "atomic": "cpp",

@@ -6,7 +6,7 @@ import os # <<< Ensure os is imported
 import sys # <<< Import sys for path determination
 import threading
 import signal
-from flask import Flask, Response, render_template_string, jsonify, redirect, url_for
+from flask import Flask, Response, render_template_string, jsonify, redirect, url_for, request
 from gpiozero import Button, Device
 from gpiozero.pins.native import NativeFactory
 import logging
@@ -61,6 +61,9 @@ digital_recording_active = False
 ina219_sensor = None
 battery_percentage = None
 last_battery_read_time = 0.0
+AVAILABLE_AWB_MODES = [m.name for m in controls.AwbModeEnum] # Get available modes dynamically
+DEFAULT_AWB_MODE_NAME = "Auto"
+current_awb_mode = controls.AwbModeEnum.Auto # Store the actual enum value
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -280,10 +283,22 @@ def get_current_resolution():
             safe_default_index = max(0, min(len(SUPPORTED_RESOLUTIONS) - 1, DEFAULT_RESOLUTION_INDEX))
             return SUPPORTED_RESOLUTIONS[safe_default_index]
 
+# --- Helper Function for FPS ---
+def get_target_fps(width, height):
+    """Determines the target FPS based on resolution."""
+    if width >= 3280: # Max resolution
+        return 15.0
+    elif width == 1920 and height == 1080: # 1080p
+        return 30.0
+    # Includes (1640, 1232), (1280, 720), (640, 480) and any others below 1080p
+    elif width <= 1640:
+         return 40.0
+    else: # Default fallback (should ideally cover all SUPPORTED_RESOLUTIONS)
+        return 30.0 # Default to 30 if resolution doesn't match specific cases
 
 # --- Initialize Camera ---
 def initialize_camera(target_width, target_height):
-    global picam2, last_error
+    global picam2, last_error, current_awb_mode # <<< Added current_awb_mode
     logging.info(f"Attempting to initialize camera with Picamera2 at {target_width}x{target_height}...")
 
     if picam2 is not None:
@@ -313,49 +328,75 @@ def initialize_camera(target_width, target_height):
             else:
                 logging.warning(f"NoIR tuning file not found at {NOIR_TUNING_FILE_PATH}. Using default tuning.")
         else:
-             logging.info("Using default tuning (NoIR tuning disabled).")
+                logging.info("Using default tuning (NoIR tuning disabled).")
 
         picam2 = Picamera2(tuning=tuning)
-        logging.info("Initialization successful.") # Log after successful Picamera2() call
+        logging.info("Picamera2 object created.") # Log after successful Picamera2() call
+
+        # --- Determine Target FPS ---
+        target_fps = get_target_fps(target_width, target_height)
+        logging.info(f"Targeting FPS: {target_fps:.1f} for resolution {target_width}x{target_height}")
+
+        # --- Get current AWB mode safely ---
+        with config_lock:
+            awb_mode_to_set = current_awb_mode # Use the global state
 
         config = picam2.create_video_configuration(
             main={"size": (target_width, target_height), "format": "RGB888"},
             controls={
-                "FrameRate": float(FRAME_RATE),
+                "FrameRate": target_fps, # <<< Use dynamic FPS
                 "AwbEnable": True,
-                "AwbMode": controls.AwbModeEnum.Auto,
+                "AwbMode": awb_mode_to_set, # <<< Use current AWB mode
                 "Brightness": 0.0,
                 "Contrast": 1.0,
                 "Saturation": 1.0,
+                 # Add other controls as needed, e.g., Sharpness, AeMeteringMode later
             }
         )
-        logging.info(f"Configuring Picamera2 with: {config}")
-        original_config_str = str(config)
+        logging.info(f"Configuring Picamera2 with: main={config['main']}, controls={config['controls']}") # Improved log
+        original_config_str = str(config) # Keep for comparison if needed
+
         picam2.configure(config)
-        new_config_str = str(picam2.camera_configuration()) # Use actual applied config
-        if original_config_str != new_config_str:
-             logging.info("Camera configuration may have been adjusted by the driver.")
+        # Give driver time to settle
+        time.sleep(0.5)
+        new_config = picam2.camera_configuration() # Use actual applied config
+
+        # Log potential differences
+        if not new_config:
+             logging.warning("Could not get camera configuration after applying.")
+        else:
+            applied_controls = new_config.get('controls', {})
+            applied_main = new_config.get('main', {})
+            logging.info(f"Applied Config: main={applied_main}, controls={applied_controls}")
+            if applied_controls.get('FrameRate') != target_fps:
+                 logging.warning(f"Camera driver adjusted FrameRate from {target_fps} to {applied_controls.get('FrameRate')}")
+            if applied_controls.get('AwbMode') != awb_mode_to_set:
+                 logging.warning(f"Camera driver adjusted AwbMode from {awb_mode_to_set} to {applied_controls.get('AwbMode')}")
+
+
         logging.info("Configuration successful!")
 
         picam2.start()
         logging.info("Camera started")
+        # Allow more time for sensor settings (like AWB, AE) to stabilize
         time.sleep(2.0)
 
         actual_config = picam2.camera_configuration()
         if not actual_config:
-             raise RuntimeError("Failed to get camera configuration after start.")
+                raise RuntimeError("Failed to get camera configuration after start.")
 
         actual_format = actual_config.get('main', {})
         actual_w = actual_format.get('size', (0,0))[0]
         actual_h = actual_format.get('size', (0,0))[1]
         actual_fmt_str = actual_format.get('format', 'Unknown')
-        logging.info(f"Picamera2 initialized. Actual main stream config: {actual_w}x{actual_h}, Format: {actual_fmt_str}")
+        actual_fps = actual_config.get('controls', {}).get('FrameRate', 'N/A') # <<< Get actual FPS
+        logging.info(f"Picamera2 initialized. Actual main stream config: {actual_w}x{actual_h}, Format: {actual_fmt_str}, Actual FPS: {actual_fps}")
 
         last_error = None
         return True
 
     except Exception as e:
-        logging.error(f"!!! Failed to initialize Picamera2 (possibly tuning related) at {target_width}x{target_height}: {e}", exc_info=True)
+        logging.error(f"!!! Failed to initialize Picamera2 at {target_width}x{target_height}: {e}", exc_info=True)
         last_error = f"Picamera2 Init Error ({target_width}x{target_height}): {e}"
         if picam2 is not None:
             try:
@@ -422,18 +463,48 @@ def start_recording():
         return False
 
     try:
-        cam_config = picam2.camera_configuration().get('main', {})
-        width = cam_config.get('size', (0,0))[0]
-        height = cam_config.get('size', (0,0))[1]
-        fps = float(FRAME_RATE)
-        if width >= 3280 and fps > 15:
-            logging.warning(f"High resolution ({width}x{height}) detected. Capping recording FPS to 15 to reduce load.")
-            fps = 15.0
+        # --- Get ACTUAL configuration ---
+        cam_config = picam2.camera_configuration()
+        if not cam_config:
+             raise RuntimeError("Failed to get camera configuration before recording start.")
+
+        main_stream_config = cam_config.get('main', {})
+        controls_config = cam_config.get('controls', {})
+
+        width = main_stream_config.get('size', (0,0))[0]
+        height = main_stream_config.get('size', (0,0))[1]
+
+        # --- Use ACTUAL FPS from camera controls ---
+        actual_fps = controls_config.get('FrameRate')
+        if actual_fps is None:
+            logging.error("!!! Could not determine actual FrameRate from camera config. Falling back.")
+            # Fallback logic: Use the function based on current resolution
+            # This might be slightly off if the driver adjusted it, but better than nothing
+            current_w_fb, current_h_fb = get_current_resolution()
+            actual_fps = get_target_fps(current_w_fb, current_h_fb)
+            last_error = "Rec FPS Fallback: Couldn't read actual FPS."
+
+        # Ensure FPS is a float, handle potential errors
+        try:
+            fps_for_writer = float(actual_fps)
+            if fps_for_writer <= 0:
+                raise ValueError("Invalid FPS value <= 0")
+        except (TypeError, ValueError) as fps_err:
+             logging.error(f"!!! Invalid FPS value obtained ({actual_fps}). Defaulting to 15 FPS. Error: {fps_err}")
+             fps_for_writer = 15.0
+             last_error = f"Rec FPS Error: Invalid value {actual_fps}"
+
+
+        # --- REMOVED: Hardcoded FPS cap based on width (now handled by get_target_fps) ---
+        # if width >= 3280 and fps > 15:
+        #     logging.warning(f"High resolution ({width}x{height}) detected. Capping recording FPS to 15 to reduce load.")
+        #     fps = 15.0
 
         if width <= 0 or height <= 0:
             raise ValueError(f"Invalid camera dimensions obtained: {width}x{height}")
 
-        logging.info(f"Starting recording with dimensions: {width}x{height} @ {fps:.1f}fps")
+        # --- Log the FPS being used for the writer ---
+        logging.info(f"Starting recording with dimensions: {width}x{height} @ {fps_for_writer:.2f} fps (Actual FPS reported by camera)")
 
         fourcc = cv2.VideoWriter_fourcc(*RECORDING_FORMAT)
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -442,7 +513,8 @@ def start_recording():
             try:
                 filename = f"recording_{timestamp}_{width}x{height}{RECORDING_EXTENSION}"
                 full_path = os.path.join(drive_path, filename)
-                writer = cv2.VideoWriter(full_path, fourcc, fps, (width, height))
+                # --- Use fps_for_writer for VideoWriter ---
+                writer = cv2.VideoWriter(full_path, fourcc, fps_for_writer, (width, height))
                 if not writer.isOpened():
                     raise IOError(f"Failed to open VideoWriter for path: {full_path}")
                 video_writers.append(writer)
@@ -458,14 +530,24 @@ def start_recording():
             is_recording = True
             logging.info(f"Recording successfully started on {success_count} drive(s).")
             if start_error and success_count < len(usb_drives):
-                 last_error = f"Partial Rec Start Fail: {start_error}"
-            else:
-                 last_error = None
+                    last_error = f"Partial Rec Start Fail: {start_error}"
+            # --- Clear previous recording errors on successful start ---
+            elif not start_error:
+                 if last_error and ("Recording" in last_error or "writers" in last_error or "USB" in last_error or "sync" in last_error or "Rec FPS" in last_error):
+                      logging.info(f"Clearing previous recording error: '{last_error}'")
+                      last_error = None
+            # --- Only set last_error if there was a failure but some succeeded ---
+            # else: # This case means no errors at all
+            #    last_error = None # Explicitly clear if needed
             return True
         else:
             is_recording = False
             logging.error("Failed to start recording on ANY USB drive.")
             last_error = f"Recording Start Failed: {start_error or 'No writers opened'}"
+            # Clean up any potentially opened (but failed) writers - belt and braces
+            for writer in video_writers:
+                 try: writer.release()
+                 except: pass
             video_writers.clear()
             recording_paths.clear()
             return False
@@ -473,7 +555,8 @@ def start_recording():
     except Exception as e:
         logging.error(f"!!! Critical error during recording setup: {e}", exc_info=True)
         last_error = f"Recording Setup Error: {e}"
-        stop_recording()
+        # Ensure cleanup even if setup fails midway
+        stop_recording() # stop_recording now handles empty lists safely
         return False
 
 
@@ -733,201 +816,335 @@ def generate_stream_frames():
 @app.route("/")
 def index():
     global last_error, digital_recording_active, battery_percentage, config_lock
+    global current_awb_mode, AVAILABLE_AWB_MODES # <<< Add globals needed for AWB
+
     current_w, current_h = get_current_resolution()
     resolution_text = f"{current_w}x{current_h}"
     err_msg = last_error if last_error else ""
+
     with config_lock:
         digital_rec_state_initial = digital_recording_active
         batt_perc_initial = battery_percentage
+        # <<< Get current AWB mode name for initial select value >>>
+        try:
+            current_awb_mode_name_initial = current_awb_mode.name
+        except AttributeError:
+             current_awb_mode_name_initial = DEFAULT_AWB_MODE_NAME # Fallback if not set
+
     batt_text_initial = f"{batt_perc_initial:.1f}" if batt_perc_initial is not None else "--"
 
+    # Build options for AWB dropdown
+    awb_options_html = ""
+    for mode_name in AVAILABLE_AWB_MODES:
+        selected_attr = ' selected' if mode_name == current_awb_mode_name_initial else ''
+        awb_options_html += f'<option value="{mode_name}"{selected_attr}>{mode_name}</option>'
+
     # Using triple quotes for the large HTML string
-    # Added {% raw %} and {% endraw %} around the <style> block
-    return render_template_string("""
+    return render_template_string(f"""
     <!DOCTYPE html>
     <html>
-      <head>
+    <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Pi Camera Stream & Record</title>
-        {% raw %}
+        {{% raw %}}
         <style>
-          body { font-family: sans-serif; line-height: 1.4; margin: 1em; background-color: #f0f0f0;}
-          .container { max-width: 960px; margin: auto; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-          h1 { text-align: center; color: #333; margin-bottom: 20px; }
-          .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 15px; margin-bottom: 15px; align-items: center; background-color: #eef; padding: 10px; border-radius: 5px;}
-          .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
-          #status, #rec-status, #resolution, #battery-level { color: #0056b3; font-weight: normal;}
-          #rec-status.active { color: #D83B01; font-weight: bold;}
-          .controls { text-align: center; margin-bottom: 15px; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px;} /* Flex layout for buttons */
-          .controls button { padding: 10px 20px; margin: 5px; font-size: 1em; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background-color: #e9e9e9; transition: background-color 0.2s, border-color 0.2s;}
-          .controls button:hover:not(:disabled) { background-color: #dcdcdc; border-color: #bbb;}
-          #error { color: red; margin-top: 10px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; /* Initially hidden */}
-          img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; } /* Placeholder color */
-          button#btn-record.recording-active { background-color: #ff4d4d; color: white; border-color: #ff1a1a; }
-          button#btn-record.recording-active:hover:not(:disabled) { background-color: #e60000; }
-          button#btn-record.recording-inactive { background-color: #4CAF50; color: white; border-color: #367c39;}
-          button#btn-record.recording-inactive:hover:not(:disabled) { background-color: #45a049; }
-          button#btn-powerdown { background-color: #f44336; color: white; border-color: #d32f2f;} /* Style for Power Down button */
-          button#btn-powerdown:hover:not(:disabled) { background-color: #c62828; }
-          button:disabled { background-color: #cccccc !important; cursor: not-allowed !important; border-color: #999 !important; color: #666 !important;}
+            body {{ font-family: sans-serif; line-height: 1.4; margin: 1em; background-color: #f0f0f0;}}
+            .container {{ max-width: 960px; margin: auto; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            h1 {{ text-align: center; color: #333; margin-bottom: 20px; }}
+            .status-grid {{ display: grid; grid-template-columns: auto 1fr; gap: 5px 15px; margin-bottom: 15px; align-items: center; background-color: #eef; padding: 10px; border-radius: 5px;}}
+            .status-grid span:first-child {{ font-weight: bold; color: #555; text-align: right;}}
+            .status-grid select {{ padding: 3px; }} /* Style for select */
+            #status, #rec-status, #resolution, #battery-level, #awb-mode-status {{ color: #0056b3; font-weight: normal;}} /* Added awb status id */
+            #rec-status.active {{ color: #D83B01; font-weight: bold;}}
+            .controls {{ text-align: center; margin-bottom: 15px; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px;}} /* Flex layout for buttons */
+            .controls button, .controls select {{ padding: 10px 15px; margin: 5px; font-size: 1em; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background-color: #e9e9e9; transition: background-color 0.2s, border-color 0.2s; }} /* Apply similar style to select */
+            .controls button:hover:not(:disabled), .controls select:hover:not(:disabled) {{ background-color: #dcdcdc; border-color: #bbb;}}
+            #error {{ color: red; margin-top: 10px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; /* Initially hidden */ }}
+            img#stream {{ display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; }} /* Placeholder color */
+            button#btn-record.recording-active {{ background-color: #ff4d4d; color: white; border-color: #ff1a1a; }}
+            button#btn-record.recording-active:hover:not(:disabled) {{ background-color: #e60000; }}
+            button#btn-record.recording-inactive {{ background-color: #4CAF50; color: white; border-color: #367c39;}}
+            button#btn-record.recording-inactive:hover:not(:disabled) {{ background-color: #45a049; }}
+            button#btn-powerdown {{ background-color: #f44336; color: white; border-color: #d32f2f;}} /* Style for Power Down button */
+            button#btn-powerdown:hover:not(:disabled) {{ background-color: #c62828; }}
+            button:disabled, select:disabled {{ background-color: #cccccc !important; cursor: not-allowed !important; border-color: #999 !important; color: #666 !important;}}
         </style>
-        {% endraw %}
-      </head>
-      <body>
+        {{% endraw %}}
+    </head>
+    <body>
         <div class="container">
-          <h1>Pi Camera Stream & Record</h1>
-          <div class="status-grid">
-            <span>Status:</span> <span id="status">Initializing...</span>
-            <span>Recording:</span> <span id="rec-status">OFF</span>
-            <span>Resolution:</span> <span id="resolution">{{ resolution_text }}</span>
-            <span>Battery:</span> <span id="battery-level">{{ batt_text_initial }}%</span>
-          </div>
-          <div class="controls">
-            <button onclick="changeResolution('down')" id="btn-down" title="Decrease resolution">&laquo; Lower Res</button>
-            <button onclick="toggleRecording()" id="btn-record" class="recording-inactive" title="Toggle recording via web interface">Start Rec (Web)</button>
-            <button onclick="changeResolution('up')" id="btn-up" title="Increase resolution">Higher Res &raquo;</button>
-            <button onclick="powerDown()" id="btn-powerdown" title="Gracefully stop service and reboot Pi">Power Down</button> </div>
-          <div id="error" {% if err_msg %}style="display: block;"{% endif %}>{{ err_msg }}</div> <img id="stream" src="{{ url_for('video_feed') }}" width="{{ current_w }}" height="{{ current_h }}" alt="Loading stream..."
-               onerror="handleStreamError()" onload="handleStreamLoad()"> </div>
+            <h1>Pi Camera Stream & Record</h1>
+            <div class="status-grid">
+                <span>Status:</span> <span id="status">Initializing...</span>
+                <span>Recording:</span> <span id="rec-status">OFF</span>
+                <span>Resolution:</span> <span id="resolution">{resolution_text}</span>
+                <span>Battery:</span> <span id="battery-level">{batt_text_initial}%</span>
+                <span>AWB Mode:</span> <span id="awb-mode-status">{current_awb_mode_name_initial}</span>
+             </div>
+             <div class="controls">
+                 <button onclick="changeResolution('down')" id="btn-down" title="Decrease resolution">&laquo; Lower Res</button>
+                 <button onclick="toggleRecording()" id="btn-record" class="recording-inactive" title="Toggle recording via web interface">Start Rec (Web)</button>
+                 <button onclick="changeResolution('up')" id="btn-up" title="Increase resolution">Higher Res &raquo;</button>
+                 <select id="awb-select" onchange="changeAwbMode()" title="Select Auto White Balance Mode">
+                    {awb_options_html}
+                </select>
+                <button onclick="powerDown()" id="btn-powerdown" title="Gracefully stop service and reboot Pi">Power Down</button>
+            </div>
+             <div id="error" {'style="display: block;"' if err_msg else ''}>{err_msg}</div>
+             <img id="stream" src="{{{{ url_for('video_feed') }}}}" width="{current_w}" height="{current_h}" alt="Loading stream..."
+                    onerror="handleStreamError()" onload="handleStreamLoad()">
+        </div>
 
         <script>
-          // --- JavaScript (Restored to Readable Format) ---
-          const statusElement = document.getElementById('status');
-          const resolutionElement = document.getElementById('resolution');
-          const errorElement = document.getElementById('error');
-          const streamImage = document.getElementById('stream');
-          const btnUp = document.getElementById('btn-up');
-          const btnDown = document.getElementById('btn-down');
-          const btnRecord = document.getElementById('btn-record');
-          const btnPowerdown = document.getElementById('btn-powerdown');
-          const recStatusElement = document.getElementById('rec-status');
-          const batteryLevelElement = document.getElementById('battery-level');
+            // --- JavaScript ---
+            const statusElement = document.getElementById('status');
+            const resolutionElement = document.getElementById('resolution');
+            const errorElement = document.getElementById('error');
+            const streamImage = document.getElementById('stream');
+            const btnUp = document.getElementById('btn-up');
+            const btnDown = document.getElementById('btn-down');
+            const btnRecord = document.getElementById('btn-record');
+            const btnPowerdown = document.getElementById('btn-powerdown');
+            const recStatusElement = document.getElementById('rec-status');
+            const batteryLevelElement = document.getElementById('battery-level');
+            const awbStatusElement = document.getElementById('awb-mode-status'); // <<< Get AWB status span
+            const awbSelectElement = document.getElementById('awb-select'); // <<< Get AWB select dropdown
 
-          let isChangingResolution = false;
-          let isTogglingRecording = false;
-          let isPoweringDown = false;
-          let currentDigitalRecordState = {{ 'true' if digital_rec_state_initial else 'false' }};
-          let statusUpdateInterval;
-          let streamErrorTimeout = null;
+            let isChangingResolution = false;
+            let isTogglingRecording = false;
+            let isChangingAwb = false; // <<< Add flag for AWB change
+            let isPoweringDown = false;
+            let currentDigitalRecordState = {'true' if digital_rec_state_initial else 'false'};
+            let statusUpdateInterval;
+            let streamErrorTimeout = null;
 
-          function updateRecordButtonState() {
-              if (currentDigitalRecordState) {
-                  btnRecord.textContent = "Stop Rec (Web)";
-                  btnRecord.classList.remove('recording-inactive');
-                  btnRecord.classList.add('recording-active');
-              } else {
-                  btnRecord.textContent = "Start Rec (Web)";
-                  btnRecord.classList.add('recording-inactive');
-                  btnRecord.classList.remove('recording-active');
-              }
-          }
+            function updateRecordButtonState() {{
+                if (currentDigitalRecordState) {{
+                    btnRecord.textContent = "Stop Rec (Web)";
+                    btnRecord.classList.remove('recording-inactive');
+                    btnRecord.classList.add('recording-active');
+                }} else {{
+                    btnRecord.textContent = "Start Rec (Web)";
+                    btnRecord.classList.add('recording-inactive');
+                    btnRecord.classList.remove('recording-active');
+                }}
+            }}
 
-          function updateStatus() {
-               if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
-               fetch('/status')
-                  .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
-                  .then(data => {
-                      statusElement.textContent = data.status_text || 'Unknown';
-                      recStatusElement.textContent = data.is_recording ? "ACTIVE" : "OFF";
-                      recStatusElement.classList.toggle('active', data.is_recording);
-                      if (data.resolution && resolutionElement.textContent !== data.resolution) {
-                          resolutionElement.textContent = data.resolution;
-                          const [w, h] = data.resolution.split('x');
-                           if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {
-                               streamImage.setAttribute('width', w);
-                               streamImage.setAttribute('height', h);
-                           }
-                      }
-                      if (data.error) { errorElement.textContent = data.error; errorElement.style.display = 'block'; }
-                      else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
-                      if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {
-                           currentDigitalRecordState = data.digital_recording_active;
-                           updateRecordButtonState();
-                      }
-                      if (data.battery_percent !== null && data.battery_percent !== undefined) {
-                           batteryLevelElement.textContent = data.battery_percent.toFixed(1);
-                       } else {
-                           batteryLevelElement.textContent = "--";
-                       }
-                  })
-                  .catch(err => { console.error("Error fetching status:", err); statusElement.textContent = "Error fetching status"; errorElement.textContent = `Failed to fetch status: ${err.message}. Check server connection.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Unknown"; batteryLevelElement.textContent = "Err"; });
-          }
+            function updateStatus() {{
+                if (isChangingResolution || isTogglingRecording || isChangingAwb || isPoweringDown) return; // <<< Check AWB flag
+                fetch('/status')
+                    .then(response => {{ if (!response.ok) {{ throw new Error(`HTTP error! Status: ${{response.status}}`); }} return response.json(); }})
+                    .then(data => {{
+                        statusElement.textContent = data.status_text || 'Unknown';
+                        recStatusElement.textContent = data.is_recording ? "ACTIVE" : "OFF";
+                        recStatusElement.classList.toggle('active', data.is_recording);
+                        if (data.resolution && resolutionElement.textContent !== data.resolution) {{
+                            resolutionElement.textContent = data.resolution;
+                            const [w, h] = data.resolution.split('x');
+                            if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {{
+                                streamImage.setAttribute('width', w);
+                                streamImage.setAttribute('height', h);
+                            }}
+                        }}
+                        if (data.error) {{ errorElement.textContent = data.error; errorElement.style.display = 'block'; }}
+                        else {{ if (errorElement.style.display !== 'none') {{ errorElement.textContent = ''; errorElement.style.display = 'none'; }} }}
+                        if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {{
+                            currentDigitalRecordState = data.digital_recording_active;
+                            updateRecordButtonState();
+                        }}
+                         // <<< Update AWB status and select dropdown if changed elsewhere >>>
+                        if (data.awb_mode && awbStatusElement.textContent !== data.awb_mode) {{
+                            awbStatusElement.textContent = data.awb_mode;
+                            if (awbSelectElement.value !== data.awb_mode) {{
+                                awbSelectElement.value = data.awb_mode;
+                                console.log("AWB mode updated by status check: " + data.awb_mode);
+                            }}
+                        }}
+                         // <<< END AWB update >>>
+                        if (data.battery_percent !== null && data.battery_percent !== undefined) {{
+                            batteryLevelElement.textContent = data.battery_percent.toFixed(1);
+                        }} else {{
+                            batteryLevelElement.textContent = "--";
+                        }}
+                    }})
+                    .catch(err => {{ console.error("Error fetching status:", err); statusElement.textContent = "Error fetching status"; errorElement.textContent = `Failed to fetch status: ${{err.message}}. Check server connection.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Unknown"; batteryLevelElement.textContent = "Err"; awbStatusElement.textContent = "Err"; }});
+            }}
 
-          function disableControls(poweringDown = false) {
-              btnUp.disabled = true; btnDown.disabled = true; btnRecord.disabled = true; btnPowerdown.disabled = true;
-              if(poweringDown) { document.body.style.opacity = '0.7'; }
-          }
+            function disableControls(poweringDown = false) {{
+                btnUp.disabled = true; btnDown.disabled = true; btnRecord.disabled = true; btnPowerdown.disabled = true;
+                awbSelectElement.disabled = true; // <<< Disable AWB select
+                if(poweringDown) {{ document.body.style.opacity = '0.7'; }}
+            }}
 
-          function enableControls() {
-              if (!isPoweringDown) { btnUp.disabled = false; btnDown.disabled = false; btnRecord.disabled = false; btnPowerdown.disabled = false; document.body.style.opacity = '1'; }
-          }
+            function enableControls() {{
+                if (!isPoweringDown) {{
+                     btnUp.disabled = false; btnDown.disabled = false; btnRecord.disabled = false; btnPowerdown.disabled = false;
+                     awbSelectElement.disabled = false; // <<< Enable AWB select
+                     document.body.style.opacity = '1';
+                 }}
+            }}
 
-          function changeResolution(direction) {
-              if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
-              isChangingResolution = true; disableControls(); statusElement.textContent = 'Changing resolution... Please wait.'; errorElement.textContent = ''; errorElement.style.display = 'none';
-              fetch(`/set_resolution/${direction}`, { method: 'POST' })
-                  .then(response => response.json().then(data => ({ status: response.status, body: data })))
-                  .then(({ status, body }) => {
-                      if (status === 200 && body.success) {
-                          statusElement.textContent = 'Resolution change initiated. Stream will update.'; resolutionElement.textContent = body.new_resolution; const [w, h] = body.new_resolution.split('x'); streamImage.setAttribute('width', w); streamImage.setAttribute('height', h); console.log("Resolution change request sent...");
-                      } else {
-                          errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed.'; isChangingResolution = false; enableControls(); updateStatus();
-                      }
-                  })
-                  .catch(err => { console.error("Network error sending resolution change:", err); errorElement.textContent = `Network error changing resolution: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed (Network).'; isChangingResolution = false; enableControls(); updateStatus(); })
-                  .finally(() => { if (isChangingResolution) { setTimeout(() => { if (isChangingResolution) { isChangingResolution = false; enableControls(); updateStatus(); } }, 7000); } });
-          }
+            function changeResolution(direction) {{
+                if (isChangingResolution || isTogglingRecording || isChangingAwb || isPoweringDown) return; // <<< Check AWB flag
+                isChangingResolution = true; disableControls(); statusElement.textContent = 'Changing resolution... Please wait.'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                fetch(`/set_resolution/${{direction}}`, {{ method: 'POST' }})
+                    .then(response => response.json().then(data => ({{ status: response.status, body: data }})))
+                    .then(({{ status, body }}) => {{
+                        if (status === 200 && body.success) {{
+                            statusElement.textContent = 'Resolution change initiated. Stream will update.'; resolutionElement.textContent = body.new_resolution; const [w, h] = body.new_resolution.split('x'); streamImage.setAttribute('width', w); streamImage.setAttribute('height', h); console.log("Resolution change request sent...");
+                        }} else {{
+                            errorElement.textContent = `Error changing resolution: ${{body.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed.'; isChangingResolution = false; enableControls(); updateStatus(); // Re-enable controls on failure
+                        }}
+                    }})
+                    .catch(err => {{ console.error("Network error sending resolution change:", err); errorElement.textContent = `Network error changing resolution: ${{err.message}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed (Network).'; isChangingResolution = false; enableControls(); updateStatus(); }}) // Re-enable controls on failure
+                    .finally(() => {{
+                        // Use a timeout to re-enable controls if the process seems stuck (might happen if camera re-init takes long)
+                        if (isChangingResolution) {{ setTimeout(() => {{ if (isChangingResolution) {{ isChangingResolution = false; enableControls(); updateStatus(); }} }}, 7000); }} // Increased timeout
+                    }});
+            }}
 
-          function toggleRecording() {
-              if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
-              isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
-              fetch('/toggle_recording', { method: 'POST' })
-                  .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
-                  .then(data => {
-                      if (data.success) {
-                          currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${currentDigitalRecordState ? 'enabled' : 'disabled'}. State updating...`; setTimeout(updateStatus, 1500);
-                      } else {
-                          errorElement.textContent = `Error toggling recording: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000);
-                      }
-                   })
-                  .catch(err => { console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); })
-                  .finally(() => { isTogglingRecording = false; enableControls(); });
-          }
+            function toggleRecording() {{
+                if (isChangingResolution || isTogglingRecording || isChangingAwb || isPoweringDown) return; // <<< Check AWB flag
+                isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                fetch('/toggle_recording', {{ method: 'POST' }})
+                    .then(response => {{ if (!response.ok) {{ throw new Error(`HTTP error! Status: ${{response.status}}`); }} return response.json(); }})
+                    .then(data => {{
+                        if (data.success) {{
+                            currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${{currentDigitalRecordState ? 'enabled' : 'disabled'}}. State updating...`; setTimeout(updateStatus, 1500); // Update status soon after
+                        }} else {{
+                            errorElement.textContent = `Error toggling recording: ${{data.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000); // Update status anyway
+                        }}
+                    }})
+                    .catch(err => {{ console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${{err.message}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); }})
+                    .finally(() => {{ isTogglingRecording = false; enableControls(); }}); // Enable controls when done
+            }}
 
-          function powerDown() {
-              if (isChangingResolution || isTogglingRecording || isPoweringDown) return;
-              if (!confirm("Are you sure you want to power down the Raspberry Pi? This will stop the camera service and reboot.")) { return; }
-              isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down... Signalling service to stop.'; errorElement.textContent = ''; errorElement.style.display = 'none';
-              if (statusUpdateInterval) clearInterval(statusUpdateInterval);
-              fetch('/power_down', { method: 'POST' }) // Request backend to set flags
-                  .then(response => { if (!response.ok) { return response.json().then(data => { throw new Error(data.message || `HTTP error! Status: ${response.status}`); }).catch(() => { throw new Error(`HTTP error! Status: ${response.status}`); }); } return response.json(); })
-                  .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; /* Backend handles reboot after cleanup */ } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); } })
-                  .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); });
-          }
+            // <<< NEW: Function to change AWB mode >>>
+            function changeAwbMode() {{
+                 if (isChangingResolution || isTogglingRecording || isChangingAwb || isPoweringDown) return;
+                 const selectedMode = awbSelectElement.value;
+                 console.log(`Requesting AWB change to: ${{selectedMode}}`);
+                 isChangingAwb = true; disableControls(); statusElement.textContent = `Setting AWB to ${{selectedMode}}...`; errorElement.textContent = ''; errorElement.style.display = 'none';
 
-          function handleStreamError() {
-              console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => { streamImage.src = "{{ url_for('video_feed') }}?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }, 3000);
-          }
+                 fetch('/set_awb_mode', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ awb_mode: selectedMode }})
+                 }})
+                 .then(response => response.json().then(data => ({{ status: response.status, body: data }})))
+                 .then(({{ status, body }}) => {{
+                     if (status === 200 && body.success) {{
+                         statusElement.textContent = `AWB mode set to ${{body.current_awb_mode}}.`;
+                         awbStatusElement.textContent = body.current_awb_mode; // Update status display
+                         console.log("AWB change successful.");
+                     }} else {{
+                         errorElement.textContent = `Error setting AWB: ${{body.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'AWB change failed.';
+                         // Revert dropdown if failed? Optional, but might be less confusing
+                         // updateStatus(); // Fetch current status to maybe reset dropdown
+                     }}
+                 }})
+                 .catch(err => {{
+                     console.error("Network error setting AWB:", err); errorElement.textContent = `Network error setting AWB: ${{err.message}}`; errorElement.style.display = 'block'; statusElement.textContent = 'AWB change failed (Network).';
+                     // updateStatus(); // Fetch current status to maybe reset dropdown
+                 }})
+                 .finally(() => {{
+                     isChangingAwb = false;
+                     enableControls();
+                     // Update status after a short delay to confirm
+                     setTimeout(updateStatus, 1000);
+                 }});
+            }}
+            // <<< END NEW AWB function >>>
 
-          function handleStreamLoad() {
-              if (streamErrorTimeout) { clearTimeout(streamErrorTimeout); streamErrorTimeout = null; if (!isPoweringDown) statusElement.textContent = 'Stream active.'; }
-          }
+            function powerDown() {{
+                if (isChangingResolution || isTogglingRecording || isChangingAwb || isPoweringDown) return; // <<< Check AWB flag
+                if (!confirm("Are you sure you want to power down the Raspberry Pi? This will stop the camera service and reboot.")) {{ return; }}
+                isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down... Signalling service to stop.'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+                fetch('/power_down', {{ method: 'POST' }}) // Request backend to set flags
+                    .then(response => {{ if (!response.ok) {{ return response.json().then(data => {{ throw new Error(data.message || `HTTP error! Status: ${{response.status}}`); }}).catch(() => {{ throw new Error(`HTTP error! Status: ${{response.status}}`); }}); }} return response.json(); }})
+                    .then(data => {{ if (data.success) {{ statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; /* Backend handles reboot */ }} else {{ errorElement.textContent = `Shutdown request failed: ${{data.message || 'Unknown error.'}}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); }} }}) // Re-enable if failed
+                    .catch(err => {{ console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${{err.message}}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); }}); // Re-enable on error
+            }}
 
-          document.addEventListener('DOMContentLoaded', () => {
-              updateRecordButtonState(); updateStatus(); statusUpdateInterval = setInterval(() => { if (!isChangingResolution && !isTogglingRecording && !isPoweringDown) { updateStatus(); } }, 5000);
-          });
+            function handleStreamError() {{
+                console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => {{ streamImage.src = "{{{{ url_for('video_feed') }}}}?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }}, 3000);
+            }}
 
-          window.addEventListener('beforeunload', () => {
-              if (statusUpdateInterval) clearInterval(statusUpdateInterval);
-          });
+            function handleStreamLoad() {{
+                if (streamErrorTimeout) {{ clearTimeout(streamErrorTimeout); streamErrorTimeout = null; if (!isPoweringDown) statusElement.textContent = 'Stream active.'; }}
+                // If resolution change was in progress, re-enable controls after stream reloads
+                if (isChangingResolution) {{
+                    console.log("Stream reloaded after potential resolution change.");
+                    isChangingResolution = false;
+                    enableControls();
+                    updateStatus(); // Ensure status is up-to-date
+                }}
+            }}
+
+            document.addEventListener('DOMContentLoaded', () => {{
+                updateRecordButtonState(); updateStatus(); statusUpdateInterval = setInterval(() => {{ if (!isChangingResolution && !isTogglingRecording && !isChangingAwb && !isPoweringDown) {{ updateStatus(); }} }}, 5000); // <<< Check AWB flag
+            }});
+
+            window.addEventListener('beforeunload', () => {{
+                if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+            }});
         </script>
-      </body>
+    </body>
     </html>
     """, resolution_text=resolution_text, current_w=current_w, current_h=current_h,
-         err_msg=err_msg, digital_rec_state_initial=digital_rec_state_initial, batt_text_initial=batt_text_initial)
+       err_msg=err_msg, digital_rec_state_initial=digital_rec_state_initial,
+       batt_text_initial=batt_text_initial,
+       # <<< Pass AWB related variables to template >>>
+       current_awb_mode_name_initial=current_awb_mode_name_initial,
+       awb_options_html=awb_options_html
+    )
 
+@app.route('/set_awb_mode', methods=['POST'])
+def set_awb_mode():
+    global picam2, last_error, current_awb_mode, config_lock
 
+    if not picam2 or not picam2.started:
+        return jsonify({'success': False, 'message': 'Camera not available.'}), 503
+
+    try:
+        data = request.get_json()
+        if not data or 'awb_mode' not in data:
+             logging.warning("/set_awb_mode called without 'awb_mode' data.")
+             return jsonify({'success': False, 'message': 'Missing awb_mode in request.'}), 400
+
+        requested_mode_name = data['awb_mode']
+        logging.info(f"Web request: Set AWB mode to '{requested_mode_name}'")
+
+        # Find the corresponding enum value
+        new_awb_enum = None
+        for mode_enum in controls.AwbModeEnum:
+            if mode_enum.name == requested_mode_name:
+                new_awb_enum = mode_enum
+                break
+
+        if new_awb_enum is None:
+             logging.error(f"Invalid AWB mode requested: {requested_mode_name}")
+             return jsonify({'success': False, 'message': f'Invalid AWB mode name: {requested_mode_name}.'}), 400
+
+        # Apply the control change immediately
+        with config_lock:
+             picam2.set_controls({"AwbMode": new_awb_enum, "AwbEnable": True})
+             current_awb_mode = new_awb_enum # Update global state
+             last_error = None # Clear potential previous errors
+             logging.info(f"Successfully set AWB mode to: {current_awb_mode.name}")
+
+        # Give AWB some time to adjust
+        time.sleep(0.5)
+
+        return jsonify({'success': True, 'message': f'AWB mode set to {current_awb_mode.name}.', 'current_awb_mode': current_awb_mode.name})
+
+    except Exception as e:
+        logging.error(f"Error setting AWB mode: {e}", exc_info=True)
+        last_error = f"AWB Set Error: {e}"
+        return jsonify({'success': False, 'message': f'Failed to set AWB mode: {e}'}), 500
+    
 @app.route("/video_feed")
 def video_feed():
     logging.info("Client connected to video feed.")
@@ -938,38 +1155,46 @@ def video_feed():
 @app.route("/status")
 def status():
     global last_error, digital_recording_active, is_recording, battery_percentage, config_lock
-    global video_writers, recording_paths
+    global video_writers, recording_paths, current_awb_mode # <<< Added current_awb_mode here
 
     status_text = "Streaming"
     rec_stat_detail = ""
     current_w, current_h = get_current_resolution()
     batt_perc = None
     current_digital_state = False
+    awb_mode_name = "Unknown" # Default
 
     with config_lock:
         current_digital_state = digital_recording_active
         batt_perc = battery_percentage
         current_is_recording = is_recording
         current_recording_paths = list(recording_paths)
+        # <<< NEW: Safely get AWB mode name >>>
+        try:
+             awb_mode_name = current_awb_mode.name
+        except AttributeError:
+             logging.warning("current_awb_mode might not be initialized correctly yet.")
+             awb_mode_name = "Initializing"
+        # <<< END NEW >>>
 
     if current_is_recording:
         if current_recording_paths:
-             rec_stat_detail = f" (Recording to {len(current_recording_paths)} USB(s))"
+            rec_stat_detail = f" (Recording to {len(current_recording_paths)} USB(s))"
         else:
-             rec_stat_detail = " (ERROR: Recording active but no paths!)"
-             logging.warning("Status check found is_recording=True but recording_paths is empty.")
-             if not last_error: last_error = "Inconsistent State: Recording active but no paths."
+            rec_stat_detail = " (ERROR: Recording active but no paths!)"
+            logging.warning("Status check found is_recording=True but recording_paths is empty.")
+            if not last_error: last_error = "Inconsistent State: Recording active but no paths."
         status_text += rec_stat_detail
 
     err_msg = last_error if last_error else ""
 
-    # Auto-clear errors logic
+    # Auto-clear errors logic (remains the same)
     if output_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg):
-         logging.info("Auto-clearing previous camera/capture error as frames are being received.")
-         last_error = None; err_msg = ""
+            logging.info("Auto-clearing previous camera/capture error as frames are being received.")
+            last_error = None; err_msg = ""
     if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
-         logging.info("Auto-clearing previous battery monitor error as a reading was successful.")
-         last_error = None; err_msg = ""
+            logging.info("Auto-clearing previous battery monitor error as a reading was successful.")
+            last_error = None; err_msg = ""
 
     return jsonify({
         'is_recording': current_is_recording,
@@ -978,7 +1203,8 @@ def status():
         'status_text': status_text,
         'error': err_msg,
         'active_recordings': current_recording_paths,
-        'battery_percent': batt_perc
+        'battery_percent': batt_perc,
+        'awb_mode': awb_mode_name # <<< NEW: Added AWB mode to status >>>
     })
 
 
