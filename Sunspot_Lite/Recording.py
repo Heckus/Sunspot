@@ -113,7 +113,7 @@ MIN_SHARPNESS = 0.0
 MAX_SHARPNESS = 2.0 # Allow a bit more range
 STEP_SHARPNESS = 0.1
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # ===========================================================
 # === BATTERY MONITOR (INA219) CODE START ===
