@@ -976,12 +976,11 @@ def index():
     global current_saturation, MIN_SATURATION, MAX_SATURATION, STEP_SATURATION
     global current_sharpness, MIN_SHARPNESS, MAX_SHARPNESS, STEP_SHARPNESS
 
-    # Get current resolution
     current_w, current_h = get_current_resolution()
     resolution_text = f"{current_w}x{current_h}"
     err_msg = last_error if last_error else ""
 
-    # Get initial state for all controls
+    # <<< Get initial state for all controls >>>
     with config_lock:
         digital_rec_state_initial = digital_recording_active
         batt_perc_initial = battery_percentage
@@ -1000,10 +999,9 @@ def index():
         saturation_initial = current_saturation
         sharpness_initial = current_sharpness
 
-
     batt_text_initial = f"{batt_perc_initial:.1f}" if batt_perc_initial is not None else "--"
 
-    # Helper Function to Build Dropdown Options
+    # --- Helper Function to Build Dropdown Options ---
     def build_options(available_modes, current_mode_name):
         options_html = ""
         for mode_name in available_modes:
@@ -1011,16 +1009,17 @@ def index():
             options_html += f'<option value="{mode_name}"{selected_attr}>{mode_name}</option>'
         return options_html
 
-    # Build HTML Option Strings
+    # --- Build HTML Option Strings ---
     awb_options_html = build_options(AVAILABLE_AWB_MODES, current_awb_mode_name_initial)
     ae_options_html = build_options(AVAILABLE_AE_MODES, current_ae_mode_name_initial)
     metering_options_html = build_options(AVAILABLE_METERING_MODES, current_metering_mode_name_initial)
     noise_reduction_options_html = build_options(AVAILABLE_NOISE_REDUCTION_MODES, current_noise_reduction_mode_name_initial)
 
-    # Calculate URL for video feed
+    # --- Calculate URL for video feed ---
+    # Do this here so it's passed as a variable to the template
     video_feed_url = url_for('video_feed')
 
-    # Define HTML Template (Standard String, NOT f-string)
+    # --- Define HTML Template (Standard String, NOT f-string) ---
     html_template = """
     <!DOCTYPE html>
     <html>
@@ -1030,30 +1029,44 @@ def index():
         <title>Pi Camera Stream & Record</title>
         {% raw %}
         <style>
-            /* --- CSS Styles (remain the same as before) --- */
             body { font-family: sans-serif; line-height: 1.4; margin: 1em; background-color: #f0f0f0;}
             .container { max-width: 960px; margin: auto; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
             h1 { text-align: center; color: #333; margin-bottom: 10px; }
+
             .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 15px; }
+
             .status-panel, .controls-panel, .sliders-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
             .panel-title { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+
+            /* Status Grid */
             .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; }
             .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
-            #status, #rec-status, #resolution, #battery-level, #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status { color: #0056b3; font-weight: normal;}
+            #status, #rec-status, #resolution, #battery-level,
+            #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status /* Status IDs */
+             { color: #0056b3; font-weight: normal;}
             #rec-status.active { color: #D83B01; font-weight: bold;}
+
+            /* Main Controls */
             .main-controls { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
             .main-controls button { padding: 10px 20px; margin: 5px; font-size: 1em; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background-color: #e9e9e9; transition: background-color 0.2s, border-color 0.2s; }
             .main-controls button:hover:not(:disabled) { background-color: #dcdcdc; border-color: #bbb; }
+
+             /* Mode Select Controls */
             .mode-controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
             .mode-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
             .mode-controls select { padding: 5px 8px; font-size: 0.9em; border-radius: 4px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
             .mode-controls select:hover:not(:disabled) { border-color: #bbb; background-color: #f9f9f9; }
+
+            /* Slider Controls */
             .slider-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; margin-bottom: 8px; }
             .slider-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
             .slider-controls input[type=range] { width: 100%; margin: 0; padding: 0; cursor: pointer; }
-            .slider-controls span { font-size: 0.9em; color: #0056b3; min-width: 35px; text-align: right; }
-            #error { color: red; margin-top: 15px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; }
-            img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; } 
+            .slider-controls span { font-size: 0.9em; color: #0056b3; min-width: 35px; text-align: right; } /* For slider value display */
+
+            #error { color: red; margin-top: 15px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; /* Initially hidden */ }
+            img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; } /* Placeholder color */
+
+            /* Button Specific Styles */
             button#btn-record.recording-active { background-color: #ff4d4d; color: white; border-color: #ff1a1a; }
             button#btn-record.recording-active:hover:not(:disabled) { background-color: #e60000; }
             button#btn-record.recording-inactive { background-color: #4CAF50; color: white; border-color: #367c39;}
@@ -1098,16 +1111,19 @@ def index():
                      <div class="mode-controls">
                          <label for="awb-select">AWB Mode:</label>
                          <select id="awb-select" onchange="changeCameraControl('AwbMode', this.value)" title="Select Auto White Balance Mode">
-                             {{ awb_options_html | safe }}
+                             {{ awb_options_html | safe }} {# Use safe filter for HTML options #}
                          </select>
+
                          <label for="ae-select">Exposure Mode:</label>
                          <select id="ae-select" onchange="changeCameraControl('AeExposureMode', this.value)" title="Select Auto Exposure Mode">
                              {{ ae_options_html | safe }}
                          </select>
+
                         <label for="metering-select">Metering Mode:</label>
                          <select id="metering-select" onchange="changeCameraControl('AeMeteringMode', this.value)" title="Select AE Metering Mode">
                              {{ metering_options_html | safe }}
                          </select>
+
                          <label for="nr-select">Noise Reduction:</label>
                          <select id="nr-select" onchange="changeCameraControl('NoiseReductionMode', this.value)" title="Select Noise Reduction Mode">
                              {{ noise_reduction_options_html | safe }}
@@ -1120,36 +1136,37 @@ def index():
                      <div class="slider-controls">
                          <label for="brightness-slider">Brightness:</label>
                          <input type="range" id="brightness-slider" min="{{ MIN_BRIGHTNESS }}" max="{{ MAX_BRIGHTNESS }}" step="{{ STEP_BRIGHTNESS }}" value="{{ brightness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Brightness', this.value)" title="Adjust Brightness">
-                         <span id="brightness-slider-value">{{ "%.1f" | format(brightness_initial) }}</span>
+                         <span id="brightness-slider-value">{{ "%.1f" | format(brightness_initial) }}</span> {# Format initial value #}
+
                          <label for="contrast-slider">Contrast:</label>
                          <input type="range" id="contrast-slider" min="{{ MIN_CONTRAST }}" max="{{ MAX_CONTRAST }}" step="{{ STEP_CONTRAST }}" value="{{ contrast_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Contrast', this.value)" title="Adjust Contrast">
                          <span id="contrast-slider-value">{{ "%.1f" | format(contrast_initial) }}</span>
+
                          <label for="saturation-slider">Saturation:</label>
                          <input type="range" id="saturation-slider" min="{{ MIN_SATURATION }}" max="{{ MAX_SATURATION }}" step="{{ STEP_SATURATION }}" value="{{ saturation_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Saturation', this.value)" title="Adjust Saturation">
                          <span id="saturation-slider-value">{{ "%.1f" | format(saturation_initial) }}</span>
+
                          <label for="sharpness-slider">Sharpness:</label>
                          <input type="range" id="sharpness-slider" min="{{ MIN_SHARPNESS }}" max="{{ MAX_SHARPNESS }}" step="{{ STEP_SHARPNESS }}" value="{{ sharpness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Sharpness', this.value)" title="Adjust Sharpness">
                          <span id="sharpness-slider-value">{{ "%.1f" | format(sharpness_initial) }}</span>
                      </div>
                  </div>
+
             </div> <div id="error" {% if err_msg %}style="display: block;"{% endif %}>{{ err_msg }}</div>
-            
-            <img id="stream" src="{{ video_feed_url }}" alt="Loading stream..."
+            <img id="stream" src="{{ video_feed_url }}" width="{{ current_w }}" height="{{ current_h }}" alt="Loading stream..."
                    onerror="handleStreamError()" onload="handleStreamLoad()">
-                   
         </div>
 
         <script>
             // Use Jinja var for initial state:
             let currentDigitalRecordState = {{ 'true' if digital_rec_state_initial else 'false' }};
+            // Store base URL generated by Python/Flask
             const videoFeedUrlBase = "{{ video_feed_url }}"; 
 
-            // --- Get Element References ---
-            // It's safer to get these *inside* DOMContentLoaded, but keep them here for now
-            // If errors occur, moving them inside might be necessary.
+            // Get Element References (same as before)
             const statusElement = document.getElementById('status');
             const resolutionElement = document.getElementById('resolution');
-            const errorElement = document.getElementById('error'); // Used in catch block
+            const errorElement = document.getElementById('error');
             const streamImage = document.getElementById('stream');
             const btnUp = document.getElementById('btn-up');
             const btnDown = document.getElementById('btn-down');
@@ -1174,95 +1191,264 @@ def index():
             const saturationValueSpan = document.getElementById('saturation-slider-value');
             const sharpnessValueSpan = document.getElementById('sharpness-slider-value');
 
-            // --- State Variables ---
+            // State Variables (same as before)
             let isChangingResolution = false;
             let isTogglingRecording = false;
             let isChangingControl = false; 
             let isPoweringDown = false;
-            let statusUpdateInterval = null; // Initialize to null
+            let statusUpdateInterval;
             let streamErrorTimeout = null;
 
-            // --- Function Definitions (Keep all functions as they were in the last correct version) ---
-            function updateRecordButtonState() { /* ... */ }
-            function updateStatus() { /* ... */ }
-            function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) { /* ... */ }
-            function disableControls(poweringDown = false) { /* ... */ }
-            function enableControls() { /* ... */ }
-            function changeResolution(direction) { /* ... (Include the console.log in timeout) ... */ }
-            function toggleRecording() { /* ... */ }
-            function changeCameraControl(controlName, controlValue) { /* ... */ }
-            function updateSliderValue(sliderId, value) { /* ... */ }
-            function powerDown() { /* ... */ }
-            function handleStreamError() { /* ... */ }
-            function handleStreamLoad() { /* ... */ }
-
-            // --- Initialization (DOM Ready) ---
-            document.addEventListener('DOMContentLoaded', () => {
-                // <<< Add Debugging Logs and Error Handling >>>
-                console.log("DOMContentLoaded event fired."); 
-                try { 
-                    // Ensure errorElement is available before potentially using it in catch block below
-                     if (!errorElement) { 
-                         console.error("Critical Error: #error element not found!"); 
-                         alert("UI Error: Cannot find the error display element.");
-                         return; // Stop initialization
-                     }
-
-                    console.log("Getting initial element references again inside DOMContentLoaded...");
-                    // Re-getting elements inside ensures they exist, though slightly redundant
-                    // If the script fails here, it means the HTML structure is wrong.
-                    if (!document.getElementById('status')) throw new Error("Element #status not found");
-                    if (!document.getElementById('btn-record')) throw new Error("Element #btn-record not found");
-                    // ... add checks for other essential elements if needed ...
-                    console.log("Essential element references seem OK.");
-
-                    updateRecordButtonState();
-                    console.log("updateRecordButtonState completed."); 
-
-                    updateStatus(); // Initial status fetch
-                    console.log("Initial updateStatus call completed."); 
-
-                    // Start periodic status updates ONLY if interval isn't already set
-                    if (!statusUpdateInterval) {
-                         statusUpdateInterval = setInterval(() => {
-                            if (!isChangingResolution && !isTogglingRecording && !isChangingControl && !isPoweringDown) {
-                                updateStatus();
-                            }
-                         }, 5000); 
-                         console.log("setInterval completed."); 
-                    } else {
-                         console.log("setInterval skipped (already running).");
-                    }
-                    
-                    // Explicitly enable controls once initialization seems okay (unless powering down)
-                    // This ensures buttons work even if initial status fetch fails
-                    if (!isPoweringDown) {
-                        console.log("Enabling controls after initial setup attempt.");
-                        enableControls(); // Make sure controls are enabled
-                    } else {
-                         console.log("Controls kept disabled as isPoweringDown is true.");
-                    }
-
-                } catch (e) {
-                    console.error("Error during DOMContentLoaded initialization:", e); 
-                    // Display error in the UI's error element
-                    if (errorElement) { // Check if errorElement itself was found
-                         errorElement.textContent = "UI Initialization Error: " + e.message;
-                         errorElement.style.display = 'block';
-                    } else {
-                         // Fallback if even the error element is missing
-                         alert("Critical UI Initialization Error: " + e.message);
-                    }
-                     // Optionally disable all controls if init fails badly
-                     try { disableControls(); } catch(dis_err) {} 
+            // --- UI Update Functions ---
+            function updateRecordButtonState() { 
+                if (currentDigitalRecordState) {
+                    btnRecord.textContent = "Stop Rec (Web)";
+                    btnRecord.classList.remove('recording-inactive');
+                    btnRecord.classList.add('recording-active');
+                } else {
+                    btnRecord.textContent = "Start Rec (Web)";
+                    btnRecord.classList.add('recording-inactive');
+                    btnRecord.classList.remove('recording-active');
                 }
+             }
+
+            function updateStatus() {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                fetch('/status')
+                    .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
+                    .then(data => {
+                        statusElement.textContent = data.status_text || 'Unknown';
+                        recStatusElement.textContent = data.is_recording ? "ACTIVE" : "OFF";
+                        recStatusElement.classList.toggle('active', data.is_recording);
+                        if (data.resolution && resolutionElement.textContent !== data.resolution) {
+                            resolutionElement.textContent = data.resolution;
+                            const [w, h] = data.resolution.split('x');
+                            if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {
+                                streamImage.setAttribute('width', w);
+                                streamImage.setAttribute('height', h);
+                            }
+                        }
+                        if (data.error) { errorElement.textContent = data.error; errorElement.style.display = 'block'; }
+                        else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
+                        if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {
+                            currentDigitalRecordState = data.digital_recording_active;
+                            updateRecordButtonState();
+                        }
+
+                        updateControlUI('awb_mode', data.awb_mode, awbStatusElement, awbSelectElement);
+                        updateControlUI('ae_mode', data.ae_mode, aeStatusElement, aeSelectElement);
+                        updateControlUI('metering_mode', data.metering_mode, meteringStatusElement, meteringSelectElement);
+                        updateControlUI('noise_reduction_mode', data.noise_reduction_mode, nrStatusElement, nrSelectElement);
+                        updateControlUI('brightness', data.brightness, null, brightnessSlider, brightnessValueSpan);
+                        updateControlUI('contrast', data.contrast, null, contrastSlider, contrastValueSpan);
+                        updateControlUI('saturation', data.saturation, null, saturationSlider, saturationValueSpan);
+                        updateControlUI('sharpness', data.sharpness, null, sharpnessSlider, sharpnessValueSpan);
+
+                        if (data.battery_percent !== null && data.battery_percent !== undefined) {
+                             batteryLevelElement.textContent = data.battery_percent.toFixed(1);
+                         } else {
+                             batteryLevelElement.textContent = "--";
+                         }
+                    })
+                    .catch(err => { 
+                        console.error("Error fetching status:", err); statusElement.textContent = "Error"; errorElement.textContent = `Status fetch failed: ${err.message}.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Err"; batteryLevelElement.textContent = "Err";
+                        awbStatusElement.textContent = "Err"; aeStatusElement.textContent = "Err"; meteringStatusElement.textContent = "Err"; nrStatusElement.textContent = "Err";
+                    });
+            }
+
+            function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) {
+                 if (newValue === undefined || newValue === null) return; 
+
+                 let currentUIValue = controlEl ? controlEl.value : null;
+                 let formattedNewValue = newValue;
+
+                 if (valueSpanEl) { 
+                     formattedNewValue = parseFloat(newValue).toFixed(1);
+                     currentUIValue = parseFloat(currentUIValue).toFixed(1);
+                     if (valueSpanEl.textContent !== formattedNewValue) {
+                        valueSpanEl.textContent = formattedNewValue;
+                     }
+                 }
+
+                 if (statusEl && statusEl.textContent !== newValue.toString()) {
+                     statusEl.textContent = newValue.toString();
+                 }
+
+                 if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution) { 
+                    console.log(`Status update forcing UI for ${controlKey}: UI='${currentUIValue}' -> Status='${formattedNewValue}'`);
+                    controlEl.value = newValue; 
+                 }
+            }
+
+            function disableControls(poweringDown = false) {
+                [btnUp, btnDown, btnRecord, btnPowerdown,
+                 awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                 brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+                ].forEach(el => el.disabled = true);
+                if(poweringDown) { document.body.style.opacity = '0.7'; }
+            }
+
+            function enableControls() {
+                 if (!isPoweringDown) {
+                    [btnUp, btnDown, btnRecord, btnPowerdown,
+                     awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                     brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+                    ].forEach(el => el.disabled = false);
+                    document.body.style.opacity = '1';
+                 }
+            }
+
+            // --- Action Functions ---
+            function changeResolution(direction) {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                
+                isChangingResolution = true; 
+                disableControls(); 
+                statusElement.textContent = 'Changing resolution... Please wait.'; 
+                errorElement.textContent = ''; 
+                errorElement.style.display = 'none';
+                
+                const cleanupResolutionChange = (isSuccess = false) => {
+                    console.log(`CleanupResolutionChange called (success=${isSuccess}).`);
+                    if (isChangingResolution) { 
+                        isChangingResolution = false; 
+                        enableControls();
+                        // Refresh status after cleanup, regardless of success/failure now
+                        setTimeout(updateStatus, 500); 
+                    }
+                };
+
+                const resolutionTimeoutId = setTimeout(() => {
+                    console.warn("Resolution change timeout reached. Forcing cleanup."); 
+                    console.log("Attempting cleanupResolutionChange from timeout..."); // <<< Keep log for testing >>>
+                    cleanupResolutionChange(false); 
+                 }, 8000); 
+
+                fetch(`/set_resolution/${direction}`, { method: 'POST' })
+                    .then(response => response.json().then(data => ({ status: response.status, body: data })))
+                    .then(({ status, body }) => {
+                        if (status === 200 && body.success) {
+                            statusElement.textContent = 'Resolution change initiated. Reloading stream...';
+                            resolutionElement.textContent = body.new_resolution;
+                            const [w, h] = body.new_resolution.split('x');
+                            streamImage.setAttribute('width', w); 
+                            streamImage.setAttribute('height', h);
+                            console.log("Resolution change request successful, forcing stream reload...");
+                            streamImage.src = videoFeedUrlBase + "?" + Date.now(); // Use JS variable for base URL
+                        } else {
+                            errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; 
+                            errorElement.style.display = 'block'; 
+                            statusElement.textContent = 'Resolution change failed.';
+                            clearTimeout(resolutionTimeoutId); 
+                            cleanupResolutionChange(false); 
+                        }
+                    })
+                    .catch(err => {
+                         console.error("Network error sending resolution change:", err); 
+                         errorElement.textContent = `Network error changing resolution: ${err.message}`; 
+                         errorElement.style.display = 'block'; 
+                         statusElement.textContent = 'Resolution change failed (Network).';
+                         clearTimeout(resolutionTimeoutId); 
+                         cleanupResolutionChange(false); 
+                     });
+            }
+
+            function toggleRecording() {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                 fetch('/toggle_recording', { method: 'POST' })
+                    .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
+                    .then(data => {
+                        if (data.success) {
+                            currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${currentDigitalRecordState ? 'enabled' : 'disabled'}. State updating...`; setTimeout(updateStatus, 1500); 
+                        } else {
+                            errorElement.textContent = `Error toggling recording: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000); 
+                        }
+                    })
+                    .catch(err => { console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); })
+                    .finally(() => { isTogglingRecording = false; enableControls(); }); 
+            }
+
+            function changeCameraControl(controlName, controlValue) {
+                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                 console.log(`Requesting control change: ${controlName} = ${controlValue}`);
+                 isChangingControl = true; disableControls(); 
+                 statusElement.textContent = `Setting ${controlName}...`;
+                 errorElement.textContent = ''; errorElement.style.display = 'none';
+
+                 fetch('/set_camera_control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ control: controlName, value: controlValue })
+                 })
+                 .then(response => response.json().then(data => ({ status: response.status, body: data })))
+                 .then(({ status, body }) => {
+                     if (status === 200 && body.success) {
+                         statusElement.textContent = `${controlName} set.`;
+                         setTimeout(updateStatus, 500); 
+                     } else {
+                         errorElement.textContent = `Error setting ${controlName}: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed.`;
+                         setTimeout(updateStatus, 500); 
+                     }
+                 })
+                 .catch(err => {
+                     console.error(`Network error setting ${controlName}:`, err); errorElement.textContent = `Network error: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed (Network).`;
+                     setTimeout(updateStatus, 500); 
+                 })
+                 .finally(() => {
+                     isChangingControl = false;
+                     enableControls();
+                 });
+             }
+
+             function updateSliderValue(sliderId, value) {
+                const spanId = sliderId + '-value';
+                const spanElement = document.getElementById(spanId);
+                if (spanElement) {
+                    spanElement.textContent = parseFloat(value).toFixed(1);
+                }
+             }
+             
+            function powerDown() {
+                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                 if (!confirm("Are you sure you want to power down?")) { return; }
+                 isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                 if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+                 fetch('/power_down', { method: 'POST' }) 
+                     .then(response => { if (!response.ok) { return response.json().then(data => { throw new Error(data.message || `HTTP error! Status: ${response.status}`); }).catch(() => { throw new Error(`HTTP error! Status: ${response.status}`); }); } return response.json(); })
+                     .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); } }) 
+                     .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); }); 
+            }
+
+            // --- Stream Handling ---
+            function handleStreamError() {
+                console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => { streamImage.src = videoFeedUrlBase + "?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }, 3000);
+            }
+
+            function handleStreamLoad() {
+                 if (streamErrorTimeout) {
+                     clearTimeout(streamErrorTimeout);
+                     streamErrorTimeout = null;
+                     if (!isPoweringDown && !isChangingResolution && !isChangingControl) { 
+                        // statusElement.textContent = 'Stream active.'; 
+                     }
+                 }
+                console.log("Stream image onload fired."); 
+             }
+
+            // --- Initialization ---
+            document.addEventListener('DOMContentLoaded', () => {
+                updateRecordButtonState();
+                updateStatus(); 
+                statusUpdateInterval = setInterval(() => {
+                    if (!isChangingResolution && !isTogglingRecording && !isChangingControl && !isPoweringDown) {
+                        updateStatus();
+                    }
+                 }, 5000); 
             });
 
-            window.addEventListener('beforeunload', () => { 
-                if (statusUpdateInterval) {
-                     clearInterval(statusUpdateInterval);
-                     statusUpdateInterval = null; // Clear interval ID
-                }
+            window.addEventListener('beforeunload', () => {
+                if (statusUpdateInterval) clearInterval(statusUpdateInterval);
             });
         </script>
     </body>
@@ -1270,10 +1456,12 @@ def index():
     """
 
     # Render the template using Jinja2 via render_template_string
+    # Pass all necessary variables as keyword arguments
     return render_template_string(html_template,
-                                   # Pass all necessary variables as keyword arguments
                                    resolution_text=resolution_text,
-                                   err_msg=err_msg, 
+                                   current_w=current_w,
+                                   current_h=current_h,
+                                   err_msg=err_msg,
                                    digital_rec_state_initial=digital_rec_state_initial,
                                    batt_text_initial=batt_text_initial,
                                    current_awb_mode_name_initial=current_awb_mode_name_initial,
@@ -1300,7 +1488,7 @@ def index():
                                    MIN_SHARPNESS=MIN_SHARPNESS,
                                    MAX_SHARPNESS=MAX_SHARPNESS,
                                    STEP_SHARPNESS=STEP_SHARPNESS,
-                                   video_feed_url=video_feed_url 
+                                   video_feed_url=video_feed_url # Pass the URL generated by url_for
                                   )
 
 
