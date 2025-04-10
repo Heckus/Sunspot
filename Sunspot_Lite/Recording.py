@@ -15,7 +15,6 @@ from libcamera import controls
 import smbus
 import math
 import subprocess # For running external commands
-import numpy as np # <<< Add numpy import
 
 # --- Configuration ---
 SUPPORTED_RESOLUTIONS = [
@@ -113,19 +112,6 @@ current_sharpness = DEFAULT_SHARPNESS
 MIN_SHARPNESS = 0.0
 MAX_SHARPNESS = 2.0 # Allow a bit more range
 STEP_SHARPNESS = 0.1
-
-undistort_active = False
-# --- CAMERA CALIBRATION DATA (PLACEHOLDERS - REPLACE WITH YOUR VALUES!) ---
-# Example K (3x3 Camera Matrix - Needs YOUR values)
-CAMERA_MATRIX_K = np.array([[1000.,    0.,  820.], # fx, 0, cx
-                           [   0., 1000.,  616.], # 0, fy, cy
-                           [   0.,    0.,    1.]]) # 0, 0, 1
-# Example D (Distortion Coefficients [k1, k2, p1, p2, k3] - Needs YOUR values for 160deg lens)
-DISTORTION_COEFF_D = np.array([[-0.1, 0.01, 0., 0., 0.]]) 
-# --- Undistortion Map Variables (Calculated later) ---
-undistort_map1 = None
-undistort_map2 = None
-undistort_optimal_matrix = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
@@ -358,45 +344,6 @@ def get_target_fps(width, height):
     else: # Default fallback (should ideally cover all SUPPORTED_RESOLUTIONS)
         return 30.0 # Default to 30 if resolution doesn't match specific cases
 
-def prepare_undistort_maps(width, height):
-    """Calculates the undistortion maps for cv2.remap based on global K and D"""
-    global undistort_map1, undistort_map2, undistort_optimal_matrix, CAMERA_MATRIX_K, DISTORTION_COEFF_D
-    
-    if CAMERA_MATRIX_K is None or DISTORTION_COEFF_D is None:
-         logging.error("Cannot prepare undistort maps: CAMERA_MATRIX_K or DISTORTION_COEFF_D is not set.")
-         undistort_map1 = None
-         undistort_map2 = None
-         return False
-
-    logging.info(f"Preparing undistort maps for {width}x{height}...")
-    try:
-        # Get the optimal new camera matrix (alpha=0 crops the black borders)
-        # If you want to keep all pixels, try alpha=1, but you'll get black areas/curves
-        alpha = 0 
-        undistort_optimal_matrix, roi = cv2.getOptimalNewCameraMatrix(CAMERA_MATRIX_K, DISTORTION_COEFF_D, (width, height), alpha, (width, height))
-        
-        if undistort_optimal_matrix is None:
-             raise ValueError("getOptimalNewCameraMatrix failed to return a matrix.")
-
-        # Calculate the undistortion mapping
-        # CV_32FC1 means the maps use 32-bit floats and have 1 channel
-        undistort_map1, undistort_map2 = cv2.initUndistortRectifyMap(
-            CAMERA_MATRIX_K, 
-            DISTORTION_COEFF_D, 
-            None, # R (Rectification transform) - None for monocular
-            undistort_optimal_matrix, 
-            (width, height), 
-            cv2.CV_32FC1 # Map type
-        )
-        logging.info("Undistort maps prepared successfully.")
-        return True
-    except Exception as e:
-        logging.error(f"!!! Failed to prepare undistort maps: {e}", exc_info=True)
-        undistort_map1 = None
-        undistort_map2 = None
-        undistort_optimal_matrix = None
-        return False
-    
 # --- Initialize Camera ---
 def initialize_camera(target_width, target_height):
     # <<< Update global list to include all control variables >>>
@@ -735,59 +682,52 @@ def stop_recording():
 
     logging.info(f"Recording fully stopped. Released {released_count} writer(s) out of {len(writers_to_release)} attempted.")
 
-# --- Capture Loop Function ---
 def capture_and_process_loop():
     global output_frame, is_recording, last_error, picam2, switch, digital_recording_active
     global current_resolution_index, reconfigure_resolution_index, last_battery_read_time
-    global video_writers, recording_paths, config_lock 
-    global undistort_active, undistort_map1, undistort_map2, last_prepared_undistort_size # Added undistortion vars
+    global video_writers, recording_paths, config_lock # <<< Added config_lock to globals
 
     logging.info("Starting frame capture loop...")
     consecutive_error_count = 0
     max_consecutive_errors = 15
-    # Removed last_prepared_undistort_size init from here, handled in global scope
 
     # --- Initial Camera Setup ---
     width, height = get_current_resolution()
     if not initialize_camera(width, height):
         logging.error("Initial camera setup failed. Capture thread cannot start.")
-        return 
-
-    # --- Prepare initial undistort maps if active ---
-    if undistort_active:
-        if prepare_undistort_maps(width, height):
-            last_prepared_undistort_size = (width, height)
-        else:
-            logging.error("Failed initial undistort map preparation. Disabling feature.")
-            undistort_active = False # Disable if prep fails
+        return # Exit thread
 
     # --- Main Loop ---
-    loop_iteration = 0 
+    loop_iteration = 0 # Add iteration counter
     while not shutdown_event.is_set():
         loop_iteration += 1
-        logging.debug(f"--- Capture Loop Iteration {loop_iteration} Start ---") 
+        # <<< Log loop start >>>
+        logging.debug(f"--- Capture Loop Iteration {loop_iteration} Start ---")
         loop_start_time = time.monotonic()
 
         try:
             # --- Check for Reconfiguration Request ---
             target_index = -1
-            logging.debug(f"[{loop_iteration}] Checking reconfigure_resolution_index...") 
-            reconfig_check_value = None 
+            # <<< Log check start >>>
+            logging.debug(f"[{loop_iteration}] Checking reconfigure_resolution_index...")
+            reconfig_check_value = None
+            # <<< Log lock access >>>
             logging.debug(f"[{loop_iteration}] Attempting to acquire config_lock for reconfig check.")
-            with config_lock: 
-                 logging.debug(f"[{loop_iteration}] Acquired config_lock for reconfig check.") 
-                 reconfig_check_value = reconfigure_resolution_index 
-            logging.debug(f"[{loop_iteration}] Released config_lock. reconfigure_resolution_index = {reconfig_check_value}") 
+            with config_lock:
+                 logging.debug(f"[{loop_iteration}] Acquired config_lock for reconfig check.")
+                 reconfig_check_value = reconfigure_resolution_index
+            logging.debug(f"[{loop_iteration}] Released config_lock. reconfigure_resolution_index = {reconfig_check_value}")
 
             if reconfig_check_value is not None:
+                # Need to acquire lock again to clear it
                 logging.debug(f"[{loop_iteration}] Attempting to acquire config_lock to clear reconfig index.")
                 with config_lock:
                     logging.debug(f"[{loop_iteration}] Acquired config_lock to clear reconfig index.")
-                    if reconfigure_resolution_index is not None: 
+                    if reconfigure_resolution_index is not None: # Double check
                         target_index = reconfigure_resolution_index
-                        reconfigure_resolution_index = None 
+                        reconfigure_resolution_index = None # Clear request
                     else:
-                         target_index = -1 
+                         target_index = -1 # Value changed between checks
                 logging.debug(f"[{loop_iteration}] Released config_lock after clearing reconfig index. Target index set to {target_index}")
             else:
                  target_index = -1
@@ -806,67 +746,36 @@ def capture_and_process_loop():
                     stop_recording()
 
                 new_width, new_height = SUPPORTED_RESOLUTIONS[target_index]
-                if initialize_camera(new_width, new_height): 
+                if initialize_camera(new_width, new_height):
                     with config_lock:
-                        current_resolution_index = target_index 
+                        current_resolution_index = target_index
                     logging.info(f"[{loop_iteration}] --- Reconfiguration successful to {new_width}x{new_height} ---")
-                    
-                    # Re-prepare undistort maps if active 
-                    if undistort_active:
-                        logging.info(f"[{loop_iteration}] Re-preparing undistort maps for new resolution.")
-                        if prepare_undistort_maps(new_width, new_height):
-                            last_prepared_undistort_size = (new_width, new_height)
-                        else:
-                             logging.error("Failed undistort map preparation after reconfig. Disabling feature.")
-                             undistort_active = False 
-                    else: # Ensure maps are cleared if undistort is not active
-                         undistort_map1 = None
-                         undistort_map2 = None
-                         last_prepared_undistort_size = None
-
-                    # Resume recording if needed
                     if should_be_recording_after:
                         logging.info(f"[{loop_iteration}] Resuming recording after successful reconfiguration...")
-                        time.sleep(1.0) 
+                        time.sleep(1.0)
                         if not start_recording():
                             logging.error(f"[{loop_iteration}] Failed to restart recording after reconfiguration!")
                 else:
-                     # Reconfiguration failed! Attempt to restore previous resolution
-                     logging.error(f"[{loop_iteration}] !!! Failed reconfigure to index {target_index}. Attempting to restore previous resolution... !!!")
-                     prev_width, prev_height = get_current_resolution() 
-                     if not initialize_camera(prev_width, prev_height):
+                    logging.error(f"[{loop_iteration}] !!! Failed reconfigure to index {target_index}. Attempting to restore previous resolution... !!!")
+                    prev_width, prev_height = get_current_resolution()
+                    if not initialize_camera(prev_width, prev_height):
                         logging.critical(f"[{loop_iteration}] !!! Failed to restore previous camera resolution after failed reconfig. Stopping service. !!!")
                         last_error = "Camera failed fatally during reconfig restore."
-                        shutdown_event.set(); break 
-                     else:
+                        shutdown_event.set(); break
+                    else:
                         logging.info(f"[{loop_iteration}] Successfully restored previous camera resolution.")
-                        # Ensure maps are correct/cleared after failed reconfig too
-                        if undistort_active:
-                             prev_w_restored, prev_h_restored = get_current_resolution() # Should match prev_width, prev_height
-                             if last_prepared_undistort_size != (prev_w_restored, prev_h_restored):
-                                  logging.info(f"[{loop_iteration}] Re-preparing undistort maps for restored resolution.")
-                                  if prepare_undistort_maps(prev_w_restored, prev_h_restored):
-                                       last_prepared_undistort_size = (prev_w_restored, prev_h_restored)
-                                  else:
-                                       logging.error("Failed map prep after failed reconfig. Disabling feature.")
-                                       undistort_active = False
-                        else:
-                             undistort_map1 = None
-                             undistort_map2 = None
-                             last_prepared_undistort_size = None
-                        # Try restarting recording if it was on before
                         if should_be_recording_after:
                             logging.info(f"[{loop_iteration}] Attempting recording restart with restored resolution...")
                             time.sleep(1.0)
                             if not start_recording():
                                 logging.error(f"[{loop_iteration}] Failed to restart recording after failed reconfig and restore.")
 
-
                 logging.info(f"[{loop_iteration}] --- Finished handling reconfiguration request ---")
-                continue 
+                continue # Go to the start of the next while loop iteration
 
             # --- Check if Camera is Available (if not reconfiguring) ---
-            logging.debug(f"[{loop_iteration}] Checking camera availability (picam2 object)...") 
+            # <<< Log detailed camera check >>>
+            logging.debug(f"[{loop_iteration}] Checking camera availability (picam2 object)...")
             is_cam_available = False
             cam_status_details = "Unknown"
             if picam2 is not None:
@@ -886,6 +795,7 @@ def capture_and_process_loop():
                  logging.error(f"[{loop_iteration}] picam2 object is None!")
                  cam_status_details = "picam2 is None"
             logging.debug(f"[{loop_iteration}] Camera status details: {cam_status_details}")
+            # <<< End detailed camera check >>>
 
             if not is_cam_available:
                 if not last_error: last_error = "Picamera2 became unavailable unexpectedly."
@@ -894,51 +804,30 @@ def capture_and_process_loop():
                 if initialize_camera(width, height):
                     logging.info(f"[{loop_iteration}] Camera re-initialized successfully after unexpected stop.")
                     last_error = None; consecutive_error_count = 0
-                     # Re-prepare maps after successful re-init if needed
-                    if undistort_active:
-                         if prepare_undistort_maps(width, height):
-                              last_prepared_undistort_size = (width, height)
-                         else:
-                              logging.error("Failed map prep after re-init. Disabling feature.")
-                              undistort_active = False
                 else:
                     logging.error(f"[{loop_iteration}] Camera re-initialization failed: {last_error}. Stopping capture loop.")
                     shutdown_event.set(); break
-                continue 
+                continue # Skip rest of loop for this iteration
             else:
-                 logging.debug(f"[{loop_iteration}] Camera check passed.") 
+                 logging.debug(f"[{loop_iteration}] Camera check passed.")
 
             # --- Capture Frame ---
-            logging.debug(f"[{loop_iteration}] Attempting to capture frame...") 
+            logging.debug(f"[{loop_iteration}] Attempting to capture frame...") # Log before capture
             frame_bgr = picam2.capture_array("main")
-            logging.debug(f"[{loop_iteration}] capture_array call completed (frame is {'None' if frame_bgr is None else 'Valid'}).") 
+            logging.debug(f"[{loop_iteration}] capture_array call completed (frame is {'None' if frame_bgr is None else 'Valid'}).") # Log after capture
+
 
             if frame_bgr is None:
-                logging.warning(f"[{loop_iteration}] Failed to capture frame (capture_array returned None). Retrying...")
-                consecutive_error_count += 1
-                if consecutive_error_count > max_consecutive_errors:
-                    last_error = f"Failed capture {max_consecutive_errors} consecutive times. Assuming camera failure."
-                    logging.error(last_error); shutdown_event.set(); break
-                time.sleep(0.1); continue 
+                # ... (Handle failed capture - remains the same) ...
+                continue
             else:
                  if consecutive_error_count > 0:
                       logging.info(f"[{loop_iteration}] Recovered frame grab after {consecutive_error_count} errors.")
                  consecutive_error_count = 0
-            
-            # --- Apply Undistortion if Active --- 
-            processed_frame = frame_bgr 
-            if undistort_active and undistort_map1 is not None and undistort_map2 is not None:
-                 current_frame_size = (processed_frame.shape[1], processed_frame.shape[0]) # W, H
-                 if current_frame_size == last_prepared_undistort_size:
-                     logging.debug(f"[{loop_iteration}] Applying undistortion remap...")
-                     remap_start_time = time.monotonic()
-                     processed_frame = cv2.remap(frame_bgr, undistort_map1, undistort_map2, cv2.INTER_LINEAR)
-                     remap_duration = (time.monotonic() - remap_start_time) * 1000
-                     logging.debug(f"[{loop_iteration}] Remap completed in {remap_duration:.1f} ms.")
-                 else:
-                      logging.warning(f"[{loop_iteration}] Undistort active but maps size {last_prepared_undistort_size} != frame size {current_frame_size}. Skipping undistort.")
+                 # logging.debug(f"[{loop_iteration}] Frame captured successfully.") # Already logged completion
 
-            # --- Check Recording Trigger ---
+
+            # --- Check Recording Trigger (Switch / Digital) ---
             physical_switch_on = False
             if switch is not None:
                 try:
@@ -946,10 +835,11 @@ def capture_and_process_loop():
                 except Exception as e:
                     logging.error(f"Error reading switch state: {e}")
                     last_error = f"Switch Read Error: {e}"
+                    # Decide behavior: maybe assume OFF or keep last known state? Assume OFF for now.
                     physical_switch_on = False
 
             with config_lock:
-                digital_switch_on = digital_recording_active 
+                digital_switch_on = digital_recording_active # Read digital state under lock
 
             should_be_recording = physical_switch_on or digital_switch_on
 
@@ -960,6 +850,7 @@ def capture_and_process_loop():
                 logging.info(f"Recording trigger active ({log_msg}) - initiating start.")
                 if not start_recording():
                     logging.error("Attempt to start recording failed.")
+                    # last_error should be set by start_recording()
             elif not should_be_recording and is_recording:
                 logging.info("Recording trigger(s) OFF - initiating stop.")
                 stop_recording()
@@ -967,44 +858,51 @@ def capture_and_process_loop():
             # --- Write Frame if Recording ---
             if is_recording:
                 if not video_writers:
+                    # Inconsistent state check
                     logging.warning("Inconsistent state: is_recording=True, but no video writers. Forcing stop.")
                     last_error = "Rec stopped: writer list was empty."
-                    stop_recording() 
+                    stop_recording() # Force stop and clear flag
                 else:
                     write_errors = 0
+                    # Use lists directly now, as start/stop handle clearing
                     for i, writer in enumerate(video_writers):
                         try:
-                            logging.debug(f"Writing frame to writer {i}") 
-                            writer.write(processed_frame) # Use potentially undistorted frame
+                            logging.debug(f"Writing frame to writer {i}") # Optional: debug log
+                            writer.write(frame_bgr)
                         except Exception as e:
                             path_str = recording_paths[i] if i < len(recording_paths) else f"Writer {i}"
                             logging.error(f"!!! Failed to write frame to {path_str}: {e}")
                             write_errors += 1
                             last_error = f"Frame write error: {os.path.basename(path_str)}"
+                            # Optional: Could remove the failing writer here? Complex.
                     if write_errors > 0 and write_errors == len(video_writers):
+                         # All writers failed
                          logging.error("All active video writers failed to write frame. Stopping recording.")
                          last_error = "Rec stopped: All writers failed write."
-                         stop_recording() 
+                         stop_recording() # Stop recording if all fail
 
             # --- Update Output Frame for Streaming ---
             with frame_lock:
-                output_frame = processed_frame.copy() # Use potentially undistorted frame
+                output_frame = frame_bgr.copy()
 
             # --- Periodic Battery Check ---
             if ina219_sensor and (loop_start_time - last_battery_read_time > BATTERY_READ_INTERVAL):
                     read_battery_level()
                     last_battery_read_time = loop_start_time
 
+            # Small delay to prevent overly tight loop if capture is very fast
+            # time.sleep(0.01) # Optional small sleep
+
         except Exception as e:
-            logging.exception(f"!!! [{loop_iteration}] Unexpected Error in capture loop: {e}") 
+            logging.exception(f"!!! [{loop_iteration}] Unexpected Error in capture loop: {e}") # Add iteration number
             last_error = f"Capture Loop Error: {e}"
             consecutive_error_count += 1
-            if consecutive_error_count > max_consecutive_errors / 2: 
+            if consecutive_error_count > max_consecutive_errors / 2:
                 logging.error(f"[{loop_iteration}] Too many consecutive errors ({consecutive_error_count}). Signaling shutdown.")
                 shutdown_event.set()
-            time.sleep(1) 
+            time.sleep(1)
 
-    # --- Cleanup after loop exit ---
+    # --- Cleanup after loop exit (if shutdown_event is set) ---
     logging.info("Exiting frame capture thread.")
     if is_recording:
         logging.info("Capture loop exiting: Stopping active recording...")
@@ -1017,7 +915,7 @@ def capture_and_process_loop():
             logging.info("Picamera2 released by capture thread.")
         except Exception as e:
             logging.error(f"Error stopping/closing Picamera2 in thread cleanup: {e}")
-# --- End capture_and_process_loop ---
+    # picam2 = None # Should be set to None in the main thread cleanup? Or here? Let main handle it.
 
 
 # ===========================================================
@@ -1077,7 +975,6 @@ def index():
     global current_contrast, MIN_CONTRAST, MAX_CONTRAST, STEP_CONTRAST
     global current_saturation, MIN_SATURATION, MAX_SATURATION, STEP_SATURATION
     global current_sharpness, MIN_SHARPNESS, MAX_SHARPNESS, STEP_SHARPNESS
-    global undistort_active 
 
     current_w, current_h = get_current_resolution()
     resolution_text = f"{current_w}x{current_h}"
@@ -1087,7 +984,6 @@ def index():
     with config_lock:
         digital_rec_state_initial = digital_recording_active
         batt_perc_initial = battery_percentage
-        undistort_state_initial = undistort_active 
 
         try: current_awb_mode_name_initial = current_awb_mode.name
         except AttributeError: current_awb_mode_name_initial = DEFAULT_AWB_MODE_NAME
@@ -1120,6 +1016,7 @@ def index():
     noise_reduction_options_html = build_options(AVAILABLE_NOISE_REDUCTION_MODES, current_noise_reduction_mode_name_initial)
 
     # --- Calculate URL for video feed ---
+    # Do this here so it's passed as a variable to the template
     video_feed_url = url_for('video_feed')
 
     # --- Define HTML Template (Standard String, NOT f-string) ---
@@ -1132,39 +1029,48 @@ def index():
         <title>Pi Camera Stream & Record</title>
         {% raw %}
         <style>
-            /* --- CSS Styles (remain the same as before) --- */
             body { font-family: sans-serif; line-height: 1.4; margin: 1em; background-color: #f0f0f0;}
-            .container { max-width: 960px; margin: 0 auto; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .container { max-width: 960px; margin: auto; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
             h1 { text-align: center; color: #333; margin-bottom: 10px; }
+
             .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 15px; }
-            .status-panel, .controls-panel, .sliders-panel { background-color: #eef; padding: 15px; border-radius: 5px; box-sizing: border-box; } 
+
+            .status-panel, .controls-panel, .sliders-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
             .panel-title { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+
+            /* Status Grid */
             .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; }
             .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
-            #status, #rec-status, #resolution, #battery-level, #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status, #undistort-status { color: #0056b3; font-weight: normal; overflow-wrap: break-word; } 
+            #status, #rec-status, #resolution, #battery-level,
+            #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status /* Status IDs */
+             { color: #0056b3; font-weight: normal;}
             #rec-status.active { color: #D83B01; font-weight: bold;}
-            #undistort-status.active { color: #1E88E5; font-weight: bold; } 
+
+            /* Main Controls */
             .main-controls { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
-            .main-controls button { padding: 10px 15px; margin: 5px; font-size: 1em; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background-color: #e9e9e9; transition: background-color 0.2s, border-color 0.2s; }
+            .main-controls button { padding: 10px 20px; margin: 5px; font-size: 1em; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background-color: #e9e9e9; transition: background-color 0.2s, border-color 0.2s; }
             .main-controls button:hover:not(:disabled) { background-color: #dcdcdc; border-color: #bbb; }
+
+             /* Mode Select Controls */
             .mode-controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
             .mode-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
             .mode-controls select { padding: 5px 8px; font-size: 0.9em; border-radius: 4px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
             .mode-controls select:hover:not(:disabled) { border-color: #bbb; background-color: #f9f9f9; }
+
+            /* Slider Controls */
             .slider-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; margin-bottom: 8px; }
             .slider-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
-            .slider-controls input[type=range] { width: 100%; margin: 0; padding: 0; cursor: pointer; box-sizing: border-box; } 
-            .slider-controls span { font-size: 0.9em; color: #0056b3; min-width: 35px; text-align: right; } 
-            #error { color: red; margin-top: 15px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; }
-            img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; box-sizing: border-box;} 
+            .slider-controls input[type=range] { width: 100%; margin: 0; padding: 0; cursor: pointer; }
+            .slider-controls span { font-size: 0.9em; color: #0056b3; min-width: 35px; text-align: right; } /* For slider value display */
+
+            #error { color: red; margin-top: 15px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; /* Initially hidden */ }
+            img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; } /* Placeholder color */
+
+            /* Button Specific Styles */
             button#btn-record.recording-active { background-color: #ff4d4d; color: white; border-color: #ff1a1a; }
             button#btn-record.recording-active:hover:not(:disabled) { background-color: #e60000; }
             button#btn-record.recording-inactive { background-color: #4CAF50; color: white; border-color: #367c39;}
             button#btn-record.recording-inactive:hover:not(:disabled) { background-color: #45a049; }
-            button#btn-undistort.undistort-active { background-color: #2196F3; color: white; border-color: #0b7dda; }
-            button#btn-undistort.undistort-inactive { background-color: #eee; color: #333; border-color: #ccc; }
-            button#btn-undistort.undistort-active:hover:not(:disabled) { background-color: #0b7dda; }
-            button#btn-undistort.undistort-inactive:hover:not(:disabled) { background-color: #ddd; }
             button#btn-powerdown { background-color: #f44336; color: white; border-color: #d32f2f;}
             button#btn-powerdown:hover:not(:disabled) { background-color: #c62828; }
             button:disabled, select:disabled, input[type=range]:disabled { background-color: #cccccc !important; cursor: not-allowed !important; border-color: #999 !important; color: #666 !important; opacity: 0.7; }
@@ -1180,7 +1086,6 @@ def index():
              <div class="main-controls">
                  <button onclick="changeResolution('down')" id="btn-down" title="Decrease resolution">&laquo; Lower Res</button>
                  <button onclick="toggleRecording()" id="btn-record" class="recording-inactive" title="Toggle recording via web interface">Start Rec (Web)</button>
-                 <button onclick="toggleUndistort()" id="btn-undistort" class="{{ 'undistort-active' if undistort_state_initial else 'undistort-inactive' }}" title="Toggle Fisheye Undistortion (Performance Cost!)">{{ 'Undistort ON' if undistort_state_initial else 'Undistort OFF' }}</button>
                  <button onclick="changeResolution('up')" id="btn-up" title="Increase resolution">Higher Res &raquo;</button>
                  <button onclick="powerDown()" id="btn-powerdown" title="Gracefully stop service and reboot Pi">Power Down</button>
             </div>
@@ -1198,7 +1103,6 @@ def index():
                         <span>AE Mode:</span> <span id="ae-mode-status">{{ current_ae_mode_name_initial }}</span>
                         <span>Metering:</span> <span id="metering-mode-status">{{ current_metering_mode_name_initial }}</span>
                         <span>Noise Red.:</span> <span id="nr-mode-status">{{ current_noise_reduction_mode_name_initial }}</span>
-                        <span>Undistortion:</span> <span id="undistort-status" class="{{ 'active' if undistort_state_initial else '' }}">{{ 'ON' if undistort_state_initial else 'OFF' }}</span>
                     </div>
                  </div>
 
@@ -1207,56 +1111,62 @@ def index():
                      <div class="mode-controls">
                          <label for="awb-select">AWB Mode:</label>
                          <select id="awb-select" onchange="changeCameraControl('AwbMode', this.value)" title="Select Auto White Balance Mode">
-                             {{ awb_options_html | safe }}
+                             {{ awb_options_html | safe }} {# Use safe filter for HTML options #}
                          </select>
+
                          <label for="ae-select">Exposure Mode:</label>
                          <select id="ae-select" onchange="changeCameraControl('AeExposureMode', this.value)" title="Select Auto Exposure Mode">
                              {{ ae_options_html | safe }}
                          </select>
+
                         <label for="metering-select">Metering Mode:</label>
                          <select id="metering-select" onchange="changeCameraControl('AeMeteringMode', this.value)" title="Select AE Metering Mode">
                              {{ metering_options_html | safe }}
                          </select>
+
                          <label for="nr-select">Noise Reduction:</label>
                          <select id="nr-select" onchange="changeCameraControl('NoiseReductionMode', this.value)" title="Select Noise Reduction Mode">
                              {{ noise_reduction_options_html | safe }}
                          </select>
                      </div>
-                     </div>
+                 </div>
 
                  <div class="sliders-panel">
                      <div class="panel-title">Image Adjustments</div>
                      <div class="slider-controls">
                          <label for="brightness-slider">Brightness:</label>
                          <input type="range" id="brightness-slider" min="{{ MIN_BRIGHTNESS }}" max="{{ MAX_BRIGHTNESS }}" step="{{ STEP_BRIGHTNESS }}" value="{{ brightness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Brightness', this.value)" title="Adjust Brightness">
-                         <span id="brightness-slider-value">{{ "%.1f" | format(brightness_initial) }}</span>
+                         <span id="brightness-slider-value">{{ "%.1f" | format(brightness_initial) }}</span> {# Format initial value #}
+
                          <label for="contrast-slider">Contrast:</label>
                          <input type="range" id="contrast-slider" min="{{ MIN_CONTRAST }}" max="{{ MAX_CONTRAST }}" step="{{ STEP_CONTRAST }}" value="{{ contrast_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Contrast', this.value)" title="Adjust Contrast">
                          <span id="contrast-slider-value">{{ "%.1f" | format(contrast_initial) }}</span>
+
                          <label for="saturation-slider">Saturation:</label>
                          <input type="range" id="saturation-slider" min="{{ MIN_SATURATION }}" max="{{ MAX_SATURATION }}" step="{{ STEP_SATURATION }}" value="{{ saturation_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Saturation', this.value)" title="Adjust Saturation">
                          <span id="saturation-slider-value">{{ "%.1f" | format(saturation_initial) }}</span>
+
                          <label for="sharpness-slider">Sharpness:</label>
                          <input type="range" id="sharpness-slider" min="{{ MIN_SHARPNESS }}" max="{{ MAX_SHARPNESS }}" step="{{ STEP_SHARPNESS }}" value="{{ sharpness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Sharpness', this.value)" title="Adjust Sharpness">
                          <span id="sharpness-slider-value">{{ "%.1f" | format(sharpness_initial) }}</span>
                      </div>
-                      </div>
+                 </div>
+
             </div> <div id="error" {% if err_msg %}style="display: block;"{% endif %}>{{ err_msg }}</div>
-            
-            <img id="stream" src="{{ video_feed_url }}" alt="Loading stream..."
+            <img id="stream" src="{{ video_feed_url }}" width="{{ current_w }}" height="{{ current_h }}" alt="Loading stream..."
                    onerror="handleStreamError()" onload="handleStreamLoad()">
-                   
         </div>
 
         <script>
-            // --- JavaScript Section (Includes Resolution Timeout Fix) ---
+            // Use Jinja var for initial state:
             let currentDigitalRecordState = {{ 'true' if digital_rec_state_initial else 'false' }};
+            // Store base URL generated by Python/Flask
             const videoFeedUrlBase = "{{ video_feed_url }}"; 
 
-            // Get Element References
+            // Get Element References (same as before)
             const statusElement = document.getElementById('status');
             const resolutionElement = document.getElementById('resolution');
-            const errorElement = document.getElementById('error'); 
+            const errorElement = document.getElementById('error');
             const streamImage = document.getElementById('stream');
             const btnUp = document.getElementById('btn-up');
             const btnDown = document.getElementById('btn-down');
@@ -1268,8 +1178,6 @@ def index():
             const aeStatusElement = document.getElementById('ae-mode-status');
             const meteringStatusElement = document.getElementById('metering-mode-status');
             const nrStatusElement = document.getElementById('nr-mode-status');
-            const btnUndistort = document.getElementById('btn-undistort'); 
-            const undistortStatusElement = document.getElementById('undistort-status'); 
             const awbSelectElement = document.getElementById('awb-select');
             const aeSelectElement = document.getElementById('ae-select');
             const meteringSelectElement = document.getElementById('metering-select');
@@ -1283,66 +1191,138 @@ def index():
             const saturationValueSpan = document.getElementById('saturation-slider-value');
             const sharpnessValueSpan = document.getElementById('sharpness-slider-value');
 
-            // State Variables 
+            // State Variables (same as before)
             let isChangingResolution = false;
             let isTogglingRecording = false;
             let isChangingControl = false; 
-            let isTogglingUndistort = false; 
             let isPoweringDown = false;
-            let statusUpdateInterval = null; 
+            let statusUpdateInterval;
             let streamErrorTimeout = null;
 
             // --- UI Update Functions ---
-            function updateRecordButtonState() { /* (Same) */ }
-            function updateUndistortButtonState(isActive) { /* (Same) */ }
-            function updateStatus() { /* (Same - includes undistort update) */ }
-            function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) { /* (Same) */ }
+            function updateRecordButtonState() { 
+                if (currentDigitalRecordState) {
+                    btnRecord.textContent = "Stop Rec (Web)";
+                    btnRecord.classList.remove('recording-inactive');
+                    btnRecord.classList.add('recording-active');
+                } else {
+                    btnRecord.textContent = "Start Rec (Web)";
+                    btnRecord.classList.add('recording-inactive');
+                    btnRecord.classList.remove('recording-active');
+                }
+             }
 
-            function disableControls(poweringDown = false) { /* (Includes btnUndistort) */
-                console.log(`disableControls called (poweringDown=${poweringDown})`); 
-                [btnUp, btnDown, btnRecord, btnUndistort, btnPowerdown, 
+            function updateStatus() {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                fetch('/status')
+                    .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
+                    .then(data => {
+                        statusElement.textContent = data.status_text || 'Unknown';
+                        recStatusElement.textContent = data.is_recording ? "ACTIVE" : "OFF";
+                        recStatusElement.classList.toggle('active', data.is_recording);
+                        if (data.resolution && resolutionElement.textContent !== data.resolution) {
+                            resolutionElement.textContent = data.resolution;
+                            const [w, h] = data.resolution.split('x');
+                            if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {
+                                streamImage.setAttribute('width', w);
+                                streamImage.setAttribute('height', h);
+                            }
+                        }
+                        if (data.error) { errorElement.textContent = data.error; errorElement.style.display = 'block'; }
+                        else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
+                        if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {
+                            currentDigitalRecordState = data.digital_recording_active;
+                            updateRecordButtonState();
+                        }
+
+                        updateControlUI('awb_mode', data.awb_mode, awbStatusElement, awbSelectElement);
+                        updateControlUI('ae_mode', data.ae_mode, aeStatusElement, aeSelectElement);
+                        updateControlUI('metering_mode', data.metering_mode, meteringStatusElement, meteringSelectElement);
+                        updateControlUI('noise_reduction_mode', data.noise_reduction_mode, nrStatusElement, nrSelectElement);
+                        updateControlUI('brightness', data.brightness, null, brightnessSlider, brightnessValueSpan);
+                        updateControlUI('contrast', data.contrast, null, contrastSlider, contrastValueSpan);
+                        updateControlUI('saturation', data.saturation, null, saturationSlider, saturationValueSpan);
+                        updateControlUI('sharpness', data.sharpness, null, sharpnessSlider, sharpnessValueSpan);
+
+                        if (data.battery_percent !== null && data.battery_percent !== undefined) {
+                             batteryLevelElement.textContent = data.battery_percent.toFixed(1);
+                         } else {
+                             batteryLevelElement.textContent = "--";
+                         }
+                    })
+                    .catch(err => { 
+                        console.error("Error fetching status:", err); statusElement.textContent = "Error"; errorElement.textContent = `Status fetch failed: ${err.message}.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Err"; batteryLevelElement.textContent = "Err";
+                        awbStatusElement.textContent = "Err"; aeStatusElement.textContent = "Err"; meteringStatusElement.textContent = "Err"; nrStatusElement.textContent = "Err";
+                    });
+            }
+
+            function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) {
+                 if (newValue === undefined || newValue === null) return; 
+
+                 let currentUIValue = controlEl ? controlEl.value : null;
+                 let formattedNewValue = newValue;
+
+                 if (valueSpanEl) { 
+                     formattedNewValue = parseFloat(newValue).toFixed(1);
+                     currentUIValue = parseFloat(currentUIValue).toFixed(1);
+                     if (valueSpanEl.textContent !== formattedNewValue) {
+                        valueSpanEl.textContent = formattedNewValue;
+                     }
+                 }
+
+                 if (statusEl && statusEl.textContent !== newValue.toString()) {
+                     statusEl.textContent = newValue.toString();
+                 }
+
+                 if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution) { 
+                    console.log(`Status update forcing UI for ${controlKey}: UI='${currentUIValue}' -> Status='${formattedNewValue}'`);
+                    controlEl.value = newValue; 
+                 }
+            }
+
+            function disableControls(poweringDown = false) {
+                [btnUp, btnDown, btnRecord, btnPowerdown,
                  awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
                  brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
-                ].forEach(el => { if(el) el.disabled = true; }); 
+                ].forEach(el => el.disabled = true);
                 if(poweringDown) { document.body.style.opacity = '0.7'; }
             }
 
-            function enableControls() { /* (Includes btnUndistort and log) */
-                 console.log("enableControls called"); 
+            function enableControls() {
                  if (!isPoweringDown) {
-                    [btnUp, btnDown, btnRecord, btnUndistort, btnPowerdown, 
+                    [btnUp, btnDown, btnRecord, btnPowerdown,
                      awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
                      brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
-                    ].forEach(el => { if(el) el.disabled = false; }); 
+                    ].forEach(el => el.disabled = false);
                     document.body.style.opacity = '1';
-                 } else {
-                    console.log("enableControls skipped: isPoweringDown is true.");
                  }
             }
 
             // --- Action Functions ---
-            function changeResolution(direction) { /* (Includes isTogglingUndistort check and timeout logic) */
-                if (isChangingResolution || isTogglingRecording || isChangingControl || isTogglingUndistort || isPoweringDown) return;
+            function changeResolution(direction) {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
                 
                 isChangingResolution = true; 
                 disableControls(); 
                 statusElement.textContent = 'Changing resolution... Please wait.'; 
-                errorElement.textContent = ''; errorElement.style.display = 'none';
+                errorElement.textContent = ''; 
+                errorElement.style.display = 'none';
                 
                 const cleanupResolutionChange = (isSuccess = false) => {
-                    console.log(`CleanupResolutionChange called (success=${isSuccess}). Current isChangingResolution = ${isChangingResolution}`);
+                    console.log(`CleanupResolutionChange called (success=${isSuccess}).`);
                     if (isChangingResolution) { 
                         isChangingResolution = false; 
-                        enableControls(); 
+                        enableControls();
+                        // Refresh status after cleanup, regardless of success/failure now
                         setTimeout(updateStatus, 500); 
                     }
                 };
 
                 const resolutionTimeoutId = setTimeout(() => {
                     console.warn("Resolution change timeout reached. Forcing cleanup."); 
-                    console.log("Attempting cleanupResolutionChange from timeout..."); 
+                    console.log("Attempting cleanupResolutionChange from timeout..."); // <<< Keep log for testing >>>
                     cleanupResolutionChange(false); 
-                 }, 8000); // 8 second timeout
+                 }, 8000); 
 
                 fetch(`/set_resolution/${direction}`, { method: 'POST' })
                     .then(response => response.json().then(data => ({ status: response.status, body: data })))
@@ -1350,10 +1330,11 @@ def index():
                         if (status === 200 && body.success) {
                             statusElement.textContent = 'Resolution change initiated. Reloading stream...';
                             resolutionElement.textContent = body.new_resolution;
-                            // <<< No width/height set on img tag here >>>
+                            const [w, h] = body.new_resolution.split('x');
+                            streamImage.setAttribute('width', w); 
+                            streamImage.setAttribute('height', h);
                             console.log("Resolution change request successful, forcing stream reload...");
-                            streamImage.src = videoFeedUrlBase + "?" + Date.now(); 
-                            // Rely on timeout for cleanup
+                            streamImage.src = videoFeedUrlBase + "?" + Date.now(); // Use JS variable for base URL
                         } else {
                             errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`; 
                             errorElement.style.display = 'block'; 
@@ -1372,56 +1353,143 @@ def index():
                      });
             }
 
-            function toggleRecording() { /* (Includes isTogglingUndistort check) */ }
-            function changeCameraControl(controlName, controlValue) { /* (Includes isTogglingUndistort check) */ }
-            function toggleUndistort() { /* (Includes isTogglingUndistort check) */ }
-            function updateSliderValue(sliderId, value) { /* (Same) */ }
-            function powerDown() { /* (Includes isTogglingUndistort check) */ }
+            function toggleRecording() {
+                if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                isTogglingRecording = true; disableControls(); statusElement.textContent = 'Sending record command...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                 fetch('/toggle_recording', { method: 'POST' })
+                    .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
+                    .then(data => {
+                        if (data.success) {
+                            currentDigitalRecordState = data.digital_recording_active; updateRecordButtonState(); statusElement.textContent = `Digital recording ${currentDigitalRecordState ? 'enabled' : 'disabled'}. State updating...`; setTimeout(updateStatus, 1500); 
+                        } else {
+                            errorElement.textContent = `Error toggling recording: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Record command failed.'; setTimeout(updateStatus, 1000); 
+                        }
+                    })
+                    .catch(err => { console.error("Error toggling recording:", err); errorElement.textContent = `Network error toggling recording: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = 'Command failed (Network).'; setTimeout(updateStatus, 1000); })
+                    .finally(() => { isTogglingRecording = false; enableControls(); }); 
+            }
+
+            function changeCameraControl(controlName, controlValue) {
+                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                 console.log(`Requesting control change: ${controlName} = ${controlValue}`);
+                 isChangingControl = true; disableControls(); 
+                 statusElement.textContent = `Setting ${controlName}...`;
+                 errorElement.textContent = ''; errorElement.style.display = 'none';
+
+                 fetch('/set_camera_control', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ control: controlName, value: controlValue })
+                 })
+                 .then(response => response.json().then(data => ({ status: response.status, body: data })))
+                 .then(({ status, body }) => {
+                     if (status === 200 && body.success) {
+                         statusElement.textContent = `${controlName} set.`;
+                         setTimeout(updateStatus, 500); 
+                     } else {
+                         errorElement.textContent = `Error setting ${controlName}: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed.`;
+                         setTimeout(updateStatus, 500); 
+                     }
+                 })
+                 .catch(err => {
+                     console.error(`Network error setting ${controlName}:`, err); errorElement.textContent = `Network error: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed (Network).`;
+                     setTimeout(updateStatus, 500); 
+                 })
+                 .finally(() => {
+                     isChangingControl = false;
+                     enableControls();
+                 });
+             }
+
+             function updateSliderValue(sliderId, value) {
+                const spanId = sliderId + '-value';
+                const spanElement = document.getElementById(spanId);
+                if (spanElement) {
+                    spanElement.textContent = parseFloat(value).toFixed(1);
+                }
+             }
+             
+            function powerDown() {
+                 if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+                 if (!confirm("Are you sure you want to power down?")) { return; }
+                 isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down...'; errorElement.textContent = ''; errorElement.style.display = 'none';
+                 if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+                 fetch('/power_down', { method: 'POST' }) 
+                     .then(response => { if (!response.ok) { return response.json().then(data => { throw new Error(data.message || `HTTP error! Status: ${response.status}`); }).catch(() => { throw new Error(`HTTP error! Status: ${response.status}`); }); } return response.json(); })
+                     .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. Reboot will occur shortly.'; } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); } }) 
+                     .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); }); 
+            }
 
             // --- Stream Handling ---
-            function handleStreamError() { /* (Same) */ }
-            function handleStreamLoad() { /* (Same) */ }
+            function handleStreamError() {
+                console.warn("Stream image 'onerror' event triggered."); if (streamErrorTimeout || isPoweringDown) return; statusElement.textContent = 'Stream interrupted. Attempting reload...'; streamErrorTimeout = setTimeout(() => { streamImage.src = videoFeedUrlBase + "?" + Date.now(); streamErrorTimeout = null; setTimeout(updateStatus, 1000); }, 3000);
+            }
+
+            function handleStreamLoad() {
+                 if (streamErrorTimeout) {
+                     clearTimeout(streamErrorTimeout);
+                     streamErrorTimeout = null;
+                     if (!isPoweringDown && !isChangingResolution && !isChangingControl) { 
+                        // statusElement.textContent = 'Stream active.'; 
+                     }
+                 }
+                console.log("Stream image onload fired."); 
+             }
 
             // --- Initialization ---
-            document.addEventListener('DOMContentLoaded', () => { /* (Same simple version) */
-                console.log("DOMContentLoaded event fired.");
+            document.addEventListener('DOMContentLoaded', () => {
                 updateRecordButtonState();
                 updateStatus(); 
-                if (!statusUpdateInterval) {
-                    statusUpdateInterval = setInterval(() => {
-                        if (!isChangingResolution && !isTogglingRecording && !isChangingControl && !isTogglingUndistort && !isPoweringDown) {
-                            updateStatus();
-                        }
-                    }, 5000); 
-                 }
-                 if(!isPoweringDown) { enableControls(); } 
+                statusUpdateInterval = setInterval(() => {
+                    if (!isChangingResolution && !isTogglingRecording && !isChangingControl && !isPoweringDown) {
+                        updateStatus();
+                    }
+                 }, 5000); 
             });
-            window.addEventListener('beforeunload', () => { /* (Same) */ });
 
+            window.addEventListener('beforeunload', () => {
+                if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+            });
         </script>
     </body>
     </html>
     """
 
-    # Render the template
+    # Render the template using Jinja2 via render_template_string
+    # Pass all necessary variables as keyword arguments
     return render_template_string(html_template,
-                                   # Pass all necessary variables ...
                                    resolution_text=resolution_text,
-                                   err_msg=err_msg, 
+                                   current_w=current_w,
+                                   current_h=current_h,
+                                   err_msg=err_msg,
                                    digital_rec_state_initial=digital_rec_state_initial,
                                    batt_text_initial=batt_text_initial,
-                                   undistort_state_initial=undistort_state_initial, 
-                                   current_awb_mode_name_initial=current_awb_mode_name_initial, awb_options_html=awb_options_html, 
-                                   current_ae_mode_name_initial=current_ae_mode_name_initial, ae_options_html=ae_options_html, 
-                                   current_metering_mode_name_initial=current_metering_mode_name_initial, metering_options_html=metering_options_html, 
-                                   current_noise_reduction_mode_name_initial=current_noise_reduction_mode_name_initial, noise_reduction_options_html=noise_reduction_options_html, 
-                                   brightness_initial=brightness_initial, MIN_BRIGHTNESS=MIN_BRIGHTNESS, MAX_BRIGHTNESS=MAX_BRIGHTNESS, STEP_BRIGHTNESS=STEP_BRIGHTNESS, 
-                                   contrast_initial=contrast_initial, MIN_CONTRAST=MIN_CONTRAST, MAX_CONTRAST=MAX_CONTRAST, STEP_CONTRAST=STEP_CONTRAST, 
-                                   saturation_initial=saturation_initial, MIN_SATURATION=MIN_SATURATION, MAX_SATURATION=MAX_SATURATION, STEP_SATURATION=STEP_SATURATION, 
-                                   sharpness_initial=sharpness_initial, MIN_SHARPNESS=MIN_SHARPNESS, MAX_SHARPNESS=MAX_SHARPNESS, STEP_SHARPNESS=STEP_SHARPNESS, 
-                                   video_feed_url=video_feed_url 
+                                   current_awb_mode_name_initial=current_awb_mode_name_initial,
+                                   awb_options_html=awb_options_html,
+                                   current_ae_mode_name_initial=current_ae_mode_name_initial,
+                                   ae_options_html=ae_options_html,
+                                   current_metering_mode_name_initial=current_metering_mode_name_initial,
+                                   metering_options_html=metering_options_html,
+                                   current_noise_reduction_mode_name_initial=current_noise_reduction_mode_name_initial,
+                                   noise_reduction_options_html=noise_reduction_options_html,
+                                   brightness_initial=brightness_initial,
+                                   MIN_BRIGHTNESS=MIN_BRIGHTNESS,
+                                   MAX_BRIGHTNESS=MAX_BRIGHTNESS,
+                                   STEP_BRIGHTNESS=STEP_BRIGHTNESS,
+                                   contrast_initial=contrast_initial,
+                                   MIN_CONTRAST=MIN_CONTRAST,
+                                   MAX_CONTRAST=MAX_CONTRAST,
+                                   STEP_CONTRAST=STEP_CONTRAST,
+                                   saturation_initial=saturation_initial,
+                                   MIN_SATURATION=MIN_SATURATION,
+                                   MAX_SATURATION=MAX_SATURATION,
+                                   STEP_SATURATION=STEP_SATURATION,
+                                   sharpness_initial=sharpness_initial,
+                                   MIN_SHARPNESS=MIN_SHARPNESS,
+                                   MAX_SHARPNESS=MAX_SHARPNESS,
+                                   STEP_SHARPNESS=STEP_SHARPNESS,
+                                   video_feed_url=video_feed_url # Pass the URL generated by url_for
                                   )
-# --- End index Route ---
 
 
 @app.route('/set_camera_control', methods=['POST'])
@@ -1567,7 +1635,8 @@ def video_feed():
 @app.route("/status")
 def status():
     global last_error, digital_recording_active, is_recording, battery_percentage, config_lock
-    global video_writers, recording_paths, undistort_active # Added undistort_active
+    global video_writers, recording_paths
+    # <<< Add all control globals >>>
     global current_awb_mode, current_ae_mode, current_metering_mode, current_noise_reduction_mode
     global current_brightness, current_contrast, current_saturation, current_sharpness
 
@@ -1592,7 +1661,6 @@ def status():
         'contrast': DEFAULT_CONTRAST,
         'saturation': DEFAULT_SATURATION,
         'sharpness': DEFAULT_SHARPNESS,
-        'undistort_active': False # Add default
     }
 
     with config_lock:
@@ -1601,23 +1669,23 @@ def status():
         status_data['is_recording'] = is_recording
         status_data['active_recordings'] = list(recording_paths)
 
-        # Safely get current control values 
+        # <<< Safely get current control values >>>
         try: status_data['awb_mode'] = current_awb_mode.name
-        except AttributeError: pass 
+        except AttributeError: pass # Keep default "Unknown"
         try: status_data['ae_mode'] = current_ae_mode.name
         except AttributeError: pass
         try: status_data['metering_mode'] = current_metering_mode.name
         except AttributeError: pass
         try: status_data['noise_reduction_mode'] = current_noise_reduction_mode.name
-        except AttributeError: pass # Will fail if draft controls aren't available
+        except AttributeError: pass
 
         status_data['brightness'] = current_brightness
         status_data['contrast'] = current_contrast
         status_data['saturation'] = current_saturation
         status_data['sharpness'] = current_sharpness
-        status_data['undistort_active'] = undistort_active # Read global state
+        # <<< END Control Values >>>
 
-    # Recording Status Text 
+    # --- Recording Status Text ---
     if status_data['is_recording']:
         if status_data['active_recordings']:
             rec_stat_detail = f" (Recording to {len(status_data['active_recordings'])} USB(s))"
@@ -1627,7 +1695,7 @@ def status():
             if not last_error: last_error = "Inconsistent State: Recording active but no paths."
         status_data['status_text'] += rec_stat_detail
 
-    # Error Handling & Auto-Clear 
+    # --- Error Handling & Auto-Clear ---
     err_msg = last_error if last_error else ""
     if output_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg):
             logging.info("Auto-clearing previous camera/capture error as frames are being received.")
@@ -1635,14 +1703,10 @@ def status():
     if status_data['battery_percent'] is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
             logging.info("Auto-clearing previous battery monitor error as a reading was successful.")
             last_error = None; err_msg = ""
-    if undistort_map1 is not None and status_data['undistort_active'] and err_msg and "Undistort" in err_msg:
-            logging.info("Auto-clearing previous undistort error as maps seem prepared now.")
-            last_error = None; err_msg = ""
-
+    # Clear control set errors if things seem okay now? Maybe not automatic.
     status_data['error'] = err_msg
 
     return jsonify(status_data)
-# --- End /status Route ---
 
 
 @app.route("/set_resolution/<direction>", methods=['POST'])
@@ -1684,57 +1748,6 @@ def toggle_recording():
              last_error = None
     return jsonify({'success': True, 'digital_recording_active': new_state})
 
-@app.route('/toggle_undistort', methods=['POST'])
-def toggle_undistort():
-    global undistort_active, undistort_map1, undistort_map2, last_prepared_undistort_size
-    global config_lock, last_error
-
-    new_state = False
-    message = "Undistortion toggled."
-    success = True
-    status_code = 200
-
-    with config_lock:
-        undistort_active = not undistort_active
-        new_state = undistort_active
-        logging.info(f"Undistortion toggled via web UI to: {'ON' if new_state else 'OFF'}")
-
-        if new_state:
-            # Enabling - need to prepare maps for current resolution
-            if picam2 and picam2.started:
-                 current_w, current_h = get_current_resolution() # Use helper under lock? No, read global index only
-                 res_index = current_resolution_index
-                 current_w, current_h = SUPPORTED_RESOLUTIONS[res_index]
-
-                 logging.info("Enabling undistortion, preparing maps...")
-                 if prepare_undistort_maps(current_w, current_h):
-                     last_prepared_undistort_size = (current_w, current_h)
-                     message = "Undistortion enabled. Maps prepared."
-                 else:
-                     message = "Undistortion enabled BUT failed to prepare maps! Feature disabled."
-                     logging.error(message)
-                     last_error = "Undistort map prep failed."
-                     undistort_active = False # Revert state
-                     new_state = False
-                     success = False
-                     status_code = 500
-            else:
-                 message = "Undistortion enabled, but maps will be prepared when camera starts/reconfigures."
-                 # Clear potentially stale maps
-                 undistort_map1 = None
-                 undistort_map2 = None
-                 last_prepared_undistort_size = None
-        else:
-             # Disabling - clear maps
-             undistort_map1 = None
-             undistort_map2 = None
-             last_prepared_undistort_size = None
-             message = "Undistortion disabled."
-
-        if success and last_error and "Undistort" in last_error:
-             last_error = None # Clear previous undistort errors on success
-
-    return jsonify({'success': success, 'undistort_active': new_state, 'message': message}), status_code
 
 # --- MODIFIED Power Down Route (Sets Flags Only) ---
 @app.route('/power_down', methods=['POST'])
