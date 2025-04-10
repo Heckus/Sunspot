@@ -1407,7 +1407,7 @@ def set_camera_control():
 
             elif control_name == 'NoiseReductionMode':
                  # <<< V3 Change: Use __members__.get() >>>
-                 enum_val = controls.NoiseReductionModeEnum.__members__.get(control_value)
+                 enum_val = controls.draft.NoiseReductionModeEnum.__members__.get(control_value)
                  if enum_val is not None:
                      control_dict_to_set[control_name] = enum_val
                      current_noise_reduction_mode = enum_val
