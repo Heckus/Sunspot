@@ -62,21 +62,30 @@ ina219_sensor = None
 battery_percentage = None
 last_battery_read_time = 0.0
 
-AVAILABLE_AWB_MODES = [m.name for m in list(controls.AwbModeEnum)] # Use list()
+AVAILABLE_AWB_MODES = list(controls.AwbModeEnum.__members__.keys()) # Use __members__.keys()
 DEFAULT_AWB_MODE_NAME = "Auto"
-current_awb_mode = controls.AwbModeEnum.Auto
+# Ensure the default value exists in the retrieved keys, otherwise fallback needed
+if DEFAULT_AWB_MODE_NAME not in AVAILABLE_AWB_MODES:
+    DEFAULT_AWB_MODE_NAME = AVAILABLE_AWB_MODES[0] if AVAILABLE_AWB_MODES else "Auto" # Fallback safely
+current_awb_mode = getattr(controls.AwbModeEnum, DEFAULT_AWB_MODE_NAME)
 
-AVAILABLE_AE_MODES = [m.name for m in list(controls.AeExposureModeEnum)] # Use list()
+AVAILABLE_AE_MODES = list(controls.AeExposureModeEnum.__members__.keys()) # Use __members__.keys()
 DEFAULT_AE_MODE_NAME = "Normal"
-current_ae_mode = controls.AeExposureModeEnum.Normal
+if DEFAULT_AE_MODE_NAME not in AVAILABLE_AE_MODES:
+     DEFAULT_AE_MODE_NAME = AVAILABLE_AE_MODES[0] if AVAILABLE_AE_MODES else "Normal"
+current_ae_mode = getattr(controls.AeExposureModeEnum, DEFAULT_AE_MODE_NAME)
 
-AVAILABLE_METERING_MODES = [m.name for m in list(controls.AeMeteringModeEnum)] # Use list()
+AVAILABLE_METERING_MODES = list(controls.AeMeteringModeEnum.__members__.keys()) # Use __members__.keys()
 DEFAULT_METERING_MODE_NAME = "CentreWeighted"
-current_metering_mode = controls.AeMeteringModeEnum.CentreWeighted
+if DEFAULT_METERING_MODE_NAME not in AVAILABLE_METERING_MODES:
+     DEFAULT_METERING_MODE_NAME = AVAILABLE_METERING_MODES[0] if AVAILABLE_METERING_MODES else "CentreWeighted"
+current_metering_mode = getattr(controls.AeMeteringModeEnum, DEFAULT_METERING_MODE_NAME)
 
-AVAILABLE_NOISE_REDUCTION_MODES = [m.name for m in list(controls.NoiseReductionModeEnum)] # Use list()
+AVAILABLE_NOISE_REDUCTION_MODES = list(controls.NoiseReductionModeEnum.__members__.keys()) # Use __members__.keys()
 DEFAULT_NOISE_REDUCTION_MODE_NAME = "Fast"
-current_noise_reduction_mode = controls.NoiseReductionModeEnum.Fast
+if DEFAULT_NOISE_REDUCTION_MODE_NAME not in AVAILABLE_NOISE_REDUCTION_MODES:
+     DEFAULT_NOISE_REDUCTION_MODE_NAME = AVAILABLE_NOISE_REDUCTION_MODES[0] if AVAILABLE_NOISE_REDUCTION_MODES else "Fast"
+current_noise_reduction_mode = getattr(controls.NoiseReductionModeEnum, DEFAULT_NOISE_REDUCTION_MODE_NAME)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
