@@ -87,7 +87,7 @@ AVAILABLE_NOISE_REDUCTION_MODES = list(controls.draft.NoiseReductionModeEnum.__m
 DEFAULT_NOISE_REDUCTION_MODE_NAME = "Fast"
 if DEFAULT_NOISE_REDUCTION_MODE_NAME not in AVAILABLE_NOISE_REDUCTION_MODES:
      DEFAULT_NOISE_REDUCTION_MODE_NAME = AVAILABLE_NOISE_REDUCTION_MODES[0] if AVAILABLE_NOISE_REDUCTION_MODES else "Fast"
-current_noise_reduction_mode = getattr(controls.NoiseReductionModeEnum, DEFAULT_NOISE_REDUCTION_MODE_NAME)
+current_noise_reduction_mode = getattr(controls.draft.NoiseReductionModeEnum, DEFAULT_NOISE_REDUCTION_MODE_NAME)
 
 DEFAULT_BRIGHTNESS = 0.0
 current_brightness = DEFAULT_BRIGHTNESS
