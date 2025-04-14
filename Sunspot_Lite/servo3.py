@@ -19,6 +19,7 @@ import sys
 import os
 import time
 import subprocess
+import atexit
 
 # --- Configuration ---
 # NOTE: Verify these values for your specific Pi 5 setup!
