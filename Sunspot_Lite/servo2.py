@@ -13,7 +13,7 @@ import subprocess # To potentially check pin function
 # Check /sys/class/pwm/ or use tools to find the correct chip/channel for your GPIO.
 # Assuming GPIO 12 corresponds to pwmchip0, channel 0. This might be different!
 # Common alternatives for GPIO 12/13 on Pi 5 might be pwmchip2/pwmchip3.
-PWM_CHIP = 2
+PWM_CHIP = 0
 PWM_CHANNEL = 0
 GPIO_PIN = 12 # The GPIO pin we are intending to use (for reference/checks)
 
