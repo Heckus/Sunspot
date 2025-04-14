@@ -113,6 +113,25 @@ MIN_SHARPNESS = 0.0
 MAX_SHARPNESS = 2.0 # Allow a bit more range
 STEP_SHARPNESS = 0.1
 
+SERVO_PWM_CHIP = 0
+SERVO_PWM_CHANNEL = 0
+SERVO_GPIO_PIN = 12 # The GPIO pin we are intending to use (for reference)
+
+# Servo Timing Configuration
+SERVO_PERIOD_NS = 20000000  # 20ms (50Hz) period in nanoseconds
+SERVO_MIN_DUTY_NS = 500000  # 0.5ms pulse width min (for angle 0)
+SERVO_MAX_DUTY_NS = 2500000  # 2.5ms pulse width max (for angle 180)
+SERVO_CENTER_DUTY_NS = 1500000 # 1.5ms pulse width center
+SERVO_DUTY_RANGE_NS = SERVO_MAX_DUTY_NS - SERVO_MIN_DUTY_NS
+# +++ END Servo Configuration +++
+
+# --- Global Variables ---
+# ... (existing global variables remain the same) ...
+# +++ ADD Servo Global State +++
+_servo_pwm_exported = False # Track if servo PWM was successfully exported
+# +++ END Servo Global State +++
+
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
 # ===========================================================
@@ -319,6 +338,150 @@ def read_battery_level():
         with config_lock:
             battery_percentage = None
 
+def _servo_pwm_write(property, value):
+    """Internal helper to write a value to a PWM sysfs file for the servo."""
+    # Use servo-specific config variables
+    path_base = f"/sys/class/pwm/pwmchip{SERVO_PWM_CHIP}/"
+    path_channel = f"{path_base}pwm{SERVO_PWM_CHANNEL}/"
+    target_path = ""
+
+    if property in ["period", "duty_cycle", "enable", "polarity"]:
+        target_path = os.path.join(path_channel, property)
+    elif property == "export":
+        target_path = os.path.join(path_base, property)
+        value = str(SERVO_PWM_CHANNEL) # Value for export/unexport is the channel number
+    elif property == "unexport":
+        target_path = os.path.join(path_base, property)
+        value = str(SERVO_PWM_CHANNEL)
+    else:
+        logging.error(f"SERVO: Unknown PWM property '{property}'")
+        return False
+
+    # Check if path exists before writing (except for export/unexport)
+    if property not in ["export", "unexport"] and not os.path.exists(target_path):
+        logging.error(f"SERVO: PWM path does not exist: {target_path}")
+        logging.error("SERVO: Is the PWM channel exported? Is the chip/channel number correct?")
+        return False
+
+    try:
+        with open(target_path, "w") as f:
+            f.write(str(value))
+        # logging.debug(f"SERVO: Wrote '{value}' to '{target_path}'") # Uncomment for debug
+        return True
+    except IOError as e:
+        logging.error(f"SERVO: Error writing '{value}' to '{target_path}': {e}")
+        logging.error("SERVO: Check permissions (run with sudo?) and path existence.")
+        return False
+    except Exception as e:
+        logging.error(f"SERVO: Unexpected error writing to '{target_path}': {e}")
+        return False
+
+# --- Public Servo Control Functions ---
+
+def servo_pwm_setup():
+    """
+    Exports and configures the PWM channel for servo control.
+    Must be called before using set_servo_angle.
+    Returns:
+        bool: True on success, False on failure.
+    """
+    global _servo_pwm_exported # Access and modify global state
+
+    pwm_base_path = f"/sys/class/pwm/pwmchip{SERVO_PWM_CHIP}/"
+    pwm_path = f"{pwm_base_path}pwm{SERVO_PWM_CHANNEL}/"
+
+    logging.info(f"SERVO: Attempting setup: Chip={SERVO_PWM_CHIP}, Channel={SERVO_PWM_CHANNEL} (GPIO {SERVO_GPIO_PIN})")
+
+    # Check root privileges (essential for sysfs)
+    if os.geteuid() != 0:
+         logging.error("SERVO: Setup requires root privileges (run with 'sudo'). Cannot control servo.")
+         return False
+
+    # Export the channel if not already exported
+    if not os.path.exists(pwm_path):
+        if not os.path.exists(pwm_base_path):
+             logging.error(f"SERVO: PWM chip path does not exist: {pwm_base_path}")
+             logging.error("SERVO: Is the SERVO_PWM_CHIP number correct?")
+             return False
+
+        logging.info(f"SERVO: Exporting PWM channel {SERVO_PWM_CHANNEL} on chip {SERVO_PWM_CHIP}...")
+        if not _servo_pwm_write("export", SERVO_PWM_CHANNEL):
+            logging.error("SERVO: Failed to export PWM channel.")
+            return False
+        time.sleep(0.1) # Give sysfs time to create files
+        _servo_pwm_exported = True # Assume export worked if write didn't return False
+    else:
+         logging.info("SERVO: PWM channel already exported.")
+         _servo_pwm_exported = True # Mark as exported if path exists
+
+    # Check again if path exists after attempting export
+    if not os.path.exists(pwm_path):
+        logging.error(f"SERVO: PWM path still does not exist after export attempt: {pwm_path}")
+        _servo_pwm_exported = False
+        return False
+
+    # Configure PWM properties
+    logging.info("SERVO: Setting PWM period...")
+    if not _servo_pwm_write("period", SERVO_PERIOD_NS): return False
+    logging.info("SERVO: Setting initial PWM duty cycle (center)...")
+    if not _servo_pwm_write("duty_cycle", SERVO_CENTER_DUTY_NS): return False
+    logging.info("SERVO: Setting PWM polarity to normal...")
+    if not _servo_pwm_write("polarity", "normal"): return False
+    logging.info("SERVO: Enabling PWM output...")
+    if not _servo_pwm_write("enable", 1): return False
+
+    logging.info("SERVO: PWM setup complete.")
+    return True
+
+def set_servo_angle(angle):
+    """
+    Sets the servo position to the specified angle.
+    Args:
+        angle (float or int): The desired angle (typically 0 to 180).
+                               Values outside this range will be clamped.
+    """
+    if not _servo_pwm_exported:
+        logging.error("SERVO: PWM not setup or export failed. Call servo_pwm_setup() first.")
+        return
+
+    # Clamp angle to 0-180 range
+    clamped_angle = max(0.0, min(180.0, float(angle)))
+
+    # Map angle to duty cycle
+    proportion = clamped_angle / 180.0
+    duty_ns = SERVO_MIN_DUTY_NS + proportion * SERVO_DUTY_RANGE_NS
+    clamped_duty_ns = int(max(SERVO_MIN_DUTY_NS, min(SERVO_MAX_DUTY_NS, duty_ns)))
+
+    # logging.debug(f"SERVO: Setting angle {clamped_angle:.1f} -> duty cycle {clamped_duty_ns} ns") # Debug
+    if not _servo_pwm_write("duty_cycle", clamped_duty_ns):
+        logging.error("SERVO: Failed to set duty cycle.")
+
+
+def cleanup_servo_pwm():
+    """
+    Disables and unexports the servo PWM channel.
+    Call this during script shutdown.
+    """
+    global _servo_pwm_exported
+    logging.info("SERVO: Cleaning up PWM...")
+
+    pwm_base_path = f"/sys/class/pwm/pwmchip{SERVO_PWM_CHIP}/"
+    pwm_path = f"{pwm_base_path}pwm{SERVO_PWM_CHANNEL}/"
+
+    # Only try to disable/unexport if the path exists and we think we exported it
+    if _servo_pwm_exported and os.path.exists(pwm_path):
+        logging.info("SERVO: Disabling PWM output...")
+        _servo_pwm_write("enable", 0)
+        time.sleep(0.1) # Short delay before unexporting
+        logging.info(f"SERVO: Unexporting PWM channel {SERVO_PWM_CHANNEL} on chip {SERVO_PWM_CHIP}...")
+        if _servo_pwm_write("unexport", SERVO_PWM_CHANNEL):
+             _servo_pwm_exported = False # Mark as unexported on success
+    elif _servo_pwm_exported:
+         logging.warning("SERVO: PWM channel path not found, but was marked as exported. Skipping disable/unexport.")
+    else:
+         logging.info("SERVO: PWM channel not marked as exported, skipping cleanup actions.")
+
+    logging.info("SERVO: PWM cleanup attempt complete.")
 
 # --- Get Current Resolution ---
 def get_current_resolution():
@@ -1804,20 +1967,21 @@ def main():
         toggle_script_path = None # Or provide a default fallback path if needed
 
     # --- Sudoers Configuration Requirement ---
-    # IMPORTANT: sudoers configuration needed for power down via toggle.sh!
-    # The user running this script (e.g., 'hecke') needs this line via `sudo visudo`
-    # (Replace '/path/to/your/script/dir' with the actual directory):
-    # hecke ALL=(ALL) NOPASSWD: /path/to/your/script/dir/toggle.sh disable
-    #
+    # IMPORTANT: sudoers configuration needed for power down via toggle.sh AND servo control!
+    # The user running this script needs NOPASSWD access for:
+    # 1. The toggle script: `hecke ALL=(ALL) NOPASSWD: /path/to/your/script/dir/toggle.sh disable`
+    # 2. Potentially sysfs PWM access if udev rules aren't used. Running the whole script with sudo is simplest.
     # Ensure toggle.sh has execute permissions: chmod +x /path/to/your/script/dir/toggle.sh
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     logging.info(" --- Starting Camera Stream & Record Service --- ")
-    logging.info(f"--- Using Picamera2 and gpiozero ---")
-    # ... (other initial log messages remain the same) ...
+    logging.info(f"--- Using Picamera2, gpiozero, Flask ---")
+    # *** MODIFY: Add Servo to log message ***
+    logging.info(f"--- Features: Recording, Web UI, Button Input, Battery Monitor, Sysfs Servo ---")
     logging.info(f"--- Power Down Method: Web UI triggers '{TOGGLE_SCRIPT_NAME} disable' ---")
+    logging.warning("--- Script requires root privileges (sudo) for Sysfs PWM (Servo) and potentially toggle.sh ---")
 
 
     logging.info(f"MAIN: Initial shutdown_event state: {shutdown_event.is_set()}")
@@ -1861,6 +2025,20 @@ def main():
             if INA219_I2C_ADDRESS is not None:
                 if not setup_battery_monitor(): logging.warning(f"Battery monitor setup failed: {last_error}. Battery level unavailable.")
             else: logging.info("Battery monitor disabled (INA219_I2C_ADDRESS not set).")
+
+            # *** ADD: Initialize Servo ***
+            logging.info("Initializing Servo via Sysfs PWM...")
+            if servo_pwm_setup():
+                logging.info("Servo PWM setup successful. Setting initial angle...")
+                set_servo_angle(90) # Set to 90 degrees on startup
+                time.sleep(0.5) # Give servo time to move
+                logging.info("Servo initial position set to 90 degrees.")
+            else:
+                # Decide how critical servo failure is. Log error and continue, or raise?
+                logging.error("!!! SERVO PWM setup failed. Servo control will be unavailable. Check logs and sudo privileges.")
+                # Optional: Raise an error if servo is critical
+                # raise RuntimeError("Servo initialization failed, cannot continue.")
+            # *** END: Initialize Servo ***
 
             # Start Capture Thread
             logging.info("Starting frame capture thread...")
@@ -1936,6 +2114,11 @@ def main():
 
     # Cleanup GPIO
     if SWITCH_GPIO_PIN is not None: cleanup_gpio()
+
+    # *** ADD: Cleanup Servo PWM ***
+    logging.info("Cleaning up Servo PWM...")
+    cleanup_servo_pwm()
+    # *** END: Cleanup Servo PWM ***
 
     # --- Execute toggle.sh disable IF reboot was requested from web UI ---
     with config_lock:
