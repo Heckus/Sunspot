@@ -2,12 +2,15 @@
 
 import tkinter as tk
 from gpiozero import Servo
-from gpiozero.pins.pigpio import PiGPIOFactory # Often needed for smoother PWM
+from gpiozero.pins.pigpio import PiGPIOFactory # Recommended for PWM stability
 import sys
 import atexit
+import signal # Required for signal handling
 
 # --- Configuration ---
-SERVO_PIN = 17  # BCM Pin for the Servo
+# Using GPIO 12 as it supports Hardware PWM on Raspberry Pi 4/5
+# Hardware PWM generally provides a more stable signal than software PWM.
+SERVO_PIN = 12
 # Adjust min/max pulse width if your servo behaves differently
 # Standard SG90 servos usually work well with defaults (1ms to 2ms)
 # which gpiozero maps to values -1 to 1.
@@ -19,11 +22,13 @@ servo = None # Define servo variable outside try block
 factory = None # Define factory variable outside try block
 
 try:
-    # Using PiGPIOFactory often results in less jittery servo movement
+    # Using PiGPIOFactory is highly recommended for servos as it uses the
+    # pigpiod daemon, which handles PWM timing precisely (including hardware PWM
+    # when the specified pin supports it, like GPIO 12).
     # Make sure pigpiod daemon is running: sudo systemctl start pigpiod
     factory = PiGPIOFactory()
     servo = Servo(SERVO_PIN, pin_factory=factory) # min_pulse_width=min_pulse, max_pulse_width=max_pulse)
-    print(f"Servo initialized on GPIO {SERVO_PIN} using pigpio.")
+    print(f"Servo initialized on GPIO {SERVO_PIN} (Hardware PWM capable pin) using pigpio.")
 
 except Exception as e:
     print(f"Error initializing servo with pigpio: {e}")
@@ -31,11 +36,12 @@ except Exception as e:
     print("Is the pigpiod service running? Try: sudo systemctl start pigpiod")
     # Fallback or exit if initialization fails
     try:
-        print("Attempting fallback GPIO driver...")
+        print("Attempting fallback GPIO driver (may be less stable)...")
         # Default RPi.GPIO or RPIO based factory might work but can be jittery
+        # and might not utilize hardware PWM effectively.
         servo = Servo(SERVO_PIN)
         print(f"Fallback successful: Servo initialized on GPIO {SERVO_PIN} using default driver.")
-        print("Note: pigpio is recommended for smoother servo control.")
+        print("Note: pigpio on a hardware PWM pin is recommended for best results.")
     except Exception as fallback_e:
         print(f"Fallback failed: {fallback_e}")
         print("Exiting. Please check GPIO setup, permissions, and libraries.")
@@ -55,7 +61,8 @@ def set_servo_position(value):
         # Ensure the value is within the valid range
         clamped_value = max(-1.0, min(1.0, value))
         try:
-            print(f"Setting Servo (Pin {servo.pin}) to value: {clamped_value:.2f}")
+            # Uncomment below for verbose logging if needed
+            # print(f"Setting Servo (Pin {servo.pin}) to value: {clamped_value:.2f}")
             servo.value = clamped_value
         except Exception as e:
             print(f"Error setting servo position: {e}")
@@ -65,10 +72,12 @@ def set_servo_position(value):
 
 
 # --- GUI Setup ---
+root = None # Make root global for cleanup function if needed
 def create_gui():
     """Creates and runs the Tkinter GUI for servo control."""
+    global root # Access the global root variable
     root = tk.Tk()
-    root.title("Raspberry Pi Servo Control")
+    root.title("Raspberry Pi Servo Control (HW PWM)")
 
     # --- GUI Callback Function ---
     def map_slider_to_servo_value(slider_value_str):
@@ -94,7 +103,7 @@ def create_gui():
     main_frame.pack()
 
     # Servo Controls
-    label = tk.Label(main_frame, text=f"Servo Control (GPIO {SERVO_PIN})")
+    label = tk.Label(main_frame, text=f"Servo Control (GPIO {SERVO_PIN} - HW PWM)")
     label.pack(pady=(0, 5))
     # Using 0-180 for slider range as it often corresponds to standard servo degrees
     # Resolution determines the steps (e.g., 1 means integer steps)
@@ -109,15 +118,35 @@ def create_gui():
     update_servo(slider.get())
 
     # --- Start GUI ---
-    print("Starting GUI...")
-    root.mainloop()
+    print("Starting GUI... Press Ctrl+C in the terminal to exit.")
+    # root.mainloop() # We will run this in the main block with error handling
 
 # --- Cleanup Function ---
-def cleanup_gpio():
+# This function is registered by atexit and signal handler
+_cleanup_called = False
+def cleanup_gpio(signum=None, frame=None):
     """Closes servo connections gracefully."""
-    print("Exiting application. Cleaning up GPIO...")
+    global _cleanup_called
+    if _cleanup_called:
+        return # Avoid running cleanup multiple times
+    _cleanup_called = True
+
+    print("\nExiting application. Cleaning up GPIO...")
     global servo # Ensure we are referencing the global servo object
     global factory
+    global root
+
+    # Attempt to close the GUI window gracefully if it exists
+    if root:
+        try:
+            root.destroy()
+            print("GUI window closed.")
+        except tk.TclError as e:
+            print(f"Error closing GUI window (might already be closed): {e}")
+        except Exception as e:
+            print(f"Unexpected error closing GUI: {e}")
+
+
     if servo:
         try:
             servo.value = None # Detach servo (stops sending PWM)
@@ -133,18 +162,46 @@ def cleanup_gpio():
             print(f"Error closing pin factory: {e}")
 
     print("GPIO cleanup attempt complete.")
+    # Exit explicitly after cleanup if called by signal handler
+    if signum is not None:
+        sys.exit(0)
 
-# Register the cleanup function to run when the script exits
+
+# Register the cleanup function to run when the script exits normally or via signals
 atexit.register(cleanup_gpio)
+signal.signal(signal.SIGINT, cleanup_gpio) # Catch Ctrl+C (SIGINT)
+signal.signal(signal.SIGTERM, cleanup_gpio) # Catch termination signals
 
 # --- Main Execution ---
 if __name__ == "__main__":
     # Check if pigpiod service needs to be started (optional but recommended)
-    # You might need to run: sudo systemctl enable pigpiod
-    #                      sudo systemctl start pigpiod
-    # Or handle this check more robustly depending on your setup.
     print("Make sure the pigpio daemon is running for best results:")
     print(" sudo systemctl start pigpiod")
     print("------------------------------------")
 
-    create_gui() # Start the GUI
+    try:
+        create_gui() # Setup the GUI components
+        if root:
+             root.mainloop() # Start the Tkinter event loop
+        else:
+             print("Error: GUI root window not created.")
+
+    except KeyboardInterrupt:
+        print("\nCtrl+C detected. Initiating cleanup...")
+        # Cleanup is handled by the registered signal handler and atexit
+        # No need to call cleanup_gpio() here explicitly unless signal/atexit fails
+        pass # Allow the script to exit gracefully
+
+    except Exception as e:
+        print(f"\nAn unexpected error occurred: {e}")
+        # Cleanup should still be attempted by atexit
+
+    finally:
+        # Ensure cleanup is called if not already done by signal/atexit
+        # This is a fallback, the signal/atexit handlers are preferred
+        if not _cleanup_called:
+             print("Performing final cleanup check...")
+             cleanup_gpio()
+
+    print("Application finished.")
+
