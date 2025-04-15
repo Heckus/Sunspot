@@ -37,7 +37,7 @@ def signal_handler(sig, frame):
 
 def setup_logging():
     """Configures the logging system."""
-    log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.INFO)
+    log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.DEBUG)
     logging.basicConfig(level=log_level,
                         format=config.LOG_FORMAT,
                         datefmt=config.LOG_DATE_FORMAT)
