@@ -7,8 +7,8 @@ Handles settings for dual cameras (HQ and IMX219), audio, hardware, etc.
 """
 import os
 import logging
-from libcamera import controls
-from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
+#from libcamera import controls
+from picamera2 import Picamera2, controls # Needed for Picamera2.load_tuning_file
 
 # --- Camera Configuration ---
 
