@@ -32,8 +32,8 @@ CAM0_USE_TUNING_FILE = False      # HQ camera generally doesn't need specific tu
 CAM0_TUNING_FILE_PATH = None      # No tuning file path needed if not used
 
 # --- Camera 1 (IMX219 NoIR) Settings ---
-CAM1_RESOLUTION = (640, 480) # Fixed resolution for secondary stream
-CAM1_FRAME_RATE = 40.0       # Fixed frame rate for secondary stream
+CAM1_RESOLUTION = (1920, 1080) # Fixed resolution for secondary stream
+CAM1_FRAME_RATE = 30.0       # Fixed frame rate for secondary stream
 CAM1_USE_NOIR_TUNING = True  # Enable NoIR tuning for the IMX219
 CAM1_NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json" # Path to NoIR tuning
 
