@@ -14,6 +14,7 @@ import threading
 import signal
 import subprocess
 import sys # Import sys for interpreter check
+import socket
 
 # Import local modules
 import config

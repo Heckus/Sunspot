@@ -14,6 +14,7 @@ import threading
 import signal
 import subprocess
 import sys # Import sys for interpreter check
+import socket
 
 # Import local modules
 import config
@@ -179,7 +180,7 @@ def main_loop(hw_manager, cam_manager):
         physical_switch_on = hw_manager.is_switch_pressed()
         with _ui_lock: # Read digital state under lock
             digital_switch_on = _app_state.get("digital_recording_active", False)
-
+        #print(f"DEBUG: Physical Switch Reading (is_pressed): {physical_switch_on}, Digital Switch State: {digital_switch_on}") # <-- ADD THIS LINE
         should_be_recording = physical_switch_on or digital_switch_on
         is_currently_recording = cam_manager.is_recording
 

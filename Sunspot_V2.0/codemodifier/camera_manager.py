@@ -14,9 +14,8 @@ import logging
 import threading
 import cv2
 import numpy as np
-from picamera2 import Picamera2,controls, Transform
-
-# from libcamera import controls, Transform
+from picamera2 import Picamera2
+from libcamera import controls, Transform
 
 # Audio related imports
 import sounddevice as sd
@@ -69,6 +68,10 @@ class CameraManager:
         self.is_initialized0 = False
         self.is_initialized1 = False
         self.last_error = None # General/last error message
+        
+        self.output_frame = None
+        self.last_cam0_capture_time = None
+        self.actual_cam0_fps = None # Add this line
 
         # State variables for Cam0 (HQ)
         self.current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
@@ -333,8 +336,26 @@ class CameraManager:
         # (Code is identical to previous version - omitted for brevity)
         frame0 = None; frame1 = None; combined = None
         if self.is_initialized0 and self.picam0 and self.picam0.started:
-            try: frame0 = self.picam0.capture_array("main");
-            except Exception as e0: logging.error(f"!!! Error Cam0 capture: {e0}"); self.last_error = f"Cam0 Capture Error: {e0}"
+            try:
+                capture_start_time = time.monotonic() # Add timing
+                frame0 = self.picam0.capture_array("main")
+                capture_end_time = time.monotonic() # Add timing
+
+                if self.last_cam0_capture_time is not None:
+                    time_diff = capture_end_time - self.last_cam0_capture_time
+                    if time_diff > 0: # Avoid division by zero
+                        instant_fps = 1.0 / time_diff
+                        # Log if significantly different from expected interval
+                        # Get expected interval (might need to pass current_cam0_fps or frame_interval here)
+                        # Or just log the instant_fps for analysis
+                        logging.debug(f"Cam0 time since last capture: {time_diff:.4f}s (Instant FPS: {instant_fps:.1f})")
+
+                self.last_cam0_capture_time = capture_end_time # Update last time
+
+            except Exception as e0:
+                logging.error(f"!!! Error Cam0 capture: {e0}")
+                self.last_error = f"Cam0 Capture Error: {e0}"
+                self.last_cam0_capture_time = None # Reset on error
         if self.is_initialized1 and self.picam1 and self.picam1.started:
             try: frame1 = self.picam1.capture_array("main");
             except Exception as e1: logging.error(f"!!! Error Cam1 capture: {e1}"); self.last_error = (self.last_error or "") + (self.last_error and " / " or "") + f"Cam1 Capture Error: {e1}"
@@ -635,7 +656,7 @@ class CameraManager:
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
         logging.info(f"Muxing video '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
-        command = [config.FFMPEG_PATH, "-y", "-i", video_path, "-i", audio_path, "-c", "copy", "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-loglevel", config.FFMPEG_LOG_LEVEL, output_path]
+        command = [config.FFMPEG_PATH, "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-loglevel", config.FFMPEG_LOG_LEVEL, output_path]
         try:
             process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=config.AUDIO_MUX_TIMEOUT)
             logging.info(f"ffmpeg muxing successful for {output_path}."); logging.debug(f"ffmpeg output:\n{process.stdout}\n{process.stderr}"); self.audio_last_error = None
