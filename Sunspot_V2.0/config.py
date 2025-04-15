@@ -185,7 +185,7 @@ AUDIO_MUX_TIMEOUT = 60                # Max seconds to wait for ffmpeg muxing pr
 MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # How many capture errors before trying to restart/shutdown
 
 # --- Logging Configuration ---
-LOG_LEVEL = "INFO" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL = "DEBUG" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FORMAT = '%(asctime)s - %(levelname)s - [%(threadName)s] - %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 

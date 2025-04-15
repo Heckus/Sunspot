@@ -69,6 +69,7 @@ class CameraManager:
         self.is_initialized1 = False
         self.last_error = None # General/last error message
         self.output_frame = None
+        self.last_cam0_capture_time = None
 
         # State variables for Cam0 (HQ)
         self.current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
@@ -333,8 +334,26 @@ class CameraManager:
         # (Code is identical to previous version - omitted for brevity)
         frame0 = None; frame1 = None; combined = None
         if self.is_initialized0 and self.picam0 and self.picam0.started:
-            try: frame0 = self.picam0.capture_array("main");
-            except Exception as e0: logging.error(f"!!! Error Cam0 capture: {e0}"); self.last_error = f"Cam0 Capture Error: {e0}"
+            try:
+                capture_start_time = time.monotonic() # Add timing
+                frame0 = self.picam0.capture_array("main")
+                capture_end_time = time.monotonic() # Add timing
+
+                if self.last_cam0_capture_time is not None:
+                    time_diff = capture_end_time - self.last_cam0_capture_time
+                    if time_diff > 0: # Avoid division by zero
+                        instant_fps = 1.0 / time_diff
+                        # Log if significantly different from expected interval
+                        # Get expected interval (might need to pass current_cam0_fps or frame_interval here)
+                        # Or just log the instant_fps for analysis
+                        logging.debug(f"Cam0 time since last capture: {time_diff:.4f}s (Instant FPS: {instant_fps:.1f})")
+
+                self.last_cam0_capture_time = capture_end_time # Update last time
+
+            except Exception as e0:
+                logging.error(f"!!! Error Cam0 capture: {e0}")
+                self.last_error = f"Cam0 Capture Error: {e0}"
+                self.last_cam0_capture_time = None # Reset on error
         if self.is_initialized1 and self.picam1 and self.picam1.started:
             try: frame1 = self.picam1.capture_array("main");
             except Exception as e1: logging.error(f"!!! Error Cam1 capture: {e1}"); self.last_error = (self.last_error or "") + (self.last_error and " / " or "") + f"Cam1 Capture Error: {e1}"
