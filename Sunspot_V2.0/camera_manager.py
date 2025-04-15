@@ -7,7 +7,7 @@ frame capture (combined stream), video recording (from primary camera),
 and audio recording/muxing.
 
 Includes fix to use actual reported camera FPS for VideoWriter to prevent
-speed mismatch issues in recordings.
+speed mismatch issues in recordings. Adds extra logging for FPS verification.
 """
 
 import os
@@ -18,6 +18,7 @@ import threading
 import cv2
 import numpy as np
 from picamera2 import Picamera2
+
 from libcamera import controls, Transform # Keep commented unless needed
 
 # Audio related imports
@@ -151,6 +152,7 @@ class CameraManager:
                 target_width, target_height, target_fps = res_list[current_res_index]
             # Reset actual FPS when re-initializing Cam0
             self.actual_cam0_fps = None
+            logging.info(f"{cam_name}: Target Resolution Index: {current_res_index}, Target FPS: {target_fps:.2f}") # Log target FPS
         elif cam_id == config.CAM1_ID:
             target_width, target_height = config.CAM1_RESOLUTION
             target_fps = config.CAM1_FRAME_RATE
@@ -241,25 +243,25 @@ class CameraManager:
             actual_w = actual_format.get('size', (0,0))[0]
             actual_h = actual_format.get('size', (0,0))[1]
             actual_fmt_str = actual_format.get('format', 'Unknown')
-            actual_fps_final_val = actual_config.get('controls', {}).get('FrameRate', None) # Get the actual FPS value
+            # <<< Get the actual FPS value from controls AFTER start >>>
+            actual_fps_final_val = actual_config.get('controls', {}).get('FrameRate', None)
             actual_gain = actual_config.get('controls', {}).get('AnalogueGain', 'N/A')
 
-            logging.info(f"{cam_name}: Initialized. Actual stream: {actual_w}x{actual_h} {actual_fmt_str} @ {actual_fps_final_val} fps. Gain: {actual_gain}")
+            logging.info(f"{cam_name}: Initialized. Actual stream: {actual_w}x{actual_h} {actual_fmt_str} @ {actual_fps_final_val} fps (Reported FrameRate Control). Gain: {actual_gain}")
 
-            # <<< MODIFIED BLOCK: Store actual FPS for Cam0 >>>
+            # <<< MODIFIED BLOCK: Store actual FPS for Cam0 with more logging >>>
             if cam_id == config.CAM0_ID:
+                _, _, configured_fps = self.get_cam0_resolution() # Get configured FPS for comparison/fallback
                 if actual_fps_final_val is not None:
                     try:
                         self.actual_cam0_fps = float(actual_fps_final_val)
-                        logging.info(f"{cam_name}: Stored actual FPS: {self.actual_cam0_fps:.2f}")
+                        logging.info(f"{cam_name}: Successfully read and stored actual FPS: {self.actual_cam0_fps:.2f} (Configured was: {configured_fps:.2f})")
                     except (ValueError, TypeError):
-                         logging.error(f"{cam_name}: Could not convert actual FPS '{actual_fps_final_val}' to float. Falling back.")
-                         _, _, configured_fps = self.get_cam0_resolution()
+                         logging.error(f"{cam_name}: Could not convert reported actual FPS '{actual_fps_final_val}' to float. Falling back to configured FPS ({configured_fps:.2f}).")
                          self.actual_cam0_fps = configured_fps # Fallback
                 else:
                     # Fallback to configured FPS if actual is not reported (less ideal)
-                    logging.warning(f"{cam_name}: Could not read actual FPS from controls after start. Falling back to configured FPS for writer.")
-                    _, _, configured_fps = self.get_cam0_resolution()
+                    logging.warning(f"{cam_name}: Could not read actual 'FrameRate' from controls after start. Falling back to configured FPS ({configured_fps:.2f}) for writer.")
                     self.actual_cam0_fps = configured_fps
             # <<< END MODIFIED BLOCK >>>
 
@@ -454,22 +456,28 @@ class CameraManager:
 
             try:
                 # Get dimensions from config, but FPS from actual stored value
-                width, height, _ = self.get_cam0_resolution() # Get dimensions
+                width, height, configured_fps = self.get_cam0_resolution() # Get dimensions AND configured FPS for logging/fallback
 
-                # <<< MODIFIED: Use actual FPS >>>
-                fps_for_writer = self.actual_cam0_fps
-                if fps_for_writer is None or fps_for_writer <= 0:
-                    logging.error("Cannot start recording, actual Cam0 FPS is invalid or not set. Trying configured FPS as fallback.")
-                    _, _, configured_fps = self.get_cam0_resolution() # Fallback to configured
+                # <<< MODIFIED: Use actual FPS, with robust check and logging >>>
+                fps_source = "unknown"
+                if self.actual_cam0_fps is not None and self.actual_cam0_fps > 0:
+                    fps_for_writer = self.actual_cam0_fps
+                    fps_source = "actual"
+                else:
+                    logging.warning(f"Actual Cam0 FPS is invalid or not set ({self.actual_cam0_fps}). Falling back to configured FPS ({configured_fps:.2f}).")
                     fps_for_writer = configured_fps
+                    fps_source = "configured fallback"
                     if fps_for_writer is None or fps_for_writer <= 0:
                          # If both actual and configured are invalid, fail
-                         raise ValueError("Invalid Cam0 FPS (actual and configured). Cannot determine recording FPS.")
+                         logging.error("Both actual and configured Cam0 FPS are invalid. Cannot determine recording FPS.")
+                         raise ValueError("Invalid Cam0 FPS (actual and configured).")
 
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
 
-                logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps (Using {'actual' if self.actual_cam0_fps else 'configured fallback'} FPS)")
+                # <<< ADDED: Explicit log just before creating writer >>>
+                logging.info(f"VideoWriter Init: Dimensions={width}x{height}, FPS={fps_for_writer:.2f} (Source: {fps_source}), Codec={config.CAM0_RECORDING_FORMAT}")
+
                 fourcc = cv2.VideoWriter_fourcc(*config.CAM0_RECORDING_FORMAT)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
