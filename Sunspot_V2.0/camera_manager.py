@@ -68,6 +68,7 @@ class CameraManager:
         self.is_initialized0 = False
         self.is_initialized1 = False
         self.last_error = None # General/last error message
+        self.output_frame = None
 
         # State variables for Cam0 (HQ)
         self.current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
@@ -634,7 +635,7 @@ class CameraManager:
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
         logging.info(f"Muxing video '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
-        command = [config.FFMPEG_PATH, "-y", "-i", video_path, "-i", audio_path, "-c", "copy", "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-loglevel", config.FFMPEG_LOG_LEVEL, output_path]
+        command = [config.FFMPEG_PATH, "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-loglevel", config.FFMPEG_LOG_LEVEL, output_path]
         try:
             process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=config.AUDIO_MUX_TIMEOUT)
             logging.info(f"ffmpeg muxing successful for {output_path}."); logging.debug(f"ffmpeg output:\n{process.stdout}\n{process.stderr}"); self.audio_last_error = None
