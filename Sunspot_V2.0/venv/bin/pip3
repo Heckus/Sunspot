@@ -1,4 +1,4 @@
-#!/home/hecke/GitHubRepos/Sunspot/Sunspot_V2.0/venv/bin/python3
+#!/home/hecke/GitHub/Sunspot/Sunspot_V2.0/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
