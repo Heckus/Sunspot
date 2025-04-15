@@ -5,6 +5,8 @@ main.py
 Main application script for the Pi Camera Stream & Record service.
 Initializes hardware and camera managers (now handling dual cameras),
 starts the web UI, and runs the main control loop.
+
+*** Includes SIMPLIFIED logging setup for debugging ***
 """
 
 import os
@@ -36,16 +38,21 @@ def signal_handler(sig, frame):
     shutdown_event.set()
 
 def setup_logging():
-    """Configures the logging system."""
-    log_level = getattr(logging, config.LOG_LEVEL.upper(), logging.DEBUG)
-    logging.basicConfig(level=log_level,
-                        format=config.LOG_FORMAT,
-                        datefmt=config.LOG_DATE_FORMAT)
-    logging.getLogger("werkzeug").setLevel(logging.WARNING)
-    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
-    # Quieten sounddevice/soundfile if needed during audio dev
-    # logging.getLogger("sounddevice").setLevel(logging.WARNING)
-    # logging.getLogger("soundfile").setLevel(logging.WARNING)
+    """Configures the logging system. *** SIMPLIFIED FOR DEBUGGING ***"""
+    print("--- setup_logging() called (Simplified) ---") # Add print statement
+    try:
+        logging.basicConfig(level=logging.DEBUG, # Hardcoded level
+                            format=config.LOG_FORMAT, # Keep format from config
+                            datefmt=config.LOG_DATE_FORMAT) # Keep date format
+        # Temporarily disable specific logger level setting for debugging
+        # logging.getLogger("werkzeug").setLevel(logging.WARNING)
+        # logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+        logging.info("--- Logging configured with SIMPLIFIED setup (Level=DEBUG) ---")
+    except Exception as e:
+        print(f"--- CRITICAL ERROR during logging.basicConfig: {e} ---")
+        # Fallback to basic print logging if basicConfig fails
+        logging.basicConfig(level=logging.DEBUG)
+        logging.error(f"Fallback logging activated due to error: {e}")
 
 
 def run_disable_script():
@@ -87,10 +94,17 @@ def main_loop(hw_manager, cam_manager):
     last_battery_check_time = time.monotonic()
     # Get initial primary camera FPS for loop timing
     try:
-        current_cam0_fps = cam_manager.get_camera_state().get('resolution_fps', 30.0)
+        # Use the actual FPS stored in cam_manager if available
+        current_cam0_fps = cam_manager.actual_cam0_fps
+        if current_cam0_fps is None:
+            # Fallback to getting from state if actual isn't set yet
+             cam_state = cam_manager.get_camera_state()
+             current_cam0_fps = cam_state.get('resolution_fps', 30.0) # Default 30 if state also fails
+
         if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0:
              logging.warning(f"Invalid initial Cam0 FPS ({current_cam0_fps}), defaulting loop timing to 30fps.")
              current_cam0_fps = 30.0
+        logging.debug(f"Main loop starting with target FPS: {current_cam0_fps:.2f}")
     except Exception:
          logging.exception("Error getting initial Cam0 FPS, defaulting loop timing.")
          current_cam0_fps = 30.0
@@ -118,12 +132,21 @@ def main_loop(hw_manager, cam_manager):
             # Re-initialize BOTH cameras, passing the new index for Cam0
             if cam_manager.initialize_cameras(requested_resolution_index):
                 logging.info("--- Reconfiguration successful ---")
-                # Update loop timing FPS
+                # Update loop timing FPS using the newly stored actual FPS
                 try:
-                    current_cam0_fps = cam_manager.get_camera_state().get('resolution_fps', current_cam0_fps) # Keep old on error
-                    if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0: current_cam0_fps = 30.0
-                except Exception: pass # Keep old FPS on error
-                logging.info(f"Updated loop timing target FPS: {current_cam0_fps:.1f}")
+                    current_cam0_fps = cam_manager.actual_cam0_fps # Get updated actual FPS
+                    if current_cam0_fps is None or current_cam0_fps <= 0:
+                        # Fallback if actual FPS wasn't set correctly during re-init
+                        logging.warning("Actual FPS not available after reconfig, using state.")
+                        cam_state = cam_manager.get_camera_state()
+                        current_cam0_fps = cam_state.get('resolution_fps', 30.0) # Default 30
+                    if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0:
+                        logging.warning(f"Invalid FPS after reconfig ({current_cam0_fps}), defaulting.")
+                        current_cam0_fps = 30.0
+                except Exception:
+                    logging.exception("Error getting FPS after reconfig, defaulting.")
+                    current_cam0_fps = 30.0
+                logging.info(f"Updated loop timing target FPS: {current_cam0_fps:.2f}")
 
                 if was_recording:
                     logging.info("Restarting recording after successful reconfiguration...")
@@ -133,14 +156,24 @@ def main_loop(hw_manager, cam_manager):
             else:
                 logging.error(f"!!! Failed to reconfigure cameras (Cam0 index {requested_resolution_index}). Error: {cam_manager.last_error}. Attempting restore... !!!")
                 # Try to re-initialize with the index *before* the failed attempt
-                if cam_manager.initialize_cameras(): # Restore previous state
+                # Note: initialize_cameras doesn't store the *previous* index, so we just call it without index
+                if cam_manager.initialize_cameras(): # Restore previous state (best effort)
                      logging.info("Successfully restored previous camera configuration.")
-                     # Update loop timing FPS back to previous state
+                     # Update loop timing FPS back to previous state's actual FPS
                      try:
-                         current_cam0_fps = cam_manager.get_camera_state().get('resolution_fps', 30.0)
-                         if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0: current_cam0_fps = 30.0
-                     except Exception: pass
-                     logging.info(f"Restored loop timing target FPS: {current_cam0_fps:.1f}")
+                         current_cam0_fps = cam_manager.actual_cam0_fps # Get restored actual FPS
+                         if current_cam0_fps is None or current_cam0_fps <= 0:
+                              logging.warning("Actual FPS not available after restore, using state.")
+                              cam_state = cam_manager.get_camera_state()
+                              current_cam0_fps = cam_state.get('resolution_fps', 30.0) # Default 30
+                         if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0:
+                              logging.warning(f"Invalid FPS after restore ({current_cam0_fps}), defaulting.")
+                              current_cam0_fps = 30.0
+                     except Exception:
+                         logging.exception("Error getting FPS after restore, defaulting.")
+                         current_cam0_fps = 30.0
+                     logging.info(f"Restored loop timing target FPS: {current_cam0_fps:.2f}")
+
                      if was_recording:
                          logging.warning("Attempting recording restart with restored configuration...")
                          time.sleep(1.0)
@@ -152,22 +185,25 @@ def main_loop(hw_manager, cam_manager):
                     break # Exit main loop
 
             logging.info("--- Finished handling reconfiguration request ---")
-            time.sleep(0.5)
-            continue
+            time.sleep(0.5) # Brief pause after reconfig action
+            continue # Skip rest of the loop iteration
 
 
         # --- Capture and Combine Frames ---
         # This now gets frames from both cameras and combines them
+        # It also writes Cam0 frame to disk if recording is active
         combined_frame = cam_manager.capture_and_combine_frames()
 
         if combined_frame is None:
             consecutive_capture_errors += 1
-            logging.warning(f"Combined frame capture failed ({consecutive_capture_errors}/{config.MAX_CONSECUTIVE_CAPTURE_ERRORS}). Error: {cam_manager.last_error}")
+            # Log less frequently if errors persist
+            if consecutive_capture_errors == 1 or consecutive_capture_errors % 10 == 0:
+                logging.warning(f"Combined frame capture failed ({consecutive_capture_errors}/{config.MAX_CONSECUTIVE_CAPTURE_ERRORS}). Error: {cam_manager.last_error}")
             if consecutive_capture_errors >= config.MAX_CONSECUTIVE_CAPTURE_ERRORS:
                 logging.error("Too many consecutive frame capture errors. Signaling shutdown.")
                 shutdown_event.set()
                 break
-            time.sleep(0.5)
+            time.sleep(0.5) # Wait longer on capture error
             continue
         else:
             if consecutive_capture_errors > 0:
@@ -179,7 +215,7 @@ def main_loop(hw_manager, cam_manager):
         physical_switch_on = hw_manager.is_switch_pressed()
         with _ui_lock: # Read digital state under lock
             digital_switch_on = _app_state.get("digital_recording_active", False)
-        #print(f"DEBUG: Physical Switch Reading (is_pressed): {physical_switch_on}, Digital Switch State: {digital_switch_on}") # <-- ADD THIS LINE
+
         should_be_recording = physical_switch_on or digital_switch_on
         is_currently_recording = cam_manager.is_recording
 
@@ -208,10 +244,17 @@ def main_loop(hw_manager, cam_manager):
 
 
         # --- Loop Delay ---
-        # Base delay on primary camera's current FPS
+        # Base delay on primary camera's current actual FPS
         loop_duration = time.monotonic() - loop_start_time
-        target_loop_time = 1.0 / (current_cam0_fps + 5) # Aim slightly faster than FPS
-        sleep_time = max(0.005, target_loop_time - loop_duration) # Ensure minimal sleep
+        if current_cam0_fps > 0:
+             # Try running loop exactly at target FPS first
+             target_loop_time = 1.0 / current_cam0_fps
+             # Original approach: run slightly faster
+             # target_loop_time = 1.0 / (current_cam0_fps + 5)
+        else:
+             target_loop_time = 1.0 / 30.0 # Fallback if FPS is invalid
+
+        sleep_time = max(0.001, target_loop_time - loop_duration) # Ensure minimal sleep, prevent 0
         # logging.debug(f"Loop duration: {loop_duration:.4f}s, Sleep time: {sleep_time:.4f}s (Target FPS: {current_cam0_fps:.1f})")
         time.sleep(sleep_time)
 
@@ -222,8 +265,12 @@ def main_loop(hw_manager, cam_manager):
 def main():
     """Main function to initialize and run the application."""
     global flask_thread, main_loop_error_count
+    print("--- main() function started ---") # Add print statement
 
+    # *** Logging setup is called first ***
     setup_logging()
+    # If setup_logging fails catastrophically, the script might exit here
+
     logging.info("========================================================")
     logging.info("=== Starting Pi Multi-Camera Stream & Record Service ===")
     logging.info("========================================================")
@@ -231,7 +278,7 @@ def main():
     logging.info(f"Script Directory: {config.SCRIPT_DIR}")
     logging.info(f"Toggle Script Path: {config.TOGGLE_SCRIPT_PATH}")
     if os.geteuid() == 0: logging.warning("Script is running with root privileges (sudo).")
-    else: logging.warning("Script is NOT running with root privileges. Servo/Toggle script may fail.")
+    else: logging.warning("Script is NOT running with root privileges. Servo/Toggle script/Hardware access may fail.")
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -247,18 +294,26 @@ def main():
             # Initialize BOTH cameras now
             if not cam_manager.initialize_cameras():
                 # Error message should be set in cam_manager.last_error
+                logging.critical(f"Initial camera setup failed: {cam_manager.last_error}") # Log as critical
                 raise RuntimeError(f"Initial camera setup failed: {cam_manager.last_error}")
 
+            logging.info("Setting up web application...")
             setup_web_app(cam_manager, hw_manager, shutdown_event)
 
+            logging.info("Starting Flask web server thread...")
             flask_thread = threading.Thread(target=run_web_server, name="FlaskThread", daemon=True)
             flask_thread.start()
-            time.sleep(2.0)
+            time.sleep(2.0) # Give thread time to start
             if not flask_thread.is_alive():
+                logging.critical("Flask web server thread failed to start.")
                 raise RuntimeError("Flask web server thread failed to start.")
 
+            # Try to get local IP for user convenience
             try:
-                import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); local_ip = s.getsockname()[0]; s.close()
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80)) # Connect to external address (doesn't send data)
+                local_ip = s.getsockname()[0]
+                s.close()
                 logging.info(f"--- System Running --- Access web interface at: http://{local_ip}:{config.WEB_PORT}")
             except Exception as ip_e:
                  logging.warning(f"Could not determine local IP address: {ip_e}")
@@ -267,55 +322,94 @@ def main():
             # Start the main application loop
             main_loop(hw_manager, cam_manager)
 
+            # If main_loop exits without shutdown_event being set, it's likely an error handled inside
             if shutdown_event.is_set():
-                 logging.info("Shutdown event received, exiting initialization loop.")
+                 logging.info("Shutdown event received during main execution, exiting initialization loop.")
                  break
+            else:
+                 # This path might be reached if main_loop exits unexpectedly without setting the event
+                 logging.warning("Main loop exited without shutdown event. Checking error count.")
+
 
         except Exception as e:
-            logging.exception(f"!!! Unhandled exception in main setup or loop: {e}")
+            # Catch exceptions during the setup/initialization phase
+            logging.exception(f"!!! Unhandled exception in main setup or loop: {e}") # Log full traceback
             main_loop_error_count += 1
             logging.error(f"Main loop error count: {main_loop_error_count}/{MAX_MAIN_LOOP_ERRORS}")
             if main_loop_error_count >= MAX_MAIN_LOOP_ERRORS:
                 logging.critical("Maximum main loop error count reached. Forcing shutdown.")
-                shutdown_event.set()
+                shutdown_event.set() # Ensure shutdown is triggered
             else:
                 logging.warning("Attempting restart after 10 seconds...")
                 # Perform partial cleanup before retry
-                if cam_manager: cam_manager.shutdown()
-                if hw_manager: hw_manager.cleanup()
-                # Flask thread is daemon, should exit, but check anyway
+                if cam_manager:
+                    try: cam_manager.shutdown()
+                    except Exception as cs_e: logging.error(f"Error during cam_manager shutdown on retry: {cs_e}")
+                if hw_manager:
+                    try: hw_manager.cleanup()
+                    except Exception as hs_e: logging.error(f"Error during hw_manager cleanup on retry: {hs_e}")
+
+                # Flask thread is daemon, should exit when main exits, but check anyway
                 if flask_thread and flask_thread.is_alive():
                      logging.warning("Flask thread still alive during restart sequence.")
-                     # Consider more forceful termination if needed, but risky
-                time.sleep(10.0)
+                     # Consider more forceful termination if needed, but generally avoid
+
+                # Reset managers to force re-initialization
+                hw_manager = None
+                cam_manager = None
+                flask_thread = None
+
+                time.sleep(10.0) # Wait before retrying
 
     # --- Final Cleanup ---
+    # This block runs after the loop exits (due to shutdown_event or max errors)
     logging.info("--- Initiating Final Cleanup ---")
 
-    if cam_manager: logging.info("Shutting down Camera Manager..."); cam_manager.shutdown()
-    else: logging.warning("Camera Manager not initialized during cleanup.")
+    # Ensure managers exist before trying to clean them up
+    if cam_manager:
+        logging.info("Shutting down Camera Manager...")
+        try: cam_manager.shutdown()
+        except Exception as e: logging.error(f"Error during final Camera Manager shutdown: {e}")
+    else:
+        logging.warning("Camera Manager was not initialized during cleanup.")
 
-    if hw_manager: logging.info("Cleaning up Hardware Manager..."); hw_manager.cleanup()
-    else: logging.warning("Hardware Manager not initialized during cleanup.")
+    if hw_manager:
+        logging.info("Cleaning up Hardware Manager...")
+        try: hw_manager.cleanup()
+        except Exception as e: logging.error(f"Error during final Hardware Manager cleanup: {e}")
+    else:
+        logging.warning("Hardware Manager was not initialized during cleanup.")
 
+    # Wait briefly for Flask thread if it was started
     if flask_thread and flask_thread.is_alive():
-        logging.info("Waiting briefly for Flask thread to exit..."); flask_thread.join(timeout=2.0)
-        if flask_thread.is_alive(): logging.warning("Flask thread did not exit cleanly.")
+        logging.info("Waiting briefly for Flask thread to exit...")
+        flask_thread.join(timeout=2.0)
+        if flask_thread.is_alive():
+            logging.warning("Flask thread did not exit cleanly.")
 
     # --- Handle Reboot Request ---
     reboot_flag = False
-    with _ui_lock: reboot_flag = _app_state.get("reboot_requested", False)
+    # Check _app_state safely
+    try:
+        with _ui_lock:
+            reboot_flag = _app_state.get("reboot_requested", False)
+    except Exception as lock_e:
+         logging.error(f"Error accessing UI lock during reboot check: {lock_e}")
+
 
     if reboot_flag:
         logging.info("Reboot flag is set, attempting to execute disable script.")
-        run_disable_script()
+        run_disable_script() # Ensure this handles permissions correctly
     else:
         logging.info("Reboot flag not set, performing normal exit.")
 
     logging.info("========================================================")
     logging.info("--- Pi Multi-Camera Stream & Record Service Stopped ---")
     logging.info("========================================================")
+    print("--- main() function finished ---") # Add print statement
 
 
 if __name__ == "__main__":
+    # This check prevents code from running automatically if the script is imported
     main()
+
