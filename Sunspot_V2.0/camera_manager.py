@@ -1157,18 +1157,7 @@ class CameraManager:
         # -map 1:a:0: Map audio stream from second input (1)
         # -shortest: Finish encoding when the shortest input stream ends (usually audio)
         # -loglevel error: Show only errors from ffmpeg
-        command = [
-            config.FFMPEG_PATH,
-            "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c", "copy",
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-shortest",
-            "-loglevel", config.FFMPEG_LOG_LEVEL,
-            output_path
-        ]
+        command = [config.FFMPEG_PATH, "-y", "-i", video_path, "-i", audio_path, "-c:v", "copy", "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0", "-shortest", "-loglevel", config.FFMPEG_LOG_LEVEL, output_path]
 
         # --- Execute ffmpeg ---
         try:
