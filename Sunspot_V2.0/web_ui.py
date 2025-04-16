@@ -3,14 +3,16 @@
 web_ui.py
 
 Handles the Flask web server and user interface for the Pi Camera application.
-Provides routes for streaming (combined view), status updates, and control commands
-(ISO, AE, Metering, Sliders, Servo).
+Provides routes for streaming, status updates, and control commands.
+
+**Modification:** Updated index route to get output frame dimensions from CameraManager
+                  to correctly size the <img> tag whether Cam1 is enabled or not.
 """
 
 import logging
 import time
 import cv2
-import threading # Added for Lock
+import threading # Import missing threading module
 from flask import Flask, Response, render_template_string, jsonify, request, url_for
 from libcamera import controls # Needed for control validation
 
@@ -28,7 +30,7 @@ _camera_manager = None
 _hardware_manager = None
 _app_state = {
     "digital_recording_active": False,
-    "reconfigure_resolution_index": None, # Tracks requests from UI for Cam0
+    "reconfigure_resolution_index": None, # Tracks requests from UI
     "reboot_requested": False, # Flag set by /power_down
     "shutdown_event": None # threading.Event passed from main
 }
@@ -44,7 +46,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi Multi-Camera Stream & Record</title>
+    <title>Pi Camera Stream & Record</title>
     {# Raw block to prevent Jinja processing CSS/JS #}
     {% raw %}
     <style>
@@ -54,15 +56,14 @@ HTML_TEMPLATE = """
 
         .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 15px; }
 
-        .status-panel, .controls-panel, .sliders-panel, .servo-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
+        .status-panel, .controls-panel, .sliders-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
         .panel-title { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
 
         /* Status Grid */
         .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; }
         .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
         #status, #rec-status, #resolution, #battery-level,
-        #iso-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status, /* Status IDs */
-        #servo-angle-status /* Servo status */
+        #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status /* Status IDs */
          { color: #0056b3; font-weight: normal;}
         #rec-status.active { color: #D83B01; font-weight: bold;}
 
@@ -77,14 +78,13 @@ HTML_TEMPLATE = """
         .mode-controls select { padding: 5px 8px; font-size: 0.9em; border-radius: 4px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
         .mode-controls select:hover:not(:disabled) { border-color: #bbb; background-color: #f9f9f9; }
 
-        /* Slider Controls (Image & Servo) */
+        /* Slider Controls */
         .slider-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; margin-bottom: 8px; }
         .slider-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
         .slider-controls input[type=range] { width: 100%; margin: 0; padding: 0; cursor: pointer; }
         .slider-controls span { font-size: 0.9em; color: #0056b3; min-width: 35px; text-align: right; } /* For slider value display */
 
         #error { color: red; margin-top: 15px; white-space: pre-wrap; font-weight: bold; min-height: 1.2em; text-align: center; background-color: #ffebeb; border: 1px solid red; padding: 8px; border-radius: 4px; display: none; /* Initially hidden */ }
-        /* Remove explicit width/height, let CSS handle max-width */
         img#stream { display: block; margin: 15px auto; border: 1px solid black; max-width: 100%; height: auto; background-color: #ddd; } /* Placeholder color */
 
         /* Button Specific Styles */
@@ -102,12 +102,12 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>Pi Multi-Camera Stream & Record</h1>
+        <h1>Pi Camera Stream & Record</h1>
 
          <div class="main-controls">
-             <button onclick="changeResolution('down')" id="btn-down" title="Decrease Cam0 resolution">&laquo; Lower Res</button>
-             <button onclick="toggleRecording()" id="btn-record" class="recording-inactive" title="Toggle Cam0 recording via web interface">Start Rec (Web)</button>
-             <button onclick="changeResolution('up')" id="btn-up" title="Increase Cam0 resolution">Higher Res &raquo;</button>
+             <button onclick="changeResolution('down')" id="btn-down" title="Decrease resolution">&laquo; Lower Res</button>
+             <button onclick="toggleRecording()" id="btn-record" class="recording-inactive" title="Toggle recording via web interface">Start Rec (Web)</button>
+             <button onclick="changeResolution('up')" id="btn-up" title="Increase resolution">Higher Res &raquo;</button>
              <button onclick="powerDown()" id="btn-powerdown" title="Gracefully stop service and reboot Pi">Power Down</button>
          </div>
 
@@ -117,23 +117,22 @@ HTML_TEMPLATE = """
                  <div class="status-grid">
                      <span>Sys Status:</span> <span id="status">Initializing...</span>
                      <span>Recording:</span> <span id="rec-status">OFF</span>
-                     <span>Cam0 Res:</span> <span id="resolution">{{ resolution_text }}</span>
+                     <span>Cam0 Res:</span> <span id="resolution">{{ resolution_text }}</span> {# Changed label #}
                      <span>Battery:</span> <span id="battery-level">{{ batt_text_initial }}%</span>
                      <hr style="grid-column: 1 / -1; border-top: 1px dashed #bbb; border-bottom: none; margin: 5px 0;">
-                     <span>ISO Mode:</span> <span id="iso-mode-status">{{ current_iso_mode_name_initial }}</span>
+                     <span>AWB Mode:</span> <span id="awb-mode-status">{{ current_awb_mode_name_initial }}</span>
                      <span>AE Mode:</span> <span id="ae-mode-status">{{ current_ae_mode_name_initial }}</span>
                      <span>Metering:</span> <span id="metering-mode-status">{{ current_metering_mode_name_initial }}</span>
                      <span>Noise Red.:</span> <span id="nr-mode-status">{{ current_noise_reduction_mode_name_initial }}</span>
-                     <span>Servo Angle:</span> <span id="servo-angle-status">{{ servo_angle_initial }}&deg;</span>
                  </div>
              </div>
 
              <div class="controls-panel">
                  <div class="panel-title">Mode Controls</div>
                  <div class="mode-controls">
-                     <label for="iso-select">ISO Mode:</label>
-                     <select id="iso-select" onchange="changeCameraControl('AnalogueGain', this.value)" title="Select ISO Sensitivity (Analogue Gain)">
-                         {{ iso_options_html | safe }} {# ISO options #}
+                     <label for="awb-select">AWB Mode:</label>
+                     <select id="awb-select" onchange="changeCameraControl('AwbMode', this.value)" title="Select Auto White Balance Mode">
+                         {{ awb_options_html | safe }} {# Use safe filter for HTML options #}
                      </select>
 
                      <label for="ae-select">Exposure Mode:</label>
@@ -174,19 +173,10 @@ HTML_TEMPLATE = """
                  </div>
              </div>
 
-             <div class="servo-panel"> {# New panel for Servo #}
-                 <div class="panel-title">Servo Control</div>
-                 <div class="slider-controls">
-                     <label for="servo-slider">Angle:</label>
-                     <input type="range" id="servo-slider" min="{{ SERVO_MIN_ANGLE }}" max="{{ SERVO_MAX_ANGLE }}" step="1" value="{{ servo_angle_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeServoAngle(this.value)" title="Adjust Servo Angle">
-                     <span id="servo-slider-value">{{ servo_angle_initial }}&deg;</span> {# Display servo angle #}
-                 </div>
-             </div>
-
          </div>
          <div id="error" {% if err_msg %}style="display: block;"{% endif %}>{{ err_msg }}</div>
-         {# Removed explicit width/height #}
-         <img id="stream" src="{{ video_feed_url }}" alt="Loading stream..."
+         {# Use output_w and output_h for the stream dimensions #}
+         <img id="stream" src="{{ video_feed_url }}" width="{{ output_w }}" height="{{ output_h }}" alt="Loading stream..."
               onerror="handleStreamError()" onload="handleStreamLoad()">
     </div>
 
@@ -196,7 +186,7 @@ HTML_TEMPLATE = """
         // Store base URL generated by Python/Flask
         const videoFeedUrlBase = "{{ video_feed_url }}";
 
-        // Get Element References
+        // Get Element References (same as before)
         const statusElement = document.getElementById('status');
         const resolutionElement = document.getElementById('resolution');
         const errorElement = document.getElementById('error');
@@ -207,13 +197,11 @@ HTML_TEMPLATE = """
         const btnPowerdown = document.getElementById('btn-powerdown');
         const recStatusElement = document.getElementById('rec-status');
         const batteryLevelElement = document.getElementById('battery-level');
-        // AWB removed
-        const isoStatusElement = document.getElementById('iso-mode-status'); // New
+        const awbStatusElement = document.getElementById('awb-mode-status');
         const aeStatusElement = document.getElementById('ae-mode-status');
         const meteringStatusElement = document.getElementById('metering-mode-status');
         const nrStatusElement = document.getElementById('nr-mode-status');
-        // AWB removed
-        const isoSelectElement = document.getElementById('iso-select'); // New
+        const awbSelectElement = document.getElementById('awb-select');
         const aeSelectElement = document.getElementById('ae-select');
         const meteringSelectElement = document.getElementById('metering-select');
         const nrSelectElement = document.getElementById('nr-select');
@@ -225,15 +213,11 @@ HTML_TEMPLATE = """
         const contrastValueSpan = document.getElementById('contrast-slider-value');
         const saturationValueSpan = document.getElementById('saturation-slider-value');
         const sharpnessValueSpan = document.getElementById('sharpness-slider-value');
-        // Servo elements
-        const servoSlider = document.getElementById('servo-slider');
-        const servoValueSpan = document.getElementById('servo-slider-value');
-        const servoAngleStatus = document.getElementById('servo-angle-status'); // Status display
 
-        // State Variables
+        // State Variables (same as before)
         let isChangingResolution = false;
         let isTogglingRecording = false;
-        let isChangingControl = false; // Used for camera controls AND servo
+        let isChangingControl = false;
         let isPoweringDown = false;
         let statusUpdateInterval;
         let streamErrorTimeout = null;
@@ -259,25 +243,29 @@ HTML_TEMPLATE = """
                     statusElement.textContent = data.status_text || 'Unknown';
                     recStatusElement.textContent = data.is_recording ? "ACTIVE" : "OFF";
                     recStatusElement.classList.toggle('active', data.is_recording);
-                    if (data.resolution && resolutionElement.textContent !== data.resolution) {
-                        resolutionElement.textContent = data.resolution;
-                        // No need to update img width/height here anymore
-                    }
-                    // Combine errors
-                    let combinedError = data.error || "";
-                    if (data.audio_last_error) {
-                         combinedError += (combinedError ? " | " : "") + "Audio: " + data.audio_last_error;
-                    }
-                    if (combinedError) { errorElement.textContent = combinedError; errorElement.style.display = 'block'; }
-                    else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
 
+                    // Update Cam0 resolution display
+                    if (data.cam0_resolution && resolutionElement.textContent !== data.cam0_resolution) {
+                        resolutionElement.textContent = data.cam0_resolution;
+                    }
+                    // Update stream image dimensions if they changed
+                    if (data.output_frame_wh) {
+                        const [w, h] = data.output_frame_wh;
+                        if (streamImage.getAttribute('width') != w || streamImage.getAttribute('height') != h) {
+                            console.log(`Status update resizing stream image to ${w}x${h}`);
+                            streamImage.setAttribute('width', w);
+                            streamImage.setAttribute('height', h);
+                        }
+                    }
+
+                    if (data.error) { errorElement.textContent = data.error; errorElement.style.display = 'block'; }
+                    else { if (errorElement.style.display !== 'none') { errorElement.textContent = ''; errorElement.style.display = 'none'; } }
                     if (typeof data.digital_recording_active === 'boolean' && currentDigitalRecordState !== data.digital_recording_active) {
                         currentDigitalRecordState = data.digital_recording_active;
                         updateRecordButtonState();
                     }
 
-                    // Update Camera Controls
-                    updateControlUI('iso_mode', data.iso_mode, isoStatusElement, isoSelectElement); // Use iso_mode (name)
+                    updateControlUI('awb_mode', data.awb_mode, awbStatusElement, awbSelectElement);
                     updateControlUI('ae_mode', data.ae_mode, aeStatusElement, aeSelectElement);
                     updateControlUI('metering_mode', data.metering_mode, meteringStatusElement, meteringSelectElement);
                     updateControlUI('noise_reduction_mode', data.noise_reduction_mode, nrStatusElement, nrSelectElement);
@@ -286,10 +274,6 @@ HTML_TEMPLATE = """
                     updateControlUI('saturation', data.saturation, null, saturationSlider, saturationValueSpan);
                     updateControlUI('sharpness', data.sharpness, null, sharpnessSlider, sharpnessValueSpan);
 
-                    // Update Servo Control
-                    updateControlUI('servo_angle', data.servo_angle, servoAngleStatus, servoSlider, servoValueSpan);
-
-                    // Update Battery
                     if (data.battery_percent !== null && data.battery_percent !== undefined) {
                          batteryLevelElement.textContent = data.battery_percent.toFixed(1) + '%'; // Add % sign
                     } else {
@@ -298,7 +282,7 @@ HTML_TEMPLATE = """
                 })
                 .catch(err => {
                     console.error("Error fetching status:", err); statusElement.textContent = "Error"; errorElement.textContent = `Status fetch failed: ${err.message}.`; errorElement.style.display = 'block'; recStatusElement.textContent = "Err"; batteryLevelElement.textContent = "Err";
-                    isoStatusElement.textContent = "Err"; aeStatusElement.textContent = "Err"; meteringStatusElement.textContent = "Err"; nrStatusElement.textContent = "Err"; servoAngleStatus.textContent = "Err";
+                    awbStatusElement.textContent = "Err"; aeStatusElement.textContent = "Err"; meteringStatusElement.textContent = "Err"; nrStatusElement.textContent = "Err";
                 });
         }
 
@@ -306,36 +290,22 @@ HTML_TEMPLATE = """
              if (newValue === undefined || newValue === null) return;
 
              let currentUIValue = controlEl ? controlEl.value : null;
-             let formattedNewValue = newValue; // Use as string by default
+             let formattedNewValue = newValue;
 
-             if (controlKey === 'brightness' || controlKey === 'contrast' || controlKey === 'saturation' || controlKey === 'sharpness') {
-                 // Handle float sliders
+             if (valueSpanEl) { // Handle sliders
                  formattedNewValue = parseFloat(newValue).toFixed(1);
-                 currentUIValue = controlEl ? parseFloat(controlEl.value).toFixed(1) : null;
-                 if (valueSpanEl && valueSpanEl.textContent !== formattedNewValue) {
+                 currentUIValue = controlEl ? parseFloat(controlEl.value).toFixed(1) : null; // Get slider value
+                 if (valueSpanEl.textContent !== formattedNewValue) {
                      valueSpanEl.textContent = formattedNewValue;
                  }
-             } else if (controlKey === 'servo_angle') {
-                 // Handle integer servo slider
-                 formattedNewValue = parseInt(newValue).toString(); // Ensure it's a string for comparison
-                 currentUIValue = controlEl ? parseInt(controlEl.value).toString() : null;
-                 if (valueSpanEl && valueSpanEl.textContent !== formattedNewValue + '°') {
-                     valueSpanEl.textContent = formattedNewValue + '°';
-                 }
-                 if (statusEl && statusEl.textContent !== formattedNewValue + '°') { // Update status text too
-                     statusEl.textContent = formattedNewValue + '°';
-                 }
-             } else { // Handle dropdowns (ISO, AE, Metering, NR)
-                 formattedNewValue = newValue.toString(); // Already a string name
-                 currentUIValue = controlEl ? controlEl.value : null;
-                 if (statusEl && statusEl.textContent !== formattedNewValue) {
-                     statusEl.textContent = formattedNewValue;
+             } else if (statusEl) { // Handle dropdown status text
+                 if (statusEl.textContent !== newValue.toString()) {
+                     statusEl.textContent = newValue.toString();
                  }
              }
 
              // Update control element (select or range) if not currently being changed by user
-             // Check the 'isChangingControl' flag to prevent overwriting user input
-             if (controlEl && currentUIValue !== formattedNewValue && !isChangingControl) {
+             if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution) {
                  console.log(`Status update forcing UI for ${controlKey}: UI='${currentUIValue}' -> Status='${formattedNewValue}'`);
                  controlEl.value = newValue; // Use the original newValue for setting element value
              }
@@ -344,20 +314,18 @@ HTML_TEMPLATE = """
 
         function disableControls(poweringDown = false) {
             [btnUp, btnDown, btnRecord, btnPowerdown,
-             isoSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement, // ISO instead of AWB
-             brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider,
-             servoSlider // Add servo slider
-            ].forEach(el => { if(el) el.disabled = true; }); // Check if element exists
+             awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+             brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+            ].forEach(el => el.disabled = true);
             if(poweringDown) { document.body.style.opacity = '0.7'; }
         }
 
         function enableControls() {
              if (!isPoweringDown) {
                  [btnUp, btnDown, btnRecord, btnPowerdown,
-                  isoSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement, // ISO instead of AWB
-                  brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider,
-                  servoSlider // Add servo slider
-                 ].forEach(el => { if(el) el.disabled = false; }); // Check if element exists
+                  awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                  brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+                 ].forEach(el => el.disabled = false);
                  document.body.style.opacity = '1';
              }
          }
@@ -368,45 +336,55 @@ HTML_TEMPLATE = """
 
             isChangingResolution = true;
             disableControls();
-            statusElement.textContent = 'Changing Cam0 resolution... Please wait.';
+            statusElement.textContent = 'Changing resolution... Please wait.';
             errorElement.textContent = '';
             errorElement.style.display = 'none';
 
+            // Timeout to re-enable controls if the backend hangs or fails silently
             const resolutionTimeoutId = setTimeout(() => {
                  console.warn("Resolution change timeout reached. Forcing UI cleanup.");
-                 if (isChangingResolution) {
-                     isChangingResolution = false; enableControls(); updateStatus();
+                 if (isChangingResolution) { // Check flag again in case it finished just before timeout
+                     isChangingResolution = false;
+                     enableControls();
+                     updateStatus(); // Refresh status after timeout
                  }
-             }, 15000); // Increased timeout further for dual cam init
+             }, 10000); // Increased timeout to 10s
 
             fetch(`/set_resolution/${direction}`, { method: 'POST' })
                 .then(response => response.json().then(data => ({ status: response.status, body: data })))
                 .then(({ status, body }) => {
-                    clearTimeout(resolutionTimeoutId);
+                    clearTimeout(resolutionTimeoutId); // Clear timeout on successful response
                     if (status === 200 && body.success) {
                         statusElement.textContent = 'Resolution change initiated. Reloading stream...';
-                        resolutionElement.textContent = body.new_resolution;
-                        // No need to set img width/height here
+                        resolutionElement.textContent = body.new_resolution; // Update Cam0 res display
+                        // Stream image size will be updated by the next status call using output_frame_wh
                         console.log("Resolution change request successful, forcing stream reload...");
+                        // Force stream reload after a short delay to allow backend to reconfigure
                         setTimeout(() => {
-                            streamImage.src = videoFeedUrlBase + "?" + Date.now();
-                            isChangingResolution = false;
+                            streamImage.src = videoFeedUrlBase + "?" + Date.now(); // Use JS variable for base URL
+                            isChangingResolution = false; // Re-enable controls AFTER stream starts reloading
                             enableControls();
-                            updateStatus();
-                        }, 2000); // Slightly longer delay for dual cam
+                            updateStatus(); // Refresh status after change
+                        }, 1500); // Delay stream reload slightly
 
                     } else {
                         errorElement.textContent = `Error changing resolution: ${body.message || 'Unknown error.'}`;
-                        errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed.';
-                        isChangingResolution = false; enableControls(); updateStatus();
+                        errorElement.style.display = 'block';
+                        statusElement.textContent = 'Resolution change failed.';
+                        isChangingResolution = false; // Re-enable controls on failure
+                        enableControls();
+                        updateStatus();
                     }
                 })
                 .catch(err => {
-                     clearTimeout(resolutionTimeoutId);
+                     clearTimeout(resolutionTimeoutId); // Clear timeout on network error
                      console.error("Network error sending resolution change:", err);
                      errorElement.textContent = `Network error changing resolution: ${err.message}`;
-                     errorElement.style.display = 'block'; statusElement.textContent = 'Resolution change failed (Network).';
-                     isChangingResolution = false; enableControls(); updateStatus();
+                     errorElement.style.display = 'block';
+                     statusElement.textContent = 'Resolution change failed (Network).';
+                     isChangingResolution = false; // Re-enable controls on failure
+                     enableControls();
+                     updateStatus();
                  });
         }
 
@@ -426,77 +404,33 @@ HTML_TEMPLATE = """
                  .finally(() => { isTogglingRecording = false; enableControls(); });
          }
 
-        // Handles Camera controls (ISO, AE, Metering, Sliders)
         function changeCameraControl(controlName, controlValue) {
              if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
-             // Note: For ISO, controlName='AnalogueGain', controlValue=ISO Name (e.g., "100")
-             console.log(`Requesting camera control change: ${controlName} = ${controlValue}`);
+             console.log(`Requesting control change: ${controlName} = ${controlValue}`);
              isChangingControl = true; disableControls();
-             // Display user-friendly name if changing ISO
-             let settingName = (controlName === 'AnalogueGain') ? `ISO to ${controlValue}` : controlName;
-             statusElement.textContent = `Setting ${settingName}...`;
+             statusElement.textContent = `Setting ${controlName}...`;
              errorElement.textContent = ''; errorElement.style.display = 'none';
 
              fetch('/set_camera_control', {
                  method: 'POST',
                  headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ control: controlName, value: controlValue }) // Send ISO name or slider value
+                 body: JSON.stringify({ control: controlName, value: controlValue })
              })
              .then(response => response.json().then(data => ({ status: response.status, body: data })))
              .then(({ status, body }) => {
                  if (status === 200 && body.success) {
-                     statusElement.textContent = `${settingName} set.`;
+                     statusElement.textContent = `${controlName} set.`;
                      // Update UI immediately based on success, then verify with status update
-                     // For ISO, update using the name ('iso_mode')
-                     let uiKey = (controlName === 'AnalogueGain') ? 'iso_mode' : controlName.toLowerCase();
-                     let statusEl = document.getElementById(uiKey.replace('_','-') + '-status');
-                     let controlEl = document.getElementById(uiKey.replace('_','-') + (uiKey.includes('mode') ? '-select' : '-slider'));
-                     let valueSpanEl = document.getElementById(uiKey.replace('_','-') + '-slider-value');
-                     updateControlUI(uiKey, controlValue, statusEl, controlEl, valueSpanEl);
+                     updateControlUI(controlName.toLowerCase(), controlValue, document.getElementById(controlName.toLowerCase()+'-mode-status'), document.getElementById(controlName.toLowerCase()+'-select'), document.getElementById(controlName.toLowerCase()+'-slider-value'));
                      setTimeout(updateStatus, 750); // Fetch status slightly later to confirm
                  } else {
-                     errorElement.textContent = `Error setting ${settingName}: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = `${settingName} change failed.`;
+                     errorElement.textContent = `Error setting ${controlName}: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed.`;
                      setTimeout(updateStatus, 500); // Fetch status to revert UI if needed
                  }
              })
              .catch(err => {
-                 console.error(`Network error setting ${settingName}:`, err); errorElement.textContent = `Network error: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = `${settingName} change failed (Network).`;
+                 console.error(`Network error setting ${controlName}:`, err); errorElement.textContent = `Network error: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = `${controlName} change failed (Network).`;
                  setTimeout(updateStatus, 500); // Fetch status to revert UI if needed
-             })
-             .finally(() => {
-                 isChangingControl = false;
-                 enableControls();
-             });
-         }
-
-        // Handles Servo control
-        function changeServoAngle(angle) {
-             if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
-             console.log(`Requesting servo angle change: ${angle}`);
-             isChangingControl = true; disableControls(); // Use same flag for simplicity
-             statusElement.textContent = `Setting Servo Angle to ${angle}°...`;
-             errorElement.textContent = ''; errorElement.style.display = 'none';
-
-             fetch('/set_servo_angle', { // New endpoint
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ angle: parseInt(angle) }) // Send integer angle
-             })
-             .then(response => response.json().then(data => ({ status: response.status, body: data })))
-             .then(({ status, body }) => {
-                 if (status === 200 && body.success) {
-                     statusElement.textContent = `Servo angle set to ${angle}°.`;
-                     // Update UI immediately
-                     updateControlUI('servo_angle', angle, servoAngleStatus, servoSlider, servoValueSpan);
-                     setTimeout(updateStatus, 750); // Verify with status update
-                 } else {
-                     errorElement.textContent = `Error setting servo angle: ${body.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = `Servo angle change failed.`;
-                     setTimeout(updateStatus, 500); // Revert UI if needed
-                 }
-             })
-             .catch(err => {
-                 console.error(`Network error setting servo angle:`, err); errorElement.textContent = `Network error: ${err.message}`; errorElement.style.display = 'block'; statusElement.textContent = `Servo angle change failed (Network).`;
-                 setTimeout(updateStatus, 500); // Revert UI if needed
              })
              .finally(() => {
                  isChangingControl = false;
@@ -508,11 +442,7 @@ HTML_TEMPLATE = """
             const spanId = sliderId + '-value';
             const spanElement = document.getElementById(spanId);
             if (spanElement) {
-                if (sliderId === 'servo-slider') {
-                    spanElement.textContent = parseInt(value).toString() + '°'; // Integer for servo
-                } else {
-                    spanElement.textContent = parseFloat(value).toFixed(1); // Float for others
-                }
+                spanElement.textContent = parseFloat(value).toFixed(1);
             }
         }
 
@@ -521,43 +451,54 @@ HTML_TEMPLATE = """
              if (!confirm("Are you sure you want to power down the Raspberry Pi?")) { return; }
              isPoweringDown = true; disableControls(true); statusElement.textContent = 'Powering down...'; errorElement.textContent = ''; errorElement.style.display = 'none';
              if (statusUpdateInterval) clearInterval(statusUpdateInterval);
-             streamImage.onerror = null; streamImage.src = "";
+             streamImage.onerror = null; // Prevent error handling during shutdown
+             streamImage.src = ""; // Clear stream image
              fetch('/power_down', { method: 'POST' })
                  .then(response => { if (!response.ok) { return response.json().then(data => { throw new Error(data.message || `HTTP error! Status: ${response.status}`); }).catch(() => { throw new Error(`HTTP error! Status: ${response.status}`); }); } return response.json(); })
-                 .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. System will reboot shortly.'; document.body.innerHTML = "<h1>Shutting Down... Please Wait.</h1>"; } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); statusUpdateInterval = setInterval(updateStatus, 5000); } })
-                 .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); statusUpdateInterval = setInterval(updateStatus, 5000); });
+                 .then(data => { if (data.success) { statusElement.textContent = 'Shutdown initiated. System will reboot shortly.'; document.body.innerHTML = "<h1>Shutting Down... Please Wait.</h1>"; } else { errorElement.textContent = `Shutdown request failed: ${data.message || 'Unknown error.'}`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown failed.'; isPoweringDown = false; enableControls(); statusUpdateInterval = setInterval(updateStatus, 5000); } }) // Restart status updates on failure
+                 .catch(err => { console.error("Error sending power down command:", err); errorElement.textContent = `Error initiating shutdown: ${err.message}.`; errorElement.style.display = 'block'; statusElement.textContent = 'Shutdown error.'; isPoweringDown = false; enableControls(); statusUpdateInterval = setInterval(updateStatus, 5000); }); // Restart status updates on failure
          }
 
         // --- Stream Handling ---
         function handleStreamError() {
             console.warn("Stream image 'onerror' event triggered.");
-            if (streamErrorTimeout || isPoweringDown || isChangingResolution) return;
+            if (streamErrorTimeout || isPoweringDown || isChangingResolution) return; // Don't retry if shutting down or changing res
             statusElement.textContent = 'Stream interrupted. Attempting reload...';
-            streamImage.src = "";
+            streamImage.src = ""; // Clear broken image
             streamErrorTimeout = setTimeout(() => {
                  console.log("Attempting stream reload...");
                  streamImage.src = videoFeedUrlBase + "?" + Date.now();
                  streamErrorTimeout = null;
-             }, 3000);
+                 // Don't update status immediately, wait for onload or next error
+             }, 3000); // Wait 3 seconds before retrying
          }
 
         function handleStreamLoad() {
              console.log("Stream image 'onload' event fired.");
-             if (streamErrorTimeout) { clearTimeout(streamErrorTimeout); streamErrorTimeout = null; }
+             if (streamErrorTimeout) { // If we were in an error state, clear it
+                 clearTimeout(streamErrorTimeout);
+                 streamErrorTimeout = null;
+             }
+             // Don't necessarily change status text here, let the status update handle it
+             // This just confirms the image element itself loaded (or reloaded)
+             // Re-enable controls if they were disabled during a resolution change that just completed
              if (isChangingResolution) {
                  console.log("Stream loaded after resolution change, enabling controls.");
-                 isChangingResolution = false; enableControls(); updateStatus();
+                 isChangingResolution = false;
+                 enableControls();
+                 updateStatus(); // Update status now that stream is loaded
              }
          }
 
         // --- Initialization ---
         document.addEventListener('DOMContentLoaded', () => {
-            updateRecordButtonState(); updateStatus();
-            statusUpdateInterval = setInterval(updateStatus, 5000);
+            updateRecordButtonState(); // Set initial button text
+            updateStatus(); // Initial status fetch
+            statusUpdateInterval = setInterval(updateStatus, 5000); // Start periodic updates
         });
 
         window.addEventListener('beforeunload', () => {
-            if (statusUpdateInterval) clearInterval(statusUpdateInterval);
+            if (statusUpdateInterval) clearInterval(statusUpdateInterval); // Clean up interval
         });
     </script>
 </body>
@@ -569,75 +510,73 @@ HTML_TEMPLATE = """
 # ===========================================================
 
 def generate_stream_frames():
-    """Generates JPEG frames for the MJPEG stream from the combined camera view."""
+    """Generates JPEG frames for the MJPEG stream."""
     global _camera_manager # Access the manager instance
     frame_counter = 0
     last_frame_time = time.monotonic()
-    logging.info("MJPEG stream client connected. Starting combined frame generation.")
+    logging.info("MJPEG stream client connected. Starting frame generation.")
 
     if not _camera_manager:
         logging.error("Stream: CameraManager not initialized!")
-        # Yield a placeholder image or error message?
-        # For now, just return, client will see broken image.
         return
 
     while True:
+        # Check shutdown status frequently
         if _app_state.get("shutdown_event") and _app_state["shutdown_event"].is_set():
             logging.info("Stream generator: Shutdown detected, stopping.")
             break
 
-        # Get the latest COMBINED frame
-        frame_to_encode = _camera_manager.get_latest_combined_frame()
+        # Get latest output frame (could be combined or single cam)
+        frame_to_encode = _camera_manager.get_latest_combined_frame() # Renamed method for clarity
 
         if frame_to_encode is None:
-            time.sleep(0.05)
+            # logging.debug("Stream generator: No frame available yet.")
+            time.sleep(0.05) # Wait briefly if no frame
             continue
 
         try:
-            (flag, encodedImage) = cv2.imencode(".jpg", frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 80]) # Slightly higher quality
+            # Encode the frame as JPEG
+            (flag, encodedImage) = cv2.imencode(".jpg", frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, 75])
             if not flag:
                 logging.warning("Stream generator: Could not encode frame to JPEG.")
                 time.sleep(0.1)
                 continue
 
+            # Yield the frame in MJPEG format
             yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' +
                    bytearray(encodedImage) + b'\r\n')
 
             frame_counter += 1
-            # --- Rate limiting (Approximate) ---
+            # --- Rate limiting ---
+            # Aim slightly faster than camera FPS to avoid falling behind
+            # This is approximate and depends on capture/encode speed
             current_time = time.monotonic()
             elapsed = current_time - last_frame_time
-            # Base target delay on primary camera's FPS? Or fixed rate?
-            # Let's aim for a fixed reasonable stream rate like 25-30fps
-            target_delay = 1.0 / 30.0 # Aim for 30fps stream
-            sleep_time = max(0.01, target_delay - elapsed)
-            time.sleep(sleep_time)
+            # Get current camera FPS (approximate) - might need a better way
+            # target_delay = 1.0 / (config.DEFAULT_FRAME_RATE + 5) # Simple approximation
+            target_delay = 0.03 # Aim for ~30fps stream rate limit
+            time.sleep(max(0.01, target_delay - elapsed)) # Ensure minimum sleep
             last_frame_time = time.monotonic()
 
+
         except GeneratorExit:
+            # Client disconnected
             logging.info(f"Streaming client disconnected after {frame_counter} frames.")
             break
         except Exception as e:
+            # Log other errors (e.g., encoding issues)
             logging.exception(f"!!! Error in MJPEG streaming generator: {e}")
-            time.sleep(0.5)
+            time.sleep(0.5) # Pause briefly after an error
 
     logging.info("Stream generator thread exiting.")
 
 
-def build_options_html(options_source, current_value_key):
-    """
-    Helper to build <option> tags for HTML select dropdowns.
-    Can handle lists (for modes) or dictionaries (for ISO).
-    """
+def build_options_html(available_modes, current_mode_name):
+    """Helper to build <option> tags for HTML select dropdowns."""
     options_html = ""
-    if isinstance(options_source, dict): # For ISO { "Name": value }
-        for key_name in options_source.keys():
-            selected_attr = ' selected' if key_name == current_value_key else ''
-            options_html += f'<option value="{key_name}"{selected_attr}>{key_name}</option>'
-    elif isinstance(options_source, list): # For simple mode lists ["Mode1", "Mode2"]
-        for mode_name in options_source:
-            selected_attr = ' selected' if mode_name == current_value_key else ''
-            options_html += f'<option value="{mode_name}"{selected_attr}>{mode_name}</option>'
+    for mode_name in available_modes:
+        selected_attr = ' selected' if mode_name == current_mode_name else ''
+        options_html += f'<option value="{mode_name}"{selected_attr}>{mode_name}</option>'
     return options_html
 
 # ===========================================================
@@ -650,58 +589,51 @@ def index():
     global _camera_manager, _hardware_manager, _app_state
 
     if not _camera_manager or not _hardware_manager:
+         # Handle case where managers aren't initialized yet (shouldn't happen if setup correctly)
          return "Error: Application not fully initialized.", 500
 
+    # Get initial state from managers and app state
     cam_state = _camera_manager.get_camera_state()
-    # Assume get_current_servo_angle() exists in hardware_manager
-    try:
-        current_servo_angle = _hardware_manager.get_current_servo_angle()
-        servo_angle_initial = int(current_servo_angle) if current_servo_angle is not None else config.SERVO_CENTER_ANGLE
-    except AttributeError:
-         logging.error("HardwareManager does not have get_current_servo_angle() method yet!")
-         servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback
-         # Set error message?
-         cam_state['last_error'] = cam_state.get('last_error', '') + " Servo angle unavailable."
-
-
-    hw_state = {
+    hw_state = { # Get relevant hardware state
         'battery_percent': _hardware_manager.battery_percentage,
-        'last_error': _hardware_manager.last_error,
-        'servo_angle': servo_angle_initial
+        'last_error': _hardware_manager.last_error # Combine errors?
     }
     with _ui_lock:
-        app_state_copy = _app_state.copy()
+        app_state_copy = _app_state.copy() # Get UI specific state
 
-    # Combine error messages
+    # Combine error messages (prioritize camera errors?)
     err_msg = cam_state.get('last_error') or hw_state.get('last_error') or ""
-    if cam_state.get('audio_last_error'): # Add audio error if present
-         err_msg += (err_msg.strip() and " | " or "") + "Audio: " + cam_state['audio_last_error']
+
+    # Get Cam0 resolution text
+    cam0_w, cam0_h = cam_state.get('resolution_wh', (0, 0))
+    resolution_text = f"{cam0_w}x{cam0_h}" if cam0_w > 0 else "Unknown"
+
+    # Get output frame dimensions for the <img> tag
+    output_w, output_h = cam_state.get('output_frame_wh', (cam0_w, cam0_h)) # Fallback to cam0 res
+    if output_w <= 0: output_w = 640 # Default width if unknown
+    if output_h <= 0: output_h = 480 # Default height if unknown
 
 
-    # Cam0 resolution text
-    current_w, current_h = cam_state.get('resolution_wh', ('?', '?'))
-    resolution_text = f"{current_w}x{current_h}"
     batt_perc_initial = hw_state.get('battery_percent')
     batt_text_initial = f"{batt_perc_initial:.1f}" if batt_perc_initial is not None else "--"
 
-    # Build HTML option strings
-    # Use config.AVAILABLE_ISO_SETTINGS dict for ISO
-    iso_options_html = build_options_html(config.AVAILABLE_ISO_SETTINGS, cam_state.get('iso_mode', config.DEFAULT_ISO_NAME))
+    # Build HTML option strings using config lists and current state from CameraManager
+    awb_options_html = build_options_html(config.AVAILABLE_AWB_MODES, cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME))
     ae_options_html = build_options_html(config.AVAILABLE_AE_MODES, cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME))
     metering_options_html = build_options_html(config.AVAILABLE_METERING_MODES, cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME))
     noise_reduction_options_html = build_options_html(config.AVAILABLE_NOISE_REDUCTION_MODES, cam_state.get('noise_reduction_mode', config.DEFAULT_NOISE_REDUCTION_MODE_NAME))
 
     # Render the template string
     return render_template_string(HTML_TEMPLATE,
-        resolution_text=resolution_text,
-        # current_w=current_w, # Removed from template img tag
-        # current_h=current_h, # Removed from template img tag
+        resolution_text=resolution_text, # Cam0 resolution text
+        output_w=output_w, # Width for the <img> tag
+        output_h=output_h, # Height for the <img> tag
         err_msg=err_msg,
         digital_rec_state_initial=app_state_copy.get('digital_recording_active', False),
         batt_text_initial=batt_text_initial,
         # Pass current control values from CameraManager state
-        current_iso_mode_name_initial=cam_state.get('iso_mode', config.DEFAULT_ISO_NAME), # ISO name
-        iso_options_html=iso_options_html,
+        current_awb_mode_name_initial=cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME),
+        awb_options_html=awb_options_html,
         current_ae_mode_name_initial=cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME),
         ae_options_html=ae_options_html,
         current_metering_mode_name_initial=cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME),
@@ -716,17 +648,13 @@ def index():
         MIN_SATURATION=config.MIN_SATURATION, MAX_SATURATION=config.MAX_SATURATION, STEP_SATURATION=config.STEP_SATURATION,
         sharpness_initial=cam_state.get('sharpness', config.DEFAULT_SHARPNESS),
         MIN_SHARPNESS=config.MIN_SHARPNESS, MAX_SHARPNESS=config.MAX_SHARPNESS, STEP_SHARPNESS=config.STEP_SHARPNESS,
-        # Servo initial values
-        servo_angle_initial=servo_angle_initial,
-        SERVO_MIN_ANGLE=config.SERVO_MIN_ANGLE,
-        SERVO_MAX_ANGLE=config.SERVO_MAX_ANGLE,
-        video_feed_url=url_for('video_feed')
+        video_feed_url=url_for('video_feed') # Generate URL dynamically
     )
 
 
 @app.route("/video_feed")
 def video_feed():
-    """Route for the MJPEG video stream (combined view)."""
+    """Route for the MJPEG video stream."""
     return Response(generate_stream_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -739,64 +667,59 @@ def status():
     if not _camera_manager or not _hardware_manager:
         return jsonify({'error': 'Application not fully initialized.'}), 500
 
+    # Get current state from managers
     cam_state = _camera_manager.get_camera_state()
+    # Get latest battery reading (don't trigger a new read here)
     batt_perc = _hardware_manager.battery_percentage
-    # Assume get_current_servo_angle() exists
-    try:
-        current_servo_angle = _hardware_manager.get_current_servo_angle()
-        servo_angle = int(current_servo_angle) if current_servo_angle is not None else None
-    except AttributeError:
-         servo_angle = None # Indicate error or unavailability
 
-
-    # Combine error messages
+    # Combine error messages (prioritize camera errors?)
     err_msg = cam_state.get('last_error') or _hardware_manager.last_error or ""
-    if cam_state.get('audio_last_error'):
-         err_msg += (err_msg.strip() and " | " or "") + "Audio: " + cam_state['audio_last_error']
 
-    # Auto-clear certain errors (simplified logic)
-    latest_frame = _camera_manager.get_latest_combined_frame()
-    if latest_frame is not None and err_msg and ("unavailable" in err_msg or "capture" in err_msg):
+    # Auto-clear certain errors if conditions are met
+    latest_frame = _camera_manager.get_latest_combined_frame() # Check if frames are coming
+    if latest_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg):
          logging.info("Status: Auto-clearing previous camera/capture error as frames are being received.")
          if _camera_manager.last_error == err_msg: _camera_manager.last_error = None
          if _hardware_manager.last_error == err_msg: _hardware_manager.last_error = None
-         err_msg = ""
+         err_msg = "" # Clear for current response
     if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
          logging.info("Status: Auto-clearing previous battery monitor error as a reading was successful.")
          if _hardware_manager.last_error == err_msg: _hardware_manager.last_error = None
-         err_msg = ""
-    if servo_angle is not None and err_msg and ("Servo" in err_msg):
-         logging.info("Status: Auto-clearing previous servo error as angle was retrieved.")
-         if _hardware_manager.last_error == err_msg: _hardware_manager.last_error = None
+         if _camera_manager.last_error == err_msg: _camera_manager.last_error = None # Should be hw error
          err_msg = ""
 
     # Build status text
     status_text = "Streaming"
-    if not cam_state.get('is_initialized0', False): status_text += " (Cam0 ERR)"
-    if not cam_state.get('is_initialized1', False): status_text += " (Cam1 ERR)"
+    if cam_state.get('is_cam1_enabled'):
+        status_text += " (Dual Cam)"
+    else:
+        status_text += " (Single Cam)"
+
     if cam_state.get('is_recording'):
         rec_count = len(cam_state.get('recording_paths', []))
-        status_text += f" (Recording Cam0 to {rec_count} USB(s))"
-        if config.AUDIO_ENABLED and cam_state.get('audio_last_error'):
-             status_text += " (Audio ERR)"
+        if rec_count > 0:
+            status_text += f" (Recording to {rec_count} USB(s))"
+        else:
+             status_text += " (ERROR: Recording active but no paths!)"
+             if not err_msg: err_msg = "Inconsistent State: Recording active but no paths."
 
 
+    # Get UI-specific state under lock
     with _ui_lock:
         digital_rec_active = _app_state.get("digital_recording_active", False)
 
+    # Return combined status
     status_data = {
         'is_recording': cam_state.get('is_recording', False),
         'digital_recording_active': digital_rec_active,
-        'resolution': f"{cam_state.get('resolution_wh', ['?','?'])[0]}x{cam_state.get('resolution_wh', ['?','?'])[1]}", # Cam0 Res
+        'cam0_resolution': f"{cam_state.get('resolution_wh', ['?','?'])[0]}x{cam_state.get('resolution_wh', ['?','?'])[1]}",
+        'output_frame_wh': cam_state.get('output_frame_wh'), # Add output frame dimensions
         'status_text': status_text,
         'error': err_msg,
-        'audio_last_error': cam_state.get('audio_last_error'), # Separate audio error
         'active_recordings': cam_state.get('recording_paths', []),
         'battery_percent': batt_perc,
-        'servo_angle': servo_angle, # Add servo angle
-        # Camera Controls
-        'iso_mode': cam_state.get('iso_mode'), # ISO Name
-        'analogue_gain': cam_state.get('analogue_gain'), # ISO Float value
+        # Include current control values from CameraManager state
+        'awb_mode': cam_state.get('awb_mode'),
         'ae_mode': cam_state.get('ae_mode'),
         'metering_mode': cam_state.get('metering_mode'),
         'noise_reduction_mode': cam_state.get('noise_reduction_mode'),
@@ -810,56 +733,57 @@ def status():
 
 @app.route("/set_resolution/<direction>", methods=['POST'])
 def set_resolution(direction):
-    """Handles requests to change the Cam0 resolution."""
+    """Handles requests to change the camera resolution."""
     global _camera_manager, _app_state
 
     if not _camera_manager: return jsonify({'success': False, 'message': 'Camera manager not ready.'}), 500
 
-    with _ui_lock:
+    with _ui_lock: # Lock access to the request index
         if _app_state.get("reconfigure_resolution_index") is not None:
-            return jsonify({'success': False, 'message': 'Reconfiguration already in progress.'}), 429
+            return jsonify({'success': False, 'message': 'Reconfiguration already in progress.'}), 429 # Too Many Requests
 
-        current_index = _camera_manager.current_resolution_index0 # Get Cam0 index
+        current_index = _camera_manager.current_resolution_index0 # Get current index from manager
         original_index = current_index
         new_index = current_index
 
         if direction == 'up': new_index += 1
         elif direction == 'down': new_index -= 1
-        else: return jsonify({'success': False, 'message': 'Invalid direction specified.'}), 400
+        else:
+            return jsonify({'success': False, 'message': 'Invalid direction specified.'}), 400
 
+        # Clamp index within valid range
         new_index = max(0, min(len(config.CAM0_RESOLUTIONS) - 1, new_index))
 
         if new_index == original_index:
             msg = 'Already at highest resolution.' if direction == 'up' else 'Already at lowest resolution.'
             return jsonify({'success': False, 'message': msg}), 400
 
+        # Store the requested index for the main loop to pick up
         _app_state["reconfigure_resolution_index"] = new_index
-        new_w, new_h, new_fps = config.CAM0_RESOLUTIONS[new_index]
-        logging.info(f"Web request: Queue Cam0 resolution change index {original_index} -> {new_index} ({new_w}x{new_h}@{new_fps}fps)")
-        _camera_manager.last_error = None # Clear error on queuing
+        new_w, new_h, _ = config.CAM0_RESOLUTIONS[new_index] # Get W, H from config
+        logging.info(f"Web request: Queue resolution change index {original_index} -> {new_index} ({new_w}x{new_h})")
+        # Clear camera manager's last error on successful request queuing
+        _camera_manager.last_error = None
 
+        # Return the new Cam0 resolution text
         return jsonify({'success': True, 'message': 'Resolution change requested.', 'new_resolution': f"{new_w}x{new_h}"})
 
 
 @app.route('/toggle_recording', methods=['POST'])
 def toggle_recording():
     """Toggles the digital recording trigger state."""
-    global _app_state, _camera_manager, _hardware_manager # Allow clearing errors
+    global _app_state
     new_state = False
     with _ui_lock:
         current_state = _app_state.get("digital_recording_active", False)
         _app_state["digital_recording_active"] = not current_state
         new_state = _app_state["digital_recording_active"]
         logging.info(f"Digital recording trigger toggled via web UI to: {'ON' if new_state else 'OFF'}")
-        # Clear potential previous recording/audio errors when user interacts
-        if _camera_manager:
-            if _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writers" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error or "Mux" in _camera_manager.last_error):
-                logging.info(f"Clearing previous recording error via toggle: '{_camera_manager.last_error}'")
-                _camera_manager.last_error = None
-            if _camera_manager.audio_last_error:
-                 logging.info(f"Clearing previous audio error via toggle: '{_camera_manager.audio_last_error}'")
-                 _camera_manager.audio_last_error = None
-        if _hardware_manager and _hardware_manager.last_error and ("Recording" in _hardware_manager.last_error):
+        # Clear potential previous recording errors when user interacts
+        if _camera_manager and _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writers" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error):
+            logging.info(f"Clearing previous recording error via toggle: '{_camera_manager.last_error}'")
+            _camera_manager.last_error = None
+        if _hardware_manager and _hardware_manager.last_error and ("Recording" in _hardware_manager.last_error): # Less likely
              _hardware_manager.last_error = None
 
     return jsonify({'success': True, 'digital_recording_active': new_state})
@@ -867,146 +791,113 @@ def toggle_recording():
 
 @app.route('/set_camera_control', methods=['POST'])
 def set_camera_control():
-    """Sets a specific common camera control value for both cameras."""
+    """Sets a specific camera control value."""
     global _camera_manager
 
     if not _camera_manager: return jsonify({'success': False, 'message': 'Camera manager not ready.'}), 500
-    # Check if *any* camera is initialized? Or require both? Let's allow if at least one is ready.
-    if not _camera_manager.is_initialized0 and not _camera_manager.is_initialized1:
-         return jsonify({'success': False, 'message': 'Cameras not initialized.'}), 503
+    # Check if required cameras are initialized based on config
+    required_init = _camera_manager.is_initialized0 and (not config.ENABLE_CAM1 or _camera_manager.is_initialized1)
+    if not required_init:
+        return jsonify({'success': False, 'message': 'Required camera(s) not initialized.'}), 503
 
-    control_name_req = None # Requested control name/key
-    control_value_req = None # Requested control value (might be name for ISO)
+    control_name = None # Initialize for error logging
     try:
         data = request.get_json()
         if not data or 'control' not in data or 'value' not in data:
             logging.warning("/set_camera_control called without 'control' or 'value'.")
             return jsonify({'success': False, 'message': 'Missing control or value in request.'}), 400
 
-        control_name_req = data['control']
-        control_value_req = data['value']
-        logging.info(f"Web request: Set control '{control_name_req}' to '{control_value_req}'")
+        control_name = data['control']
+        control_value = data['value']
+        logging.info(f"Web request: Set control '{control_name}' to '{control_value}'")
 
-        control_dict_to_apply = {} # Controls to pass to camera_manager
+        control_dict_to_set = {}
+        parsed_value = None
         validation_error = None
 
         # --- Validate and Parse Value ---
-        if control_name_req == 'AnalogueGain': # ISO control uses name in request
-            iso_name = str(control_value_req)
-            gain_value = config.AVAILABLE_ISO_SETTINGS.get(iso_name)
-            if gain_value is not None:
-                control_dict_to_apply["AnalogueGain"] = gain_value
-                if gain_value == 0.0: # Auto ISO
-                     control_dict_to_apply["AeEnable"] = True # Ensure AE is on for Auto ISO
-            else:
-                validation_error = f"Invalid ISO Mode name: {iso_name}"
-        elif control_name_req == 'AeExposureMode':
-            enum_val = controls.AeExposureModeEnum.__members__.get(control_value_req)
-            if enum_val is not None: control_dict_to_apply["AeExposureMode"] = enum_val; control_dict_to_apply["AeEnable"] = True
-            else: validation_error = f"Invalid AeExposureMode value: {control_value_req}"
-        elif control_name_req == 'AeMeteringMode':
-            enum_val = controls.AeMeteringModeEnum.__members__.get(control_value_req)
-            if enum_val is not None: control_dict_to_apply["AeMeteringMode"] = enum_val; control_dict_to_apply["AeEnable"] = True
-            else: validation_error = f"Invalid AeMeteringMode value: {control_value_req}"
-        elif control_name_req == 'NoiseReductionMode':
+        # Mode Controls (convert string name to enum member)
+        if control_name == 'AwbMode':
+            enum_val = controls.AwbModeEnum.__members__.get(control_value)
+            if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AwbEnable"] = True # Ensure enabled
+            else: validation_error = f"Invalid AwbMode value: {control_value}"
+        elif control_name == 'AeExposureMode':
+            enum_val = controls.AeExposureModeEnum.__members__.get(control_value)
+            if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AeEnable"] = True
+            else: validation_error = f"Invalid AeExposureMode value: {control_value}"
+        elif control_name == 'AeMeteringMode':
+            enum_val = controls.AeMeteringModeEnum.__members__.get(control_value)
+            if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AeEnable"] = True
+            else: validation_error = f"Invalid AeMeteringMode value: {control_value}"
+        elif control_name == 'NoiseReductionMode':
+            try: # Handle potential absence of draft controls
+                enum_val = controls.draft.NoiseReductionModeEnum.__members__.get(control_value)
+                if enum_val is not None: parsed_value = enum_val
+                else: validation_error = f"Invalid NoiseReductionMode value: {control_value}"
+            except AttributeError:
+                validation_error = "NoiseReductionMode control not available."
+
+        # Numeric Controls (convert to float and clamp)
+        elif control_name == 'Brightness':
             try:
-                enum_val = controls.draft.NoiseReductionModeEnum.__members__.get(control_value_req)
-                if enum_val is not None: control_dict_to_apply["NoiseReductionMode"] = enum_val
-                else: validation_error = f"Invalid NoiseReductionMode value: {control_value_req}"
-            except AttributeError: validation_error = "NoiseReductionMode control not available."
-        elif control_name_req == 'Brightness':
-            try: val = float(control_value_req); control_dict_to_apply["Brightness"] = max(config.MIN_BRIGHTNESS, min(config.MAX_BRIGHTNESS, val))
+                val = float(control_value)
+                parsed_value = max(config.MIN_BRIGHTNESS, min(config.MAX_BRIGHTNESS, val))
             except ValueError: validation_error = "Invalid numeric value for Brightness"
-        elif control_name_req == 'Contrast':
-            try: val = float(control_value_req); control_dict_to_apply["Contrast"] = max(config.MIN_CONTRAST, min(config.MAX_CONTRAST, val))
+        elif control_name == 'Contrast':
+            try:
+                val = float(control_value)
+                parsed_value = max(config.MIN_CONTRAST, min(config.MAX_CONTRAST, val))
             except ValueError: validation_error = "Invalid numeric value for Contrast"
-        elif control_name_req == 'Saturation':
-            try: val = float(control_value_req); control_dict_to_apply["Saturation"] = max(config.MIN_SATURATION, min(config.MAX_SATURATION, val))
+        elif control_name == 'Saturation':
+            try:
+                val = float(control_value)
+                parsed_value = max(config.MIN_SATURATION, min(config.MAX_SATURATION, val))
             except ValueError: validation_error = "Invalid numeric value for Saturation"
-        elif control_name_req == 'Sharpness':
-            try: val = float(control_value_req); control_dict_to_apply["Sharpness"] = max(config.MIN_SHARPNESS, min(config.MAX_SHARPNESS, val))
+        elif control_name == 'Sharpness':
+            try:
+                val = float(control_value)
+                parsed_value = max(config.MIN_SHARPNESS, min(config.MAX_SHARPNESS, val))
             except ValueError: validation_error = "Invalid numeric value for Sharpness"
         else:
-            validation_error = f"Unknown control name: {control_name_req}"
+            validation_error = f"Unknown control name: {control_name}"
 
         # --- Handle Validation Result ---
         if validation_error:
-            logging.error(f"Control validation failed for '{control_name_req}': {validation_error}")
+            logging.error(f"Control validation failed for '{control_name}': {validation_error}")
             return jsonify({'success': False, 'message': validation_error}), 400
 
         # --- Apply Control ---
-        if not control_dict_to_apply:
-             logging.error(f"Internal error: No controls parsed for request '{control_name_req}'.")
+        if parsed_value is not None:
+            control_dict_to_set[control_name] = parsed_value
+            if _camera_manager.apply_camera_controls(control_dict_to_set):
+                 # Value applied successfully by camera manager
+                 logged_value = f"{parsed_value:.2f}" if isinstance(parsed_value, float) else parsed_value.name if hasattr(parsed_value,'name') else str(parsed_value)
+                 logging.info(f"Successfully set {control_name} to: {logged_value}")
+                 return jsonify({'success': True, 'message': f'{control_name} set.'})
+            else:
+                 # apply_camera_controls failed, error should be in manager's last_error
+                 error_msg = _camera_manager.last_error or f"Failed to apply {control_name}"
+                 return jsonify({'success': False, 'message': error_msg}), 500
+        else:
+             # Should have been caught by validation_error check, but as a fallback
+             logging.error(f"Internal error: Parsed value is None for control '{control_name}' after validation.")
              return jsonify({'success': False, 'message': 'Internal processing error.'}), 500
 
-        if _camera_manager.apply_camera_controls(control_dict_to_apply):
-             # Value applied successfully by camera manager
-             applied_val_str = str(list(control_dict_to_apply.values())[0]) # Get first value applied
-             logging.info(f"Successfully applied controls: {control_dict_to_apply}")
-             return jsonify({'success': True, 'message': f'{control_name_req} set.'})
-        else:
-             # apply_camera_controls failed, error should be in manager's last_error
-             error_msg = _camera_manager.last_error or f"Failed to apply {control_name_req}"
-             return jsonify({'success': False, 'message': error_msg}), 500
-
     except Exception as e:
-        logging.error(f"Error processing set_camera_control '{control_name_req}': {e}", exc_info=True)
-        return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
-
-
-@app.route('/set_servo_angle', methods=['POST'])
-def set_servo_angle():
-    """Sets the servo angle."""
-    global _hardware_manager
-
-    if not _hardware_manager: return jsonify({'success': False, 'message': 'Hardware manager not ready.'}), 500
-    if not config.SERVO_ENABLED: return jsonify({'success': False, 'message': 'Servo control is disabled in config.'}), 403
-
-    angle = None # Initialize for error logging
-    try:
-        data = request.get_json()
-        if not data or 'angle' not in data:
-            logging.warning("/set_servo_angle called without 'angle'.")
-            return jsonify({'success': False, 'message': 'Missing angle in request.'}), 400
-
-        angle_req = data['angle']
-        logging.info(f"Web request: Set servo angle to '{angle_req}'")
-
-        # Validate angle
-        try:
-            angle = int(angle_req)
-            if not (config.SERVO_MIN_ANGLE <= angle <= config.SERVO_MAX_ANGLE):
-                 raise ValueError(f"Angle {angle} out of range ({config.SERVO_MIN_ANGLE}-{config.SERVO_MAX_ANGLE})")
-        except (ValueError, TypeError) as e:
-            logging.error(f"Invalid servo angle value: {angle_req}. Error: {e}")
-            return jsonify({'success': False, 'message': f"Invalid angle: {angle_req}. Must be integer between {config.SERVO_MIN_ANGLE} and {config.SERVO_MAX_ANGLE}."}), 400
-
-        # Apply angle using HardwareManager method
-        # Assume set_servo updates internal state and handles errors
-        _hardware_manager.set_servo(angle)
-
-        # Check for errors set by hardware_manager during set_servo
-        if _hardware_manager.last_error and "Servo" in _hardware_manager.last_error:
-            error_msg = _hardware_manager.last_error
-            # Clear the error after reporting it? Or let status poll clear it? Let status poll clear.
-            return jsonify({'success': False, 'message': error_msg}), 500
-        else:
-            logging.info(f"Successfully set servo angle to: {angle}")
-            return jsonify({'success': True, 'message': f'Servo angle set to {angle}°.'})
-
-    except Exception as e:
-        logging.error(f"Error processing set_servo_angle '{angle}': {e}", exc_info=True)
+        # Catch-all for unexpected errors during request processing
+        logging.error(f"Error processing set_camera_control '{control_name}': {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
 
 
 @app.route('/power_down', methods=['POST'])
 def power_down():
     """Signals the main application to initiate shutdown and reboot."""
-    global _app_state, _camera_manager, _hardware_manager
+    global _app_state
     logging.warning("Received request for power down via web UI. Setting flags.")
 
     with _ui_lock:
         _app_state["reboot_requested"] = True
+        # Set the shutdown event if it exists
         shutdown_event = _app_state.get("shutdown_event")
         if shutdown_event:
             shutdown_event.set()
@@ -1014,7 +905,7 @@ def power_down():
             logging.error("Power down requested, but shutdown_event not set in app_state!")
             return jsonify({'success': False, 'message': 'Internal server error: Shutdown event not configured.'}), 500
 
-    # Update manager errors
+    # Update manager errors to reflect shutdown trigger
     if _camera_manager: _camera_manager.last_error = "Shutdown initiated via web UI..."
     if _hardware_manager: _hardware_manager.last_error = "Shutdown initiated via web UI..."
 
@@ -1027,25 +918,35 @@ def power_down():
 def setup_web_app(camera_manager, hardware_manager, shutdown_event_ref):
     """
     Sets up the Flask application context with manager instances and shared event.
+
+    Args:
+        camera_manager (CameraManager): Instance of the camera manager.
+        hardware_manager (HardwareManager): Instance of the hardware manager.
+        shutdown_event_ref (threading.Event): Reference to the main shutdown event.
     """
     global _camera_manager, _hardware_manager, _app_state
     _camera_manager = camera_manager
     _hardware_manager = hardware_manager
     with _ui_lock:
         _app_state["shutdown_event"] = shutdown_event_ref
+        # Reset other UI state flags on setup
         _app_state["digital_recording_active"] = False
         _app_state["reconfigure_resolution_index"] = None
         _app_state["reboot_requested"] = False
+
     logging.info("Web application context configured with manager instances.")
 
 
 def run_web_server():
     """Runs the Flask web server."""
     logging.info(f"Starting Flask web server on 0.0.0.0:{config.WEB_PORT}...")
+    # Use 'threaded=True' for handling multiple clients (stream + status requests)
+    # 'debug=False' and 'use_reloader=False' are important for stability when run as a service
     try:
         app.run(host='0.0.0.0', port=config.WEB_PORT, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         logging.exception(f"!!! Flask web server failed: {e}")
+        # Signal shutdown if Flask fails catastrophically
         with _ui_lock:
             shutdown_event = _app_state.get("shutdown_event")
             if shutdown_event and not shutdown_event.is_set():
@@ -1054,44 +955,71 @@ def run_web_server():
 
 # Example Usage (for testing purposes - requires dummy managers)
 if __name__ == "__main__":
-    # --- Dummy Managers ---
-    class DummyCamManager:
-        is_initialized0 = True; is_initialized1 = True; is_recording = False; last_error = None; audio_last_error = None
-        current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
-        current_iso_name = config.DEFAULT_ISO_NAME; current_analogue_gain = config.DEFAULT_ANALOGUE_GAIN
-        current_ae_mode = config.DEFAULT_AE_MODE_NAME; current_metering_mode = config.DEFAULT_METERING_MODE_NAME
-        current_noise_reduction_mode = config.DEFAULT_NOISE_REDUCTION_MODE_NAME
-        current_brightness = config.DEFAULT_BRIGHTNESS; current_contrast = config.DEFAULT_CONTRAST
-        current_saturation = config.DEFAULT_SATURATION; current_sharpness = config.DEFAULT_SHARPNESS
-        recording_paths = []
+    # --- Create Dummy Managers for testing ---
+    class DummyManager:
+        def __init__(self):
+            self.last_error = None
+            self.is_initialized0 = True
+            self.is_initialized1 = config.ENABLE_CAM1 # Reflect config
+            self.current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
+            self.measured_cam0_fps_avg = 25.0
+            self.actual_cam0_fps = 30.0
+            self.audio_last_error = None
+
         def get_latest_combined_frame(self):
-            img = np.zeros((720, 1280, 3), dtype=np.uint8); cv2.putText(img,'Combined Stream',(50,360),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+            w0, h0, _ = config.CAM0_RESOLUTIONS[self.current_resolution_index0]
+            h = h0
+            if config.ENABLE_CAM1:
+                _, h1 = config.CAM1_RESOLUTION
+                h += h1 + config.STREAM_BORDER_SIZE
+
+            img = cv2.cvtColor(cv2.UMat(h, w0, cv2.CV_8UC3), cv2.COLOR_RGB2BGR)
+            status_text = "Cam0" + (" + Cam1" if config.ENABLE_CAM1 else "")
+            cv2.putText(img, f'Test Frame {status_text}',(50,int(h/2)),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
             return img
+
         def get_camera_state(self):
-             w,h,f = config.CAM0_RESOLUTIONS[self.current_resolution_index0]
-             return {'is_initialized': True, 'is_initialized0': True, 'is_initialized1': True, 'resolution_index': self.current_resolution_index0, 'resolution_wh': (w,h), 'resolution_fps': f, 'is_recording': self.is_recording, 'recording_paths': self.recording_paths, 'last_error': self.last_error, 'audio_last_error': self.audio_last_error, 'iso_mode': self.current_iso_name, 'analogue_gain': self.current_analogue_gain, 'ae_mode': self.current_ae_mode, 'metering_mode': self.current_metering_mode, 'noise_reduction_mode': self.current_noise_reduction_mode, 'brightness': self.current_brightness, 'contrast': self.current_contrast, 'saturation': self.current_saturation, 'sharpness': self.current_sharpness}
+            w0, h0, fps0 = config.CAM0_RESOLUTIONS[self.current_resolution_index0]
+            out_w, out_h = w0, h0
+            if config.ENABLE_CAM1:
+                _, h1 = config.CAM1_RESOLUTION
+                out_h += h1 + config.STREAM_BORDER_SIZE
+            return {
+                'is_initialized': self.is_initialized0 and (not config.ENABLE_CAM1 or self.is_initialized1),
+                'is_initialized0': self.is_initialized0,
+                'is_initialized1': self.is_initialized1,
+                'is_cam1_enabled': config.ENABLE_CAM1,
+                'resolution_index': self.current_resolution_index0,
+                'resolution_wh': (w0, h0),
+                'output_frame_wh': (out_w, out_h),
+                'target_cam0_fps': fps0,
+                'actual_cam0_fps': self.actual_cam0_fps,
+                'measured_cam0_fps': self.measured_cam0_fps_avg,
+                'is_recording': False, 'recording_paths': [], 'last_error': self.last_error,
+                'audio_last_error': self.audio_last_error,
+                'awb_mode': 'Auto', 'ae_mode': 'Normal', 'metering_mode': 'CentreWeighted',
+                'noise_reduction_mode': 'Fast', 'brightness': 0.0, 'contrast': 1.0,
+                'saturation': 1.0, 'sharpness': 1.0, 'iso_mode': 'Auto', 'analogue_gain': 0.0
+            }
+
         def apply_camera_controls(self, d): print(f"DummyCam: Apply controls {d}"); return True
-        def initialize_cameras(self, idx): print(f"DummyCam: Init cameras (idx={idx})"); return True
-        def toggle_recording(self): self.is_recording = not self.is_recording; return True
-        def shutdown(self): print("DummyCam Shutdown")
+        def initialize_cameras(self, idx=None): print(f"DummyCam: Init cameras (idx={idx})"); return True
+
 
     class DummyHWManager:
          battery_percentage = 75.3
          last_error = None
-         current_servo_angle = config.SERVO_CENTER_ANGLE
-         def get_current_servo_angle(self): return self.current_servo_angle
-         def set_servo(self, angle): print(f"DummyHW: Set servo to {angle}"); self.current_servo_angle = angle; return True
-         def cleanup(self): print("DummyHW Cleanup")
 
     # --- Setup Logging ---
     logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT)
-    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING) # Quieten Flask's default logging
 
     # --- Setup and Run ---
-    print("--- Web UI Test (Dual Cam / Servo) ---")
+    print("--- Web UI Test ---")
     print(f"--- Running on http://0.0.0.0:{config.WEB_PORT} ---")
+    print(f"--- Cam1 Enabled: {config.ENABLE_CAM1} ---") # Show status
     dummy_shutdown = threading.Event()
-    setup_web_app(DummyCamManager(), DummyHWManager(), dummy_shutdown)
-    run_web_server()
+    setup_web_app(DummyManager(), DummyHWManager(), dummy_shutdown)
+    run_web_server() # This will block until Ctrl+C
     print("--- Web UI Test Complete ---")
 

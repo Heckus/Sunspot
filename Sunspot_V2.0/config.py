@@ -34,6 +34,12 @@ WEB_PORT = 8000
 MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # How many capture errors before trying to restart/shutdown
 
 # ===========================================================
+# === Camera Enable Flags ===
+# ===========================================================
+# Set ENABLE_CAM1 to False to run in single-camera mode (only Cam0)
+ENABLE_CAM1 = False
+
+# ===========================================================
 # === Camera 0 (Primary - e.g., HQ Camera) Configuration ===
 # ===========================================================
 CAM0_ID = 0 # Physical camera number (usually 0 for the first camera)
@@ -76,6 +82,7 @@ CAM0_RECORDING_EXTENSION = ".mp4"
 # ===========================================================
 # === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
 # ===========================================================
+# These settings are only used if ENABLE_CAM1 is True
 CAM1_ID = 1 # Physical camera number (usually 1 for the second camera)
 
 # Fixed resolution and frame rate for Cam1 (used for combined stream)
@@ -91,7 +98,7 @@ CAM1_USE_NOIR_TUNING = True # Set to False to use default tuning for Cam1
 CAM1_NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json"
 # Load tuning data if enabled and file exists
 CAM1_TUNING = None
-if CAM1_USE_NOIR_TUNING:
+if ENABLE_CAM1 and CAM1_USE_NOIR_TUNING: # Only load if Cam1 is enabled
     if os.path.exists(CAM1_NOIR_TUNING_FILE_PATH):
         try:
             CAM1_TUNING = Picamera2.load_tuning_file(CAM1_NOIR_TUNING_FILE_PATH)
@@ -101,20 +108,23 @@ if CAM1_USE_NOIR_TUNING:
             CAM1_TUNING = None # Ensure it's None on error
     else:
         print(f"Cam1 NoIR tuning file not found at {CAM1_NOIR_TUNING_FILE_PATH}. Using default tuning.")
-else:
+elif ENABLE_CAM1:
      print("Using default camera tuning for Cam1 (NoIR tuning disabled).")
+else:
+    print("Cam1 is disabled. Skipping Cam1 tuning file load.")
 
 
 # ===========================================================
 # === Combined Stream Configuration ===
 # ===========================================================
+# These settings are only used if ENABLE_CAM1 is True
 STREAM_BORDER_SIZE = 5 # Pixels between Cam0 and Cam1 in combined stream
 STREAM_BORDER_COLOR = (64, 64, 64) # BGR color for the border
 
 # ===========================================================
 # === Common Camera Control Defaults & Ranges ===
 # ===========================================================
-# These apply to BOTH cameras when changed via UI/API
+# These apply to BOTH cameras (if Cam1 enabled) when changed via UI/API
 
 # --- ISO / Analogue Gain ---
 # Define available ISO settings and their corresponding AnalogueGain values
@@ -191,7 +201,8 @@ AUDIO_CHANNELS = 1            # Number of audio channels (1 for mono, 2 for ster
 AUDIO_FORMAT = 'int16'        # Data type for audio samples ('int16', 'float32', etc.) - must be supported by sounddevice/soundfile
 AUDIO_BLOCK_SIZE = 1024       # Number of frames per buffer processed by sounddevice callback (adjust for performance/latency)
 AUDIO_TEMP_EXTENSION = ".wav" # Temporary file extension for raw audio
-AUDIO_MUX_TIMEOUT = 60        # Timeout in seconds for the ffmpeg muxing process
+AUDIO_MUX_TIMEOUT = 60        # Timeout in seconds for the ffmpeg muxing process (copying)
+AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 3 # Multiply timeout by this when re-encoding video in ffmpeg
 FFMPEG_PATH = "/usr/bin/ffmpeg" # Path to the ffmpeg executable
 FFMPEG_LOG_LEVEL = "error"    # ffmpeg log level ('quiet', 'panic', 'fatal', 'error', 'warning', 'info', 'verbose', 'debug')
 
