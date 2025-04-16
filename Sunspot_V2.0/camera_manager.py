@@ -5,6 +5,7 @@ camera_manager.py
 Manages the Picamera2 camera, including initialization, configuration,
 frame capture, video recording, and audio recording/muxing.
 Refactored for single-camera operation.
+Includes fix attempt for audio/video sync using ffmpeg -ss offset.
 """
 
 import os
@@ -1189,6 +1190,7 @@ class CameraManager:
         """
         Merges audio and video files using ffmpeg. Uses '-c:v copy'.
         Uses the provided recording_fps to hint the input video rate for sync.
+        Adds a small -ss offset to the audio input to compensate for start delay.
         """
         if not config.AUDIO_ENABLED: return None # Should not be called if disabled
 
@@ -1224,35 +1226,43 @@ class CameraManager:
         logging.info(f"Muxing (copy video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
         # --- Construct ffmpeg Command ---
-        command_base = [
+        command = [
             config.FFMPEG_PATH,
             "-y", # Overwrite output file without asking
         ]
 
-        # --- Add Input Frame Rate Hint (Crucial for Sync) ---
-        # Use the FPS value that was used when creating the VideoWriter object
+        # --- Add Input Frame Rate Hint (BEFORE video input) ---
         if recording_fps is not None and recording_fps > 0:
             logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.4f} fps")
-            # Insert BEFORE the video input file
-            command_base.extend(["-r", f"{recording_fps:.4f}"])
+            command.extend(["-r", f"{recording_fps:.4f}"])
         else:
             logging.warning("No valid recording FPS available to hint ffmpeg. Sync might be affected.")
 
-        # --- Define Inputs, Outputs, and Options ---
-        command_inputs_outputs = [
-            "-i", video_path,   # Video input
-            "-i", audio_path,   # Audio input
+        # --- Add Video Input ---
+        command.extend(["-i", video_path])
+
+        # --- Add Audio Input Offset (BEFORE audio input) ---
+        # Introduce a small offset to compensate for potential audio start delay.
+        # Adjust this value (in seconds) if sync is still off.
+        audio_start_offset = 0.1 # Start reading audio 0.1 seconds in
+        logging.info(f"Applying {audio_start_offset}s start offset to audio input.")
+        command.extend(["-ss", str(audio_start_offset)])
+
+        # --- Add Audio Input ---
+        command.extend(["-i", audio_path])
+
+        # --- Add Output Options ---
+        command.extend([
+            "-map", "0:v:0",    # Map video stream from first input (index 0)
+            "-map", "1:a:0",    # Map audio stream from second input (index 1)
             "-c:v", "copy",     # Copy video stream without re-encoding
             "-c:a", "aac",      # Encode audio to AAC (common, adjust if needed)
             "-b:a", "128k",     # Audio bitrate (optional, adjust as needed)
-            "-map", "0:v:0",    # Map video stream from first input
-            "-map", "1:a:0",    # Map audio stream from second input
             "-shortest",        # Finish encoding when the shortest input stream ends
             "-loglevel", config.FFMPEG_LOG_LEVEL, # Control ffmpeg verbosity
             output_path         # Output file
-        ]
+        ])
 
-        command = command_base + command_inputs_outputs
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         # --- Execute ffmpeg ---
@@ -1365,7 +1375,7 @@ if __name__ == "__main__":
     log_level = getattr(logging, log_level_str.upper(), logging.INFO)
     logging.basicConfig(level=log_level, format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT)
 
-    logging.info("--- Camera Manager Single Cam Test ---")
+    logging.info("--- Camera Manager Single Cam Test (Sync Fix) ---")
     cam_manager = CameraManager()
     test_failed = False
 
@@ -1415,7 +1425,7 @@ if __name__ == "__main__":
                          print("!!! Capture failed during recording test.")
                      else:
                           rec_frames += 1
-                          cv2.imshow("Recording Test", frame)
+                          #cv2.imshow("Recording Test", frame) # Optional: display during recording
                      if cv2.waitKey(1) & 0xFF == ord('q'):
                          print("Quit requested during recording.")
                          break
