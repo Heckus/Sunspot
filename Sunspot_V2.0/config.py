@@ -5,14 +5,14 @@ config.py
 Configuration constants for the Pi Camera Stream & Record application.
 Handles settings for multiple cameras, hardware, and the web UI.
 
-**Modification:** Reinstated AVAILABLE_AWB_MODES definition for web UI compatibility.
+**Modification:** Reverted AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER to 1 (as video is copied again).
 """
 import os
 from libcamera import controls
 from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
 
 # --- General ---
-LOG_LEVEL = "DEBUG" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL = "INFO" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FORMAT = '%(asctime)s - %(levelname)s - [%(threadName)s:%(lineno)d] - %(message)s' # Added line number
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
@@ -39,7 +39,7 @@ MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # How many capture errors before trying to r
 # === Camera Enable Flags ===
 # ===========================================================
 # Set ENABLE_CAM1 to False to run in single-camera mode (only Cam0)
-ENABLE_CAM1 = False # <<< Keep this False for your single-camera test
+ENABLE_CAM1 = False 
 
 # ===========================================================
 # === Camera 0 (Primary - e.g., HQ Camera) Configuration ===
@@ -50,10 +50,10 @@ CAM0_ID = 0 # Physical camera number (usually 0 for the first camera)
 # Format: (Width, Height, Target_FPS)
 CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA
-    (1280, 720, 30.0),     # 720p HD
-    (1920, 1080, 30.0),    # 1080p FHD
-    (2028, 1080, 30.0),    # Specific HQ mode (adjust FPS if needed)
-    (2028, 1520, 25.0),    # Specific HQ mode (adjust FPS if needed)
+    (1332, 990, 120.0),     # 720p HD
+    (1920, 1080, 60.0),    # 1080p FHD
+    (2028, 1080, 50.0),    # Specific HQ mode (adjust FPS if needed)
+    (2028, 1520, 40.0),    # Specific HQ mode (adjust FPS if needed)
     (4056, 3040, 10.0)     # Max Native Resolution IMX477 (Max FPS ~10)
 ]
 CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080
@@ -128,7 +128,7 @@ STREAM_BORDER_COLOR = (64, 64, 64) # BGR color for the border
 # ===========================================================
 # These apply to BOTH cameras (if Cam1 enabled) when changed via UI/API
 
-# --- Auto White Balance (AWB) ---  <<< REINSTATED THIS SECTION >>>
+# --- Auto White Balance (AWB) ---
 AVAILABLE_AWB_MODES = list(controls.AwbModeEnum.__members__.keys())
 DEFAULT_AWB_MODE_NAME = "Auto"
 if DEFAULT_AWB_MODE_NAME not in AVAILABLE_AWB_MODES:
@@ -202,7 +202,7 @@ AUDIO_FORMAT = 'int16'
 AUDIO_BLOCK_SIZE = 1024
 AUDIO_TEMP_EXTENSION = ".wav"
 AUDIO_MUX_TIMEOUT = 60
-AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 3
+AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 1 # Reverted to 1 (no re-encode)
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 FFMPEG_LOG_LEVEL = "error"
 
