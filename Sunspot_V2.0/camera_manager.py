@@ -1244,7 +1244,7 @@ class CameraManager:
         # --- Add Audio Input Offset (BEFORE audio input) ---
         # Introduce a small offset to compensate for potential audio start delay.
         # Adjust this value (in seconds) if sync is still off.
-        audio_start_offset = 0.1 # Start reading audio 0.1 seconds in
+        audio_start_offset = 1 # Start reading audio 0.1 seconds in
         logging.info(f"Applying {audio_start_offset}s start offset to audio input.")
         command.extend(["-ss", str(audio_start_offset)])
 
