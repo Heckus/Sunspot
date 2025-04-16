@@ -5,6 +5,8 @@ camera_manager.py
 Manages multiple Picamera2 cameras, including initialization, configuration,
 frame capture (combined stream), video recording (from primary camera),
 and audio recording/muxing.
+
+**Modification:** Updated start_recording to use a more robust FPS hierarchy for VideoWriter.
 """
 
 import os
@@ -79,6 +81,8 @@ class CameraManager:
 
         # State variable for combined frame
         self.combined_frame = None # Stores the latest combined frame for streaming
+        self.output_frame = None # Stores the latest combined frame for streaming (used in get_latest_combined_frame)
+
 
         # Recording state (only for Cam0)
         self.is_recording = False
@@ -87,7 +91,7 @@ class CameraManager:
         self.recording_start_time = None # Track recording start time
 
         # Locks for thread safety
-        self.frame_lock = threading.Lock() # Protects access to combined_frame
+        self.frame_lock = threading.Lock() # Protects access to combined_frame/output_frame
         self.config_lock = threading.Lock() # Protects access to camera state/config changes
         self.recording_lock = threading.Lock() # Protects access to recording state/writers
 
@@ -158,7 +162,19 @@ class CameraManager:
                     logging.error(f"{cam_name}: Invalid res index {resolution_index}. Using current {self.current_resolution_index0}.")
             res_list = config.CAM0_RESOLUTIONS
             current_res_index = self.current_resolution_index0
-            tuning_data = config.CAM0_TUNING_FILE_PATH # Use specific tuning file path
+            # Load tuning file using Picamera2 method if path exists
+            tuning_data = None
+            if config.CAM0_TUNING_FILE_PATH and os.path.exists(config.CAM0_TUNING_FILE_PATH):
+                try:
+                    tuning_data = Picamera2.load_tuning_file(config.CAM0_TUNING_FILE_PATH)
+                    logging.info(f"{cam_name}: Loaded tuning file: {config.CAM0_TUNING_FILE_PATH}")
+                except Exception as e:
+                    logging.error(f"{cam_name}: Failed to load tuning file '{config.CAM0_TUNING_FILE_PATH}': {e}. Using default tuning.")
+            elif config.CAM0_TUNING_FILE_PATH:
+                logging.warning(f"{cam_name}: Tuning file not found at {config.CAM0_TUNING_FILE_PATH}. Using default tuning.")
+            else:
+                logging.info(f"{cam_name}: No tuning file specified, using default tuning.")
+
             try:
                 target_width, target_height, target_fps = res_list[current_res_index]
             except IndexError:
@@ -170,7 +186,21 @@ class CameraManager:
         elif cam_id == config.CAM1_ID:
             target_width, target_height = config.CAM1_RESOLUTION
             target_fps = config.CAM1_FRAME_RATE
-            tuning_data = config.CAM1_TUNING # Use tuning data loaded from file or None
+            # Load tuning file using Picamera2 method if path exists
+            tuning_data = None
+            if config.CAM1_USE_NOIR_TUNING and config.CAM1_NOIR_TUNING_FILE_PATH and os.path.exists(config.CAM1_NOIR_TUNING_FILE_PATH):
+                 try:
+                     tuning_data = Picamera2.load_tuning_file(config.CAM1_NOIR_TUNING_FILE_PATH)
+                     logging.info(f"{cam_name}: Loaded NoIR tuning file: {config.CAM1_NOIR_TUNING_FILE_PATH}")
+                 except Exception as e:
+                     logging.error(f"{cam_name}: Failed to load NoIR tuning file '{config.CAM1_NOIR_TUNING_FILE_PATH}': {e}. Using default tuning.")
+            elif config.CAM1_USE_NOIR_TUNING and config.CAM1_NOIR_TUNING_FILE_PATH:
+                 logging.warning(f"{cam_name}: NoIR tuning file not found at {config.CAM1_NOIR_TUNING_FILE_PATH}. Using default tuning.")
+            elif config.CAM1_USE_NOIR_TUNING:
+                 logging.warning(f"{cam_name}: NoIR tuning enabled but no path specified. Using default tuning.")
+            else:
+                 logging.info(f"{cam_name}: NoIR tuning disabled, using default tuning.")
+
             current_res_index = 0 # Cam1 has fixed resolution
         else:
             logging.error(f"Invalid camera ID {cam_id}")
@@ -503,20 +533,36 @@ class CameraManager:
 
             # --- Get dimensions and ACTUAL FPS for VideoWriter ---
             try:
-                width, height, _ = self.get_cam0_resolution_config() # Get W, H from config
-                # *** USE ACTUAL FPS REPORTED BY DRIVER ***
-                fps_for_writer = self.actual_cam0_fps
-                if fps_for_writer is None or fps_for_writer <= 0:
-                    logging.warning(f"Actual Cam0 FPS not available ({self.actual_cam0_fps}), falling back to target FPS from config for VideoWriter.")
-                    fps_for_writer = self.get_cam0_resolution_config()[2] # Get target FPS as fallback
-                    if fps_for_writer <= 0: # Final fallback
-                         fps_for_writer = 30.0
-                         logging.error(f"Target FPS from config also invalid ({fps_for_writer}). Using hardcoded 30fps for VideoWriter.")
+                width, height, target_fps_config = self.get_cam0_resolution_config() # Get W, H, TargetFPS from config
+
+                # *** Determine FPS for VideoWriter using hierarchy ***
+                fps_for_writer = None
+                fps_source = "Unknown"
+
+                # 1. Try driver-reported actual FPS
+                if self.actual_cam0_fps is not None and self.actual_cam0_fps > 0:
+                    fps_for_writer = self.actual_cam0_fps
+                    fps_source = "Driver Reported"
+                # 2. Fallback to measured average FPS (if available and valid)
+                elif self.measured_cam0_fps_avg is not None and self.measured_cam0_fps_avg > 0:
+                    fps_for_writer = self.measured_cam0_fps_avg
+                    fps_source = "Measured Average"
+                    logging.warning(f"Using measured average FPS ({fps_for_writer:.2f}) for VideoWriter as driver FPS was unavailable.")
+                # 3. Last resort: Configured target FPS
+                elif target_fps_config > 0:
+                    fps_for_writer = target_fps_config
+                    fps_source = "Config Target"
+                    logging.warning(f"Using configured target FPS ({fps_for_writer:.2f}) for VideoWriter as driver/measured FPS were unavailable.")
+                # 4. Final hardcoded fallback (should not be reached ideally)
+                else:
+                    fps_for_writer = 30.0
+                    fps_source = "Hardcoded Fallback"
+                    logging.error(f"All FPS sources invalid. Using hardcoded {fps_for_writer:.1f}fps for VideoWriter.")
 
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
 
-                logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps (using actual/fallback driver FPS)")
+                logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps (Source: {fps_source})")
                 fourcc = cv2.VideoWriter_fourcc(*config.CAM0_RECORDING_FORMAT)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 base_filename = f"recording_{timestamp}_{width}x{height}" # Used for both video and audio temp
@@ -1605,3 +1651,4 @@ if __name__ == "__main__":
              print("!!! One or more tests failed or were skipped due to errors. !!!")
         else:
              print("+++ All tests passed (or skipped gracefully). +++")
+
