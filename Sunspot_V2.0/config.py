@@ -3,9 +3,8 @@
 config.py
 
 Configuration constants for the Pi Camera Stream & Record application.
-Handles settings for multiple cameras, hardware, and the web UI.
-
-**Modification:** Reverted AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER to 1 (as video is copied again).
+Handles settings for the camera, hardware, and the web UI.
+Refactored for single-camera (Cam0) operation.
 """
 import os
 from libcamera import controls
@@ -13,7 +12,7 @@ from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
 
 # --- General ---
 LOG_LEVEL = "INFO" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FORMAT = '%(asctime)s - %(levelname)s - [%(threadName)s:%(lineno)d] - %(message)s' # Added line number
+LOG_FORMAT = '%(asctime)s - %(levelname)s - [%(threadName)s:%(lineno)d] - %(message)s'
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 
 # --- File Paths ---
@@ -36,97 +35,48 @@ WEB_PORT = 8000
 MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # How many capture errors before trying to restart/shutdown
 
 # ===========================================================
-# === Camera Enable Flags ===
+# === Camera Configuration ===
 # ===========================================================
-# Set ENABLE_CAM1 to False to run in single-camera mode (only Cam0)
-ENABLE_CAM1 = False 
+CAMERA_ID = 0 # Physical camera number
 
-# ===========================================================
-# === Camera 0 (Primary - e.g., HQ Camera) Configuration ===
-# ===========================================================
-CAM0_ID = 0 # Physical camera number (usually 0 for the first camera)
-
-# Define available resolutions and TARGET frame rates for Cam0
+# Define available resolutions and TARGET frame rates for the camera
 # Format: (Width, Height, Target_FPS)
-CAM0_RESOLUTIONS = [
+CAMERA_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA
-    (1332, 990, 120.0),     # 720p HD
-    (1920, 1080, 20.0),    # 1080p FHD
+    (1332, 990, 120.0),     # 720p HD (Check if sensor supports this rate)
+    (1920, 1080, 30.0),    # 1080p FHD (Adjusted FPS for stability)
     (2028, 1080, 50.0),    # Specific HQ mode (adjust FPS if needed)
     (2028, 1520, 40.0),    # Specific HQ mode (adjust FPS if needed)
     (4056, 3040, 10.0)     # Max Native Resolution IMX477 (Max FPS ~10)
 ]
-CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080
+DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ 30fps
 
-# --- Cam0 Tuning ---
+# --- Camera Tuning ---
 # Set to None to use default tuning, or provide path to a valid JSON tuning file
-# Example: CAM0_TUNING_FILE_PATH = "/path/to/your/imx477_tuning.json"
-CAM0_TUNING_FILE_PATH = None
+# Example: TUNING_FILE_PATH = "/path/to/your/imx477_tuning.json"
+TUNING_FILE_PATH = None
 # Load tuning data if path is provided and file exists
-CAM0_TUNING = None
-if CAM0_TUNING_FILE_PATH:
-    if os.path.exists(CAM0_TUNING_FILE_PATH):
+TUNING = None
+if TUNING_FILE_PATH:
+    if os.path.exists(TUNING_FILE_PATH):
         try:
-            CAM0_TUNING = Picamera2.load_tuning_file(CAM0_TUNING_FILE_PATH)
-            print(f"Successfully loaded Cam0 tuning file: {CAM0_TUNING_FILE_PATH}")
+            TUNING = Picamera2.load_tuning_file(TUNING_FILE_PATH)
+            print(f"Successfully loaded camera tuning file: {TUNING_FILE_PATH}")
         except Exception as e:
-            print(f"Error loading Cam0 tuning file '{CAM0_TUNING_FILE_PATH}': {e}. Using default tuning.")
-            CAM0_TUNING = None # Ensure it's None on error
+            print(f"Error loading camera tuning file '{TUNING_FILE_PATH}': {e}. Using default tuning.")
+            TUNING = None # Ensure it's None on error
     else:
-        print(f"Cam0 tuning file not found at {CAM0_TUNING_FILE_PATH}. Using default tuning.")
+        print(f"Camera tuning file not found at {TUNING_FILE_PATH}. Using default tuning.")
 else:
-     print("Using default camera tuning for Cam0 (no tuning file specified).")
+     print("Using default camera tuning (no tuning file specified).")
 
-# --- Cam0 Recording Configuration ---
-CAM0_RECORDING_FORMAT = "mp4v" # Codec for OpenCV VideoWriter (e.g., "mp4v", "XVID")
-CAM0_RECORDING_EXTENSION = ".mp4"
-
-# ===========================================================
-# === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
-# ===========================================================
-# These settings are only used if ENABLE_CAM1 is True
-CAM1_ID = 1 # Physical camera number (usually 1 for the second camera)
-
-# Fixed resolution and frame rate for Cam1 (used for combined stream)
-CAM1_RESOLUTION = (640, 480) # Lower resolution suitable for secondary stream
-CAM1_FRAME_RATE = 30.0
-
-# --- Cam1 Flipping ---
-CAM1_VFLIP = False # Set to True if Cam1 image is vertically flipped
-CAM1_HFLIP = False # Set to True if Cam1 image is horizontally flipped
-
-# --- Cam1 Tuning (NoIR Example) ---
-CAM1_USE_NOIR_TUNING = True # Set to False to use default tuning for Cam1
-CAM1_NOIR_TUNING_FILE_PATH = "/usr/share/libcamera/ipa/rpi/pisp/imx219_noir.json"
-# Load tuning data if enabled and file exists
-CAM1_TUNING = None
-if ENABLE_CAM1 and CAM1_USE_NOIR_TUNING: # Only load if Cam1 is enabled
-    if os.path.exists(CAM1_NOIR_TUNING_FILE_PATH):
-        try:
-            CAM1_TUNING = Picamera2.load_tuning_file(CAM1_NOIR_TUNING_FILE_PATH)
-            print(f"Successfully loaded Cam1 NoIR tuning file: {CAM1_NOIR_TUNING_FILE_PATH}")
-        except Exception as e:
-            print(f"Error loading Cam1 NoIR tuning file '{CAM1_NOIR_TUNING_FILE_PATH}': {e}. Using default tuning.")
-            CAM1_TUNING = None # Ensure it's None on error
-    else:
-        print(f"Cam1 NoIR tuning file not found at {CAM1_NOIR_TUNING_FILE_PATH}. Using default tuning.")
-elif ENABLE_CAM1:
-     print("Using default camera tuning for Cam1 (NoIR tuning disabled).")
-else:
-    print("Cam1 is disabled. Skipping Cam1 tuning file load.")
-
+# --- Camera Recording Configuration ---
+RECORDING_FORMAT = "mp4v" # Codec for OpenCV VideoWriter (e.g., "mp4v", "XVID")
+RECORDING_EXTENSION = ".mp4"
 
 # ===========================================================
-# === Combined Stream Configuration ===
+# === Camera Control Defaults & Ranges ===
 # ===========================================================
-# These settings are only used if ENABLE_CAM1 is True
-STREAM_BORDER_SIZE = 5 # Pixels between Cam0 and Cam1 in combined stream
-STREAM_BORDER_COLOR = (64, 64, 64) # BGR color for the border
-
-# ===========================================================
-# === Common Camera Control Defaults & Ranges ===
-# ===========================================================
-# These apply to BOTH cameras (if Cam1 enabled) when changed via UI/API
 
 # --- Auto White Balance (AWB) ---
 AVAILABLE_AWB_MODES = list(controls.AwbModeEnum.__members__.keys())
@@ -136,7 +86,7 @@ if DEFAULT_AWB_MODE_NAME not in AVAILABLE_AWB_MODES:
 
 # --- ISO / Analogue Gain ---
 AVAILABLE_ISO_SETTINGS = {
-    "Auto": 0.0,
+    "Auto": 0.0, # 0.0 typically means Auto Gain in libcamera controls
     "100": 1.0,
     "200": 2.0,
     "400": 4.0,
@@ -195,41 +145,44 @@ STEP_SHARPNESS = 0.1
 # === Audio Configuration ===
 # ===========================================================
 AUDIO_ENABLED = True
-AUDIO_DEVICE_HINT = "USB"
-AUDIO_SAMPLE_RATE = 44100
-AUDIO_CHANNELS = 1
-AUDIO_FORMAT = 'int16'
-AUDIO_BLOCK_SIZE = 1024
-AUDIO_TEMP_EXTENSION = ".wav"
-AUDIO_MUX_TIMEOUT = 60
-AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 1 # Reverted to 1 (no re-encode)
-FFMPEG_PATH = "/usr/bin/ffmpeg"
-FFMPEG_LOG_LEVEL = "error"
+AUDIO_DEVICE_HINT = "USB" # Hint to find the correct audio input device
+AUDIO_SAMPLE_RATE = 44100 # Sample rate in Hz
+AUDIO_CHANNELS = 1 # Number of audio channels (1 for mono, 2 for stereo)
+AUDIO_FORMAT = 'int16' # Data type for audio samples (e.g., 'int16', 'float32')
+AUDIO_BLOCK_SIZE = 1024 # Number of frames per buffer in audio callback
+AUDIO_TEMP_EXTENSION = ".wav" # Extension for temporary audio file
+AUDIO_MUX_TIMEOUT = 60 # Timeout in seconds for the ffmpeg muxing process
+# Multiplier for mux timeout (kept at 1 as video is copied, not re-encoded)
+AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 1
+FFMPEG_PATH = "/usr/bin/ffmpeg" # Path to ffmpeg executable
+FFMPEG_LOG_LEVEL = "error" # ffmpeg log level (e.g., "quiet", "error", "warning", "info", "debug")
 
 
 # ===========================================================
 # === Hardware Configuration ===
 # ===========================================================
-SWITCH_GPIO_PIN = 17
-SWITCH_BOUNCE_TIME = 0.1
+SWITCH_GPIO_PIN = 17 # GPIO pin for the physical recording switch (BCM numbering)
+SWITCH_BOUNCE_TIME = 0.1 # Debounce time for the switch in seconds
 
-INA219_I2C_ADDRESS = 0x41
-INA219_I2C_BUS = 1
-BATTERY_READ_INTERVAL = 30.0
-BATTERY_MAX_VOLTAGE = 12.6
-BATTERY_MIN_VOLTAGE = 9.0
-INA219_CALIBRATION_CONFIG = "16V_5A"
+# --- Battery Monitor (INA219) ---
+INA219_I2C_ADDRESS = 0x41 # I2C address of the INA219 sensor
+INA219_I2C_BUS = 1 # I2C bus number (usually 1 on Raspberry Pi)
+BATTERY_READ_INTERVAL = 30.0 # How often to read battery level (seconds)
+BATTERY_MAX_VOLTAGE = 12.6 # Voltage considered 100%
+BATTERY_MIN_VOLTAGE = 9.0 # Voltage considered 0%
+INA219_CALIBRATION_CONFIG = "16V_5A" # Predefined calibration setting in hardware_manager.py
 
-SERVO_ENABLED = True
-SERVO_PWM_CHIP = 0
-SERVO_PWM_CHANNEL = 0
-SERVO_GPIO_PIN = 12
-SERVO_PERIOD_NS = 20000000
-SERVO_MIN_DUTY_NS = 500000
-SERVO_MAX_DUTY_NS = 2500000
-SERVO_CENTER_ANGLE = 90
-SERVO_MIN_ANGLE = 0
-SERVO_MAX_ANGLE = 180
+# --- Servo Motor ---
+SERVO_ENABLED = True # Set to False to disable servo control
+SERVO_PWM_CHIP = 0 # PWM chip number (check /sys/class/pwm/)
+SERVO_PWM_CHANNEL = 0 # PWM channel number on the chip
+SERVO_GPIO_PIN = 12 # GPIO pin associated with the PWM channel (for reference/logging)
+SERVO_PERIOD_NS = 20000000 # PWM period in nanoseconds (20ms = 50Hz)
+SERVO_MIN_DUTY_NS = 500000 # Duty cycle for minimum angle (0.5ms)
+SERVO_MAX_DUTY_NS = 2500000 # Duty cycle for maximum angle (2.5ms)
+SERVO_CENTER_ANGLE = 90 # Angle corresponding to center position
+SERVO_MIN_ANGLE = 0 # Minimum controllable angle
+SERVO_MAX_ANGLE = 180 # Maximum controllable angle
 
 # --- Deprecated / Old Config Values ---
 # (Removed for clarity)
