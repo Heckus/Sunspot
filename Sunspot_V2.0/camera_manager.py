@@ -6,7 +6,8 @@ Manages multiple Picamera2 cameras, including initialization, configuration,
 frame capture (combined stream), video recording (from primary camera),
 and audio recording/muxing.
 
-**Modification:** Updated start_recording to use a more robust FPS hierarchy for VideoWriter.
+**Modification:** Updated start_recording FPS hierarchy AGAIN to prioritize
+                  MEASURED average FPS over driver-reported/config FPS.
 """
 
 import os
@@ -78,6 +79,8 @@ class CameraManager:
         self.actual_cam0_fps = None # Store the ACTUAL FPS reported by the driver
         self.last_cam0_capture_time = None # For calculating instantaneous FPS
         self.measured_cam0_fps_avg = None # Simple moving average for measured FPS
+        # Minimum reasonable measured FPS to use for VideoWriter
+        self.MIN_MEASURED_FPS_THRESHOLD = 5.0
 
         # State variable for combined frame
         self.combined_frame = None # Stores the latest combined frame for streaming
@@ -531,29 +534,29 @@ class CameraManager:
                 self.last_error = f"Cannot start recording: No writable USB drives found"
                 return False
 
-            # --- Get dimensions and ACTUAL FPS for VideoWriter ---
+            # --- Get dimensions and FPS for VideoWriter ---
             try:
                 width, height, target_fps_config = self.get_cam0_resolution_config() # Get W, H, TargetFPS from config
 
-                # *** Determine FPS for VideoWriter using hierarchy ***
+                # *** Determine FPS for VideoWriter using NEW hierarchy ***
                 fps_for_writer = None
                 fps_source = "Unknown"
 
-                # 1. Try driver-reported actual FPS
-                if self.actual_cam0_fps is not None and self.actual_cam0_fps > 0:
-                    fps_for_writer = self.actual_cam0_fps
-                    fps_source = "Driver Reported"
-                # 2. Fallback to measured average FPS (if available and valid)
-                elif self.measured_cam0_fps_avg is not None and self.measured_cam0_fps_avg > 0:
+                # 1. Try Measured Average FPS (if available and reasonable)
+                if self.measured_cam0_fps_avg is not None and self.measured_cam0_fps_avg >= self.MIN_MEASURED_FPS_THRESHOLD:
                     fps_for_writer = self.measured_cam0_fps_avg
                     fps_source = "Measured Average"
-                    logging.warning(f"Using measured average FPS ({fps_for_writer:.2f}) for VideoWriter as driver FPS was unavailable.")
-                # 3. Last resort: Configured target FPS
+                # 2. Fallback to Driver-Reported FPS
+                elif self.actual_cam0_fps is not None and self.actual_cam0_fps > 0:
+                    fps_for_writer = self.actual_cam0_fps
+                    fps_source = "Driver Reported"
+                    logging.warning(f"Using driver-reported FPS ({fps_for_writer:.2f}) for VideoWriter as measured FPS was unavailable/low ({self.measured_cam0_fps_avg}).")
+                # 3. Fallback to Configured Target FPS
                 elif target_fps_config > 0:
                     fps_for_writer = target_fps_config
                     fps_source = "Config Target"
                     logging.warning(f"Using configured target FPS ({fps_for_writer:.2f}) for VideoWriter as driver/measured FPS were unavailable.")
-                # 4. Final hardcoded fallback (should not be reached ideally)
+                # 4. Final hardcoded fallback
                 else:
                     fps_for_writer = 30.0
                     fps_source = "Hardcoded Fallback"
@@ -562,7 +565,10 @@ class CameraManager:
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
 
-                logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps (Source: {fps_source})")
+                # Log the chosen FPS clearly
+                logging.info(f"Selected FPS for VideoWriter: {fps_for_writer:.2f} (Source: {fps_source})")
+                logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps")
+
                 fourcc = cv2.VideoWriter_fourcc(*config.CAM0_RECORDING_FORMAT)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 base_filename = f"recording_{timestamp}_{width}x{height}" # Used for both video and audio temp
@@ -584,7 +590,7 @@ class CameraManager:
                     video_only_filename = f"{base_filename}_video{config.CAM0_RECORDING_EXTENSION}"
                     full_path = os.path.join(drive_path, video_only_filename)
 
-                    # Create the writer
+                    # Create the writer with the chosen FPS
                     writer = cv2.VideoWriter(full_path, fourcc, fps_for_writer, (width, height))
                     if not writer.isOpened():
                         raise IOError(f"Failed to open VideoWriter for path: {full_path}")
