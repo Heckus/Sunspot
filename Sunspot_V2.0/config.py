@@ -51,7 +51,7 @@ CAM0_ID = 0 # Physical camera number (usually 0 for the first camera)
 CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA
     (1332, 990, 120.0),     # 720p HD
-    (1920, 1080, 30.0),    # 1080p FHD
+    (1920, 1080, 20.0),    # 1080p FHD
     (2028, 1080, 50.0),    # Specific HQ mode (adjust FPS if needed)
     (2028, 1520, 40.0),    # Specific HQ mode (adjust FPS if needed)
     (4056, 3040, 10.0)     # Max Native Resolution IMX477 (Max FPS ~10)
