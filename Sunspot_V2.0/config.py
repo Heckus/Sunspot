@@ -10,7 +10,7 @@ from libcamera import controls
 from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
 
 # --- General ---
-LOG_LEVEL = "DEBUG" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL = "INFO" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
 LOG_FORMAT = '%(asctime)s - %(levelname)s - [%(threadName)s:%(lineno)d] - %(message)s' # Added line number
 LOG_DATE_FORMAT = '%Y-%m-%d %H:%M:%S'
 

@@ -8,6 +8,7 @@ and audio recording/muxing.
 
 **Modification:** Updated start_recording FPS hierarchy AGAIN to prioritize
                   MEASURED average FPS over driver-reported/config FPS.
+**Modification:** Changed measured FPS log line to INFO level.
 """
 
 import os
@@ -92,6 +93,7 @@ class CameraManager:
         self.video_writers = [] # List of OpenCV VideoWriter objects for Cam0
         self.recording_paths = [] # List of corresponding file paths for Cam0 (video-only initially)
         self.recording_start_time = None # Track recording start time
+        self.recording_fps = None # Store the FPS used for the current recording session
 
         # Locks for thread safety
         self.frame_lock = threading.Lock() # Protects access to combined_frame/output_frame
@@ -565,6 +567,9 @@ class CameraManager:
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
 
+                # Store the chosen FPS for potential use during muxing
+                self.recording_fps = fps_for_writer
+
                 # Log the chosen FPS clearly
                 logging.info(f"Selected FPS for VideoWriter: {fps_for_writer:.2f} (Source: {fps_source})")
                 logging.info(f"Starting Cam0 recording: {width}x{height} @ {fps_for_writer:.2f} fps")
@@ -632,6 +637,7 @@ class CameraManager:
             else:
                 # All writers failed
                 self.is_recording = False
+                self.recording_fps = None # Clear stored FPS
                 logging.error("Failed to start video recording on ANY drive.")
                 self.last_error = f"Rec Start Failed: {start_error or 'No writers opened'}"
                 # Ensure any partially opened writers are released (shouldn't happen if isOpened check works)
@@ -647,6 +653,8 @@ class CameraManager:
         audio_file_to_mux = None
         final_output_paths = []
         released_count = 0
+        # Store the FPS used for this session before clearing state
+        fps_used_for_recording = self.recording_fps
 
         with self.recording_lock:
             if not self.is_recording:
@@ -659,12 +667,14 @@ class CameraManager:
                 if config.AUDIO_ENABLED and (self.audio_thread and self.audio_thread.is_alive()):
                     logging.warning("Stopping orphaned audio recording during stop_recording call...")
                     self._stop_audio_recording() # Attempt cleanup
+                self.recording_fps = None # Ensure FPS is cleared
                 return # Nothing to do if not recording
 
             logging.info("Stopping recording (Video and Audio)...")
             self.is_recording = False
             recording_duration = (time.monotonic() - self.recording_start_time) if self.recording_start_time else None
             self.recording_start_time = None # Reset start time
+            self.recording_fps = None # Clear stored FPS
 
             # Make copies of lists to work with outside the lock potentially
             writers_to_release = list(self.video_writers)
@@ -693,8 +703,9 @@ class CameraManager:
                 released_count += 1
 
                 # --- Muxing Logic ---
+                # Pass the FPS used for recording to the muxer
                 if audio_file_to_mux and os.path.exists(video_path):
-                    final_path = self._mux_audio_video(video_path, audio_file_to_mux)
+                    final_path = self._mux_audio_video(video_path, audio_file_to_mux, fps_used_for_recording)
                     if final_path:
                         final_output_paths.append(final_path)
                         # If muxing created a new file, remove the temporary video-only file
@@ -785,9 +796,10 @@ class CameraManager:
 
                         # Log instantaneous FPS periodically for debugging
                         # Check if measured FPS avg is available and log it too
+                        # --- CHANGE THIS LINE FROM DEBUG TO INFO ---
                         if capture_start_time - getattr(self, '_last_fps_log_time', 0) > 5.0: # Log every 5s
                              avg_fps_str = f", Avg: {self.measured_cam0_fps_avg:.2f}" if self.measured_cam0_fps_avg is not None else ""
-                             logging.debug(f"Cam0 Capture Time Diff: {time_diff:.4f}s (Instant FPS: {instant_fps:.2f}{avg_fps_str})")
+                             logging.info(f"Cam0 Capture Time Diff: {time_diff:.4f}s (Instant FPS: {instant_fps:.2f}{avg_fps_str})") # Now INFO
                              self._last_fps_log_time = capture_start_time
                     else:
                          logging.warning(f"Cam0 capture time difference too small or negative: {time_diff:.5f}s")
@@ -1342,8 +1354,11 @@ class CameraManager:
             self.temp_audio_file_path = None # Ensure path is cleared
             return None
 
-    def _mux_audio_video(self, video_path, audio_path):
-        """Merges audio and video files using ffmpeg."""
+    def _mux_audio_video(self, video_path, audio_path, recording_fps=None):
+        """
+        Merges audio and video files using ffmpeg.
+        Optionally uses the provided recording_fps to hint the input video rate.
+        """
         if not config.AUDIO_ENABLED: return None # Should not be called if disabled
 
         # --- Input Validation ---
@@ -1374,28 +1389,32 @@ class CameraManager:
         logging.info(f"Muxing video '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
         # --- Construct ffmpeg Command ---
-        # -y: Overwrite output without asking
-        # -i video: Input video file
-        # -i audio: Input audio file
-        # -c:v copy: Copy video stream without re-encoding (fast)
-        # -c:a aac: Re-encode audio to AAC (common, good compatibility) - adjust if needed
-        # -map 0:v:0: Map video stream from first input (0)
-        # -map 1:a:0: Map audio stream from second input (1)
-        # -shortest: Finish encoding when the shortest input stream ends (usually video)
-        # -loglevel error: Show only errors (or 'warning', 'info', 'debug')
-        command = [
+        command_base = [
             config.FFMPEG_PATH,
-            "-y",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c:v", "copy",
-            "-c:a", "aac", # Consider config option? 'copy' might work if source is compatible
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-shortest",
-            "-loglevel", config.FFMPEG_LOG_LEVEL,
-            output_path
+            "-y", # Overwrite output without asking
         ]
+
+        # --- Add Input Frame Rate Hint (if available) ---
+        # Add '-r' *before* the video input '-i'
+        if recording_fps is not None and recording_fps > 0:
+            logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.2f} fps")
+            command_base.extend(["-r", f"{recording_fps:.4f}"]) # Use more precision for ffmpeg
+        else:
+            logging.warning("No valid recording FPS available to hint ffmpeg.")
+
+        command_inputs_outputs = [
+            "-i", video_path, # Input video file
+            "-i", audio_path, # Input audio file
+            "-c:v", "copy",   # Copy video stream without re-encoding (fast)
+            "-c:a", "aac",    # Re-encode audio to AAC (common, good compatibility)
+            "-map", "0:v:0",  # Map video stream from first input (0)
+            "-map", "1:a:0",  # Map audio stream from second input (1)
+            "-shortest",      # Finish encoding when the shortest input stream ends
+            "-loglevel", config.FFMPEG_LOG_LEVEL, # Show only errors (or 'warning', 'info', 'debug')
+            output_path       # Output file
+        ]
+
+        command = command_base + command_inputs_outputs
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         # --- Execute ffmpeg ---
