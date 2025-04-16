@@ -4,7 +4,7 @@ web_ui.py
 
 Handles the Flask web server and user interface for the Pi Camera application.
 Provides routes for streaming, status updates, and control commands.
-Refactored for single-camera operation.
+Refactored for single-camera operation. Includes servo control UI.
 """
 
 import logging
@@ -54,14 +54,16 @@ HTML_TEMPLATE = """
 
         .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 15px; }
 
-        .status-panel, .controls-panel, .sliders-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
+        /* Panel Styles */
+        .status-panel, .controls-panel, .sliders-panel, .servo-panel { background-color: #eef; padding: 15px; border-radius: 5px; }
         .panel-title { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
 
         /* Status Grid */
         .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; }
         .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
         #status, #rec-status, #resolution, #battery-level,
-        #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status /* Status IDs */
+        #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status,
+        #servo-angle-status /* Status IDs */
          { color: #0056b3; font-weight: normal;}
         #rec-status.active { color: #D83B01; font-weight: bold;}
 
@@ -76,7 +78,7 @@ HTML_TEMPLATE = """
         .mode-controls select { padding: 5px 8px; font-size: 0.9em; border-radius: 4px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
         .mode-controls select:hover:not(:disabled) { border-color: #bbb; background-color: #f9f9f9; }
 
-        /* Slider Controls */
+        /* Slider Controls (Image & Servo) */
         .slider-controls { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; margin-bottom: 8px; }
         .slider-controls label { font-weight: normal; color: #444; text-align: right; font-size: 0.9em;}
         .slider-controls input[type=range] { width: 100%; margin: 0; padding: 0; cursor: pointer; }
@@ -117,6 +119,9 @@ HTML_TEMPLATE = """
                      <span>Recording:</span> <span id="rec-status">OFF</span>
                      <span>Resolution:</span> <span id="resolution">{{ resolution_text }}</span>
                      <span>Battery:</span> <span id="battery-level">{{ batt_text_initial }}%</span>
+                     {% if servo_enabled %}
+                     <span>Servo Angle:</span> <span id="servo-angle-status">{{ servo_angle_initial }}&deg;</span>
+                     {% endif %}
                      <hr style="grid-column: 1 / -1; border-top: 1px dashed #bbb; border-bottom: none; margin: 5px 0;">
                      <span>AWB Mode:</span> <span id="awb-mode-status">{{ current_awb_mode_name_initial }}</span>
                      <span>AE Mode:</span> <span id="ae-mode-status">{{ current_ae_mode_name_initial }}</span>
@@ -154,22 +159,34 @@ HTML_TEMPLATE = """
                  <div class="panel-title">Image Adjustments</div>
                  <div class="slider-controls">
                      <label for="brightness-slider">Brightness:</label>
-                     <input type="range" id="brightness-slider" min="{{ MIN_BRIGHTNESS }}" max="{{ MAX_BRIGHTNESS }}" step="{{ STEP_BRIGHTNESS }}" value="{{ brightness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Brightness', this.value)" title="Adjust Brightness">
+                     <input type="range" id="brightness-slider" min="{{ MIN_BRIGHTNESS }}" max="{{ MAX_BRIGHTNESS }}" step="{{ STEP_BRIGHTNESS }}" value="{{ brightness_initial }}" oninput="updateSliderValue(this.id, this.value, 1)" onchange="changeCameraControl('Brightness', this.value)" title="Adjust Brightness">
                      <span id="brightness-slider-value">{{ "%.1f" | format(brightness_initial) }}</span> {# Format initial value #}
 
                      <label for="contrast-slider">Contrast:</label>
-                     <input type="range" id="contrast-slider" min="{{ MIN_CONTRAST }}" max="{{ MAX_CONTRAST }}" step="{{ STEP_CONTRAST }}" value="{{ contrast_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Contrast', this.value)" title="Adjust Contrast">
+                     <input type="range" id="contrast-slider" min="{{ MIN_CONTRAST }}" max="{{ MAX_CONTRAST }}" step="{{ STEP_CONTRAST }}" value="{{ contrast_initial }}" oninput="updateSliderValue(this.id, this.value, 1)" onchange="changeCameraControl('Contrast', this.value)" title="Adjust Contrast">
                      <span id="contrast-slider-value">{{ "%.1f" | format(contrast_initial) }}</span>
 
                      <label for="saturation-slider">Saturation:</label>
-                     <input type="range" id="saturation-slider" min="{{ MIN_SATURATION }}" max="{{ MAX_SATURATION }}" step="{{ STEP_SATURATION }}" value="{{ saturation_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Saturation', this.value)" title="Adjust Saturation">
+                     <input type="range" id="saturation-slider" min="{{ MIN_SATURATION }}" max="{{ MAX_SATURATION }}" step="{{ STEP_SATURATION }}" value="{{ saturation_initial }}" oninput="updateSliderValue(this.id, this.value, 1)" onchange="changeCameraControl('Saturation', this.value)" title="Adjust Saturation">
                      <span id="saturation-slider-value">{{ "%.1f" | format(saturation_initial) }}</span>
 
                      <label for="sharpness-slider">Sharpness:</label>
-                     <input type="range" id="sharpness-slider" min="{{ MIN_SHARPNESS }}" max="{{ MAX_SHARPNESS }}" step="{{ STEP_SHARPNESS }}" value="{{ sharpness_initial }}" oninput="updateSliderValue(this.id, this.value)" onchange="changeCameraControl('Sharpness', this.value)" title="Adjust Sharpness">
+                     <input type="range" id="sharpness-slider" min="{{ MIN_SHARPNESS }}" max="{{ MAX_SHARPNESS }}" step="{{ STEP_SHARPNESS }}" value="{{ sharpness_initial }}" oninput="updateSliderValue(this.id, this.value, 1)" onchange="changeCameraControl('Sharpness', this.value)" title="Adjust Sharpness">
                      <span id="sharpness-slider-value">{{ "%.1f" | format(sharpness_initial) }}</span>
                  </div>
              </div>
+
+             {# --- Servo Control Panel (Only shown if servo enabled) --- #}
+             {% if servo_enabled %}
+             <div class="servo-panel">
+                 <div class="panel-title">Servo Control</div>
+                 <div class="slider-controls">
+                     <label for="servo-slider">Angle:</label>
+                     <input type="range" id="servo-slider" min="{{ SERVO_MIN_ANGLE }}" max="{{ SERVO_MAX_ANGLE }}" step="1" value="{{ servo_angle_initial }}" oninput="updateSliderValue(this.id, this.value, 0)" onchange="setServoAngle(this.value)" title="Adjust Servo Angle">
+                     <span id="servo-slider-value">{{ servo_angle_initial }}&deg;</span> {# Initial angle value #}
+                 </div>
+             </div>
+             {% endif %}
 
          </div>
          <div id="error" {% if err_msg %}style="display: block;"{% endif %}>{{ err_msg }}</div>
@@ -210,11 +227,17 @@ HTML_TEMPLATE = """
         const contrastValueSpan = document.getElementById('contrast-slider-value');
         const saturationValueSpan = document.getElementById('saturation-slider-value');
         const sharpnessValueSpan = document.getElementById('sharpness-slider-value');
+        // Servo elements (check if they exist)
+        const servoSlider = document.getElementById('servo-slider');
+        const servoSliderValueSpan = document.getElementById('servo-slider-value');
+        const servoAngleStatus = document.getElementById('servo-angle-status');
+
 
         // State Variables
         let isChangingResolution = false;
         let isTogglingRecording = false;
         let isChangingControl = false;
+        let isSettingServo = false; // Added state for servo
         let isPoweringDown = false;
         let statusUpdateInterval;
         let streamErrorTimeout = null;
@@ -234,7 +257,7 @@ HTML_TEMPLATE = """
 
         function updateStatus() {
             // Prevent status updates during critical operations
-            if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+            if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
 
             fetch('/status')
                 .then(response => { if (!response.ok) { throw new Error(`HTTP error! Status: ${response.status}`); } return response.json(); })
@@ -274,15 +297,19 @@ HTML_TEMPLATE = """
                     }
 
                     // Update camera control UI elements (dropdowns and sliders)
-                    // Use the keys from the refactored camera_manager state
                     updateControlUI('awb_mode', data.awb_mode, awbStatusElement, awbSelectElement);
                     updateControlUI('ae_mode', data.ae_mode, aeStatusElement, aeSelectElement);
                     updateControlUI('metering_mode', data.metering_mode, meteringStatusElement, meteringSelectElement);
                     updateControlUI('noise_reduction_mode', data.noise_reduction_mode, nrStatusElement, nrSelectElement);
-                    updateControlUI('brightness', data.brightness, null, brightnessSlider, brightnessValueSpan);
-                    updateControlUI('contrast', data.contrast, null, contrastSlider, contrastValueSpan);
-                    updateControlUI('saturation', data.saturation, null, saturationSlider, saturationValueSpan);
-                    updateControlUI('sharpness', data.sharpness, null, sharpnessSlider, sharpnessValueSpan);
+                    updateControlUI('brightness', data.brightness, null, brightnessSlider, brightnessValueSpan, 1);
+                    updateControlUI('contrast', data.contrast, null, contrastSlider, contrastValueSpan, 1);
+                    updateControlUI('saturation', data.saturation, null, saturationSlider, saturationValueSpan, 1);
+                    updateControlUI('sharpness', data.sharpness, null, sharpnessSlider, sharpnessValueSpan, 1);
+
+                    // Update servo UI elements if they exist
+                    if (servoSlider) {
+                        updateControlUI('servo_angle', data.servo_angle, servoAngleStatus, servoSlider, servoSliderValueSpan, 0);
+                    }
 
                     // Update battery level display
                     if (data.battery_percent !== null && data.battery_percent !== undefined) {
@@ -304,34 +331,36 @@ HTML_TEMPLATE = """
                     aeStatusElement.textContent = "Err";
                     meteringStatusElement.textContent = "Err";
                     nrStatusElement.textContent = "Err";
+                    if (servoAngleStatus) servoAngleStatus.textContent = "Err";
                 });
         }
 
         // Helper function to update individual control UI elements
-        function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null) {
+        function updateControlUI(controlKey, newValue, statusEl, controlEl, valueSpanEl = null, decimalPlaces = 1) {
              // Only update if new value is provided
              if (newValue === undefined || newValue === null) return;
 
              let currentUIValue = controlEl ? controlEl.value : null;
              let formattedNewValue = newValue;
+             let suffix = (controlKey === 'servo_angle') ? '°' : ''; // Add degree symbol for servo
 
              // Handle sliders specifically (formatting and value span)
              if (valueSpanEl) {
-                 formattedNewValue = parseFloat(newValue).toFixed(1);
-                 currentUIValue = controlEl ? parseFloat(controlEl.value).toFixed(1) : null; // Get current slider value
+                 formattedNewValue = parseFloat(newValue).toFixed(decimalPlaces);
+                 currentUIValue = controlEl ? parseFloat(controlEl.value).toFixed(decimalPlaces) : null; // Get current slider value
                  // Update the text span next to the slider
-                 if (valueSpanEl.textContent !== formattedNewValue) {
-                     valueSpanEl.textContent = formattedNewValue;
+                 if (valueSpanEl.textContent !== formattedNewValue + suffix) {
+                     valueSpanEl.textContent = formattedNewValue + suffix;
                  }
              } else if (statusEl) { // Handle dropdown status text display
-                 if (statusEl.textContent !== newValue.toString()) {
-                     statusEl.textContent = newValue.toString();
+                 if (statusEl.textContent !== newValue.toString() + suffix) {
+                     statusEl.textContent = newValue.toString() + suffix;
                  }
              }
 
              // Update the control element itself (select or range slider)
              // Only update if the value differs and the user isn't actively changing it
-             if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution) {
+             if (controlEl && currentUIValue !== formattedNewValue.toString() && !isChangingControl && !isChangingResolution && !isSettingServo) {
                  console.log(`Status update forcing UI for ${controlKey}: UI='${currentUIValue}' -> Status='${formattedNewValue}'`);
                  controlEl.value = newValue; // Use the original newValue for setting element value
              }
@@ -340,10 +369,16 @@ HTML_TEMPLATE = """
 
         // Function to disable all controls during operations
         function disableControls(poweringDown = false) {
-            [btnUp, btnDown, btnRecord, btnPowerdown,
-             awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
-             brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
-            ].forEach(el => el.disabled = true);
+            const elementsToDisable = [
+                btnUp, btnDown, btnRecord, btnPowerdown,
+                awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+            ];
+            // Add servo slider if it exists
+            if (servoSlider) {
+                elementsToDisable.push(servoSlider);
+            }
+            elementsToDisable.forEach(el => { if(el) el.disabled = true; }); // Check if element exists before disabling
             // Dim the page slightly during power down
             if(poweringDown) { document.body.style.opacity = '0.7'; }
         }
@@ -352,10 +387,15 @@ HTML_TEMPLATE = """
         function enableControls() {
              // Only enable if not in the process of powering down
              if (!isPoweringDown) {
-                 [btnUp, btnDown, btnRecord, btnPowerdown,
-                  awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
-                  brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
-                 ].forEach(el => el.disabled = false);
+                 const elementsToEnable = [
+                    btnUp, btnDown, btnRecord, btnPowerdown,
+                    awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                    brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
+                 ];
+                 if (servoSlider) {
+                     elementsToEnable.push(servoSlider);
+                 }
+                 elementsToEnable.forEach(el => { if(el) el.disabled = false; });
                  document.body.style.opacity = '1'; // Restore full opacity
              }
          }
@@ -363,7 +403,7 @@ HTML_TEMPLATE = """
         // --- Action Functions ---
         function changeResolution(direction) {
             // Prevent action if another operation is in progress
-            if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+            if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
 
             isChangingResolution = true;
             disableControls();
@@ -379,7 +419,7 @@ HTML_TEMPLATE = """
                      enableControls();
                      updateStatus(); // Refresh status
                  }
-             }, 10000); // 10 second timeout
+             }, 15000); // Increased timeout to 15s for potentially slower reconfig
 
             // Send request to backend
             fetch(`/set_resolution/${direction}`, { method: 'POST' })
@@ -428,7 +468,7 @@ HTML_TEMPLATE = """
 
         function toggleRecording() {
             // Prevent action if another operation is in progress
-            if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+            if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
 
             isTogglingRecording = true;
             disableControls();
@@ -471,7 +511,7 @@ HTML_TEMPLATE = """
 
         function changeCameraControl(controlName, controlValue) {
              // Prevent action if another operation is in progress
-             if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+             if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
 
              console.log(`Requesting control change: ${controlName} = ${controlValue}`);
              isChangingControl = true;
@@ -516,18 +556,80 @@ HTML_TEMPLATE = """
          }
 
         // Function to update the displayed value next to a slider
-        function updateSliderValue(sliderId, value) {
+        function updateSliderValue(sliderId, value, decimalPlaces = 1) {
             const spanId = sliderId + '-value';
             const spanElement = document.getElementById(spanId);
             if (spanElement) {
-                // Format to one decimal place
-                spanElement.textContent = parseFloat(value).toFixed(1);
+                let suffix = (sliderId === 'servo-slider') ? '°' : '';
+                spanElement.textContent = parseFloat(value).toFixed(decimalPlaces) + suffix;
             }
         }
 
+        // Function to send servo angle command
+        function setServoAngle(angle) {
+            // Prevent action if another operation is in progress
+            if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
+
+            console.log(`Requesting servo angle change: ${angle}`);
+            isSettingServo = true; // Set servo state flag
+            disableControls();
+            statusElement.textContent = `Setting servo angle to ${angle}°...`;
+            errorElement.textContent = ''; // Clear previous errors
+            errorElement.style.display = 'none';
+
+            // Timeout to re-enable controls if the backend hangs (especially with smooth move)
+            const servoTimeoutId = setTimeout(() => {
+                 console.warn("Servo set timeout reached. Forcing UI cleanup.");
+                 if (isSettingServo) { // Check flag again
+                     isSettingServo = false;
+                     enableControls();
+                     updateStatus(); // Refresh status
+                 }
+             }, 5000); // 5 second timeout (adjust if smooth moves are longer)
+
+
+            fetch('/set_servo_angle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ angle: angle })
+            })
+            .then(response => response.json().then(data => ({ status: response.status, body: data })))
+            .then(({ status, body }) => {
+                 clearTimeout(servoTimeoutId); // Clear timeout on response
+                 if (status === 200 && body.success) {
+                     statusElement.textContent = `Servo angle set to ${angle}°.`;
+                     // Update status display immediately
+                     if (servoAngleStatus) servoAngleStatus.textContent = `${angle}°`;
+                     // Update status later to confirm actual state if needed
+                     setTimeout(updateStatus, 750);
+                 } else {
+                     // Handle failure response
+                     errorElement.textContent = `Error setting servo angle: ${body.message || 'Unknown error.'}`;
+                     errorElement.style.display = 'block';
+                     statusElement.textContent = `Servo angle change failed.`;
+                     setTimeout(updateStatus, 500); // Fetch status to revert UI if needed
+                 }
+             })
+             .catch(err => {
+                 clearTimeout(servoTimeoutId); // Clear timeout on error
+                 // Handle network errors
+                 console.error(`Network error setting servo angle:`, err);
+                 errorElement.textContent = `Network error: ${err.message}`;
+                 errorElement.style.display = 'block';
+                 statusElement.textContent = `Servo angle change failed (Network).`;
+                 setTimeout(updateStatus, 500); // Fetch status to revert UI if needed
+             })
+             .finally(() => {
+                 // Re-enable controls once operation is complete
+                 isSettingServo = false;
+                 enableControls();
+             });
+        }
+
+
         function powerDown() {
              // Prevent action if another operation is in progress
-             if (isChangingResolution || isTogglingRecording || isChangingControl || isPoweringDown) return;
+             if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
              // Confirm with user
              if (!confirm("Are you sure you want to power down the Raspberry Pi?")) { return; }
 
@@ -740,7 +842,9 @@ def index():
     cam_state = _camera_manager.get_camera_state()
     hw_state = { # Get relevant hardware state
         'battery_percent': _hardware_manager.battery_percentage,
-        'last_error': _hardware_manager.last_error
+        'last_error': _hardware_manager.last_error,
+        # Get initial servo angle (duty cycle) from hardware manager state
+        'current_servo_duty_ns': getattr(_hardware_manager, 'current_servo_duty_ns', None)
     }
     with _ui_lock:
         app_state_copy = _app_state.copy() # Get UI specific state
@@ -754,8 +858,23 @@ def index():
     batt_perc_initial = hw_state.get('battery_percent')
     batt_text_initial = f"{batt_perc_initial:.1f}" if batt_perc_initial is not None else "--"
 
+    # Calculate initial servo angle from duty cycle for UI display
+    servo_angle_initial = config.SERVO_CENTER_ANGLE # Default
+    if config.SERVO_ENABLED and hw_state['current_servo_duty_ns'] is not None:
+        try:
+            duty_range = config.SERVO_MAX_DUTY_NS - config.SERVO_MIN_DUTY_NS
+            angle_range = config.SERVO_MAX_ANGLE - config.SERVO_MIN_ANGLE
+            if duty_range > 0 and angle_range > 0:
+                 proportion = (hw_state['current_servo_duty_ns'] - config.SERVO_MIN_DUTY_NS) / duty_range
+                 servo_angle_initial = int(round(config.SERVO_MIN_ANGLE + proportion * angle_range))
+                 servo_angle_initial = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, servo_angle_initial)) # Clamp
+            else:
+                 servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback if range is zero
+        except Exception as e:
+            logging.warning(f"Could not calculate initial servo angle from duty cycle {hw_state['current_servo_duty_ns']}: {e}")
+            servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback
+
     # Build HTML option strings using config lists and current state from CameraManager
-    # Use refactored state keys
     awb_options_html = build_options_html(config.AVAILABLE_AWB_MODES, cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME))
     ae_options_html = build_options_html(config.AVAILABLE_AE_MODES, cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME))
     metering_options_html = build_options_html(config.AVAILABLE_METERING_MODES, cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME))
@@ -769,7 +888,7 @@ def index():
         err_msg=err_msg,
         digital_rec_state_initial=app_state_copy.get('digital_recording_active', False),
         batt_text_initial=batt_text_initial,
-        # Pass current control values from CameraManager state (using refactored keys)
+        # Camera Controls
         current_awb_mode_name_initial=cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME),
         awb_options_html=awb_options_html,
         current_ae_mode_name_initial=cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME),
@@ -786,6 +905,12 @@ def index():
         MIN_SATURATION=config.MIN_SATURATION, MAX_SATURATION=config.MAX_SATURATION, STEP_SATURATION=config.STEP_SATURATION,
         sharpness_initial=cam_state.get('sharpness', config.DEFAULT_SHARPNESS),
         MIN_SHARPNESS=config.MIN_SHARPNESS, MAX_SHARPNESS=config.MAX_SHARPNESS, STEP_SHARPNESS=config.STEP_SHARPNESS,
+        # Servo Controls
+        servo_enabled=config.SERVO_ENABLED,
+        servo_angle_initial=servo_angle_initial,
+        SERVO_MIN_ANGLE=config.SERVO_MIN_ANGLE,
+        SERVO_MAX_ANGLE=config.SERVO_MAX_ANGLE,
+        # Other
         video_feed_url=url_for('video_feed') # Generate URL dynamically
     )
 
@@ -808,11 +933,11 @@ def status():
 
     # Get current state from managers
     cam_state = _camera_manager.get_camera_state()
-    # Get latest battery reading (don't trigger a new read here)
     batt_perc = _hardware_manager.battery_percentage
+    current_servo_duty = getattr(_hardware_manager, 'current_servo_duty_ns', None)
 
     # Combine error messages
-    err_msg = cam_state.get('last_error') or _hardware_manager.last_error or ""
+    err_msg = cam_state.get('last_error') or _hardware_manager.last_error or cam_state.get('audio_last_error') or "" # Include audio error
 
     # Auto-clear certain errors if conditions are met (e.g., frames are flowing)
     latest_frame = _camera_manager.get_latest_frame() # Check if frames are coming
@@ -843,6 +968,18 @@ def status():
     with _ui_lock:
         digital_rec_active = _app_state.get("digital_recording_active", False)
 
+    # Calculate current servo angle from duty cycle for status
+    current_servo_angle = None
+    if config.SERVO_ENABLED and current_servo_duty is not None:
+         try:
+             duty_range = config.SERVO_MAX_DUTY_NS - config.SERVO_MIN_DUTY_NS
+             angle_range = config.SERVO_MAX_ANGLE - config.SERVO_MIN_ANGLE
+             if duty_range > 0 and angle_range > 0:
+                  proportion = (current_servo_duty - config.SERVO_MIN_DUTY_NS) / duty_range
+                  current_servo_angle = int(round(config.SERVO_MIN_ANGLE + proportion * angle_range))
+                  current_servo_angle = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, current_servo_angle)) # Clamp
+         except Exception: pass # Ignore calculation errors for status
+
     # Return combined status using refactored state keys
     status_data = {
         'is_recording': cam_state.get('is_recording', False),
@@ -853,7 +990,7 @@ def status():
         'error': err_msg,
         'active_recordings': cam_state.get('recording_paths', []),
         'battery_percent': batt_perc,
-        # Include current control values from CameraManager state (using refactored keys)
+        # Camera controls
         'awb_mode': cam_state.get('awb_mode'),
         'ae_mode': cam_state.get('ae_mode'),
         'metering_mode': cam_state.get('metering_mode'),
@@ -862,6 +999,8 @@ def status():
         'contrast': cam_state.get('contrast'),
         'saturation': cam_state.get('saturation'),
         'sharpness': cam_state.get('sharpness'),
+        # Servo status
+        'servo_angle': current_servo_angle,
     }
     return jsonify(status_data)
 
@@ -919,12 +1058,13 @@ def toggle_recording():
         new_state = _app_state["digital_recording_active"]
         logging.info(f"Digital recording trigger toggled via web UI to: {'ON' if new_state else 'OFF'}")
         # Clear potential previous recording errors when user interacts
-        if _camera_manager and _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writers" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error or "Mux" in _camera_manager.last_error):
-            logging.info(f"Clearing previous recording/muxing error via toggle: '{_camera_manager.last_error}'")
-            _camera_manager.last_error = None
-        if _camera_manager and _camera_manager.audio_last_error: # Clear audio errors too
-             logging.info(f"Clearing previous audio error via toggle: '{_camera_manager.audio_last_error}'")
-             _camera_manager.audio_last_error = None
+        if _camera_manager:
+            if _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writers" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error or "Mux" in _camera_manager.last_error):
+                logging.info(f"Clearing previous video/muxing error via toggle: '{_camera_manager.last_error}'")
+                _camera_manager.last_error = None
+            if _camera_manager.audio_last_error: # Clear audio errors too
+                 logging.info(f"Clearing previous audio error via toggle: '{_camera_manager.audio_last_error}'")
+                 _camera_manager.audio_last_error = None
         if _hardware_manager and _hardware_manager.last_error and ("Recording" in _hardware_manager.last_error): # Less likely
              _hardware_manager.last_error = None
 
@@ -1027,6 +1167,47 @@ def set_camera_control():
     except Exception as e:
         # Catch-all for unexpected errors during request processing
         logging.error(f"Error processing set_camera_control '{control_name}': {e}", exc_info=True)
+        return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
+
+
+@app.route('/set_servo_angle', methods=['POST'])
+def set_servo_angle_route():
+    """Sets the servo angle via the hardware manager."""
+    global _hardware_manager
+
+    if not config.SERVO_ENABLED:
+        return jsonify({'success': False, 'message': 'Servo control is disabled in config.'}), 403 # Forbidden
+    if not _hardware_manager:
+        return jsonify({'success': False, 'message': 'Hardware manager not ready.'}), 500
+
+    try:
+        data = request.get_json()
+        if not data or 'angle' not in data:
+            logging.warning("/set_servo_angle called without 'angle'.")
+            return jsonify({'success': False, 'message': 'Missing angle in request.'}), 400
+
+        target_angle = data['angle']
+        logging.info(f"Web request: Set servo angle to '{target_angle}'")
+
+        # Validate angle (basic numeric check, hardware manager clamps further)
+        try:
+            angle_float = float(target_angle)
+        except ValueError:
+             logging.error(f"Invalid servo angle value received: {target_angle}")
+             return jsonify({'success': False, 'message': 'Invalid angle value.'}), 400
+
+        # Call the hardware manager method
+        # Note: This call might block if smooth movement is enabled
+        _hardware_manager.set_servo(angle_float)
+
+        # Assume success if no exception from set_servo (it logs errors internally)
+        # A more robust implementation might have set_servo return True/False
+        logging.info(f"Servo angle set to {angle_float} degrees.")
+        return jsonify({'success': True, 'message': 'Servo angle set.'})
+
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logging.error(f"Error processing set_servo_angle '{target_angle}': {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
 
 
@@ -1146,13 +1327,15 @@ if __name__ == "__main__":
     class DummyHWManager:
          battery_percentage = 75.3
          last_error = None
+         current_servo_duty_ns = 1500000 # Example center duty
+         def set_servo(self, angle): print(f"DummyHW: Set servo to {angle}")
 
     # --- Setup Logging ---
     logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT)
     logging.getLogger("werkzeug").setLevel(logging.WARNING) # Quieten Flask's default logging
 
     # --- Setup and Run ---
-    print("--- Web UI Test (Single Cam Refactor) ---")
+    print("--- Web UI Test (Servo UI Added) ---")
     print(f"--- Running on http://0.0.0.0:{config.WEB_PORT} ---")
     dummy_shutdown = threading.Event()
     setup_web_app(DummyManager(), DummyHWManager(), dummy_shutdown)

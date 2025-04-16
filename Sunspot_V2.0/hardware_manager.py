@@ -5,6 +5,7 @@ hardware_manager.py
 Manages hardware interactions for the Pi Camera Stream & Record application,
 including GPIO switch, INA219 battery monitor, and Servo motor control via Sysfs PWM.
 Includes smooth servo movement logic.
+Fixes NameError for INA219 config constants.
 """
 
 import os
@@ -20,7 +21,6 @@ import config
 
 # ===========================================================
 # === INA219 Battery Monitor Class START ===
-# (INA219 Class remains unchanged)
 # ===========================================================
 # Register Addresses
 _REG_CONFIG                      = 0x00
@@ -45,17 +45,38 @@ _CONFIG_GAIN_8_320MV             = 0x1800 # Gain 8, 320mV Range
 
 _CONFIG_BADCRES_MASK             = 0x0780 # Bus ADC Resolution Mask
 _CONFIG_BADCRES_9BIT_1S          = 0x0000 # 9bit, 1 sample, 84us
-# ... other BADCRES values ...
+_CONFIG_BADCRES_10BIT_1S         = 0x0080 # 10bit, 1 sample, 148us
+_CONFIG_BADCRES_11BIT_1S         = 0x0100 # 11bit, 1 sample, 276us
+_CONFIG_BADCRES_12BIT_1S         = 0x0180 # 12bit, 1 sample, 532us
+_CONFIG_BADCRES_12BIT_2S         = 0x0480 # 12bit, 2 samples, 1.06ms
+_CONFIG_BADCRES_12BIT_4S         = 0x0500 # 12bit, 4 samples, 2.13ms
+_CONFIG_BADCRES_12BIT_8S         = 0x0580 # 12bit, 8 samples, 4.26ms
+_CONFIG_BADCRES_12BIT_16S        = 0x0600 # 12bit, 16 samples, 8.51ms
+_CONFIG_BADCRES_12BIT_32S        = 0x0680 # <<<< ADDED BACK
+_CONFIG_BADCRES_12BIT_64S        = 0x0700 # 12bit, 64 samples, 34.05ms
 _CONFIG_BADCRES_12BIT_128S       = 0x0780 # 12bit, 128 samples, 68.10ms
 
 _CONFIG_SADCRES_MASK             = 0x0078 # Shunt ADC Resolution Mask
 _CONFIG_SADCRES_9BIT_1S          = 0x0000 # 9bit, 1 sample, 84us
-# ... other SADCRES values ...
+_CONFIG_SADCRES_10BIT_1S         = 0x0008 # 10bit, 1 sample, 148us
+_CONFIG_SADCRES_11BIT_1S         = 0x0010 # 11bit, 1 sample, 276us
+_CONFIG_SADCRES_12BIT_1S         = 0x0018 # 12bit, 1 sample, 532us
+_CONFIG_SADCRES_12BIT_2S         = 0x0048 # 12bit, 2 samples, 1.06ms
+_CONFIG_SADCRES_12BIT_4S         = 0x0050 # 12bit, 4 samples, 2.13ms
+_CONFIG_SADCRES_12BIT_8S         = 0x0058 # 12bit, 8 samples, 4.26ms
+_CONFIG_SADCRES_12BIT_16S        = 0x0060 # 12bit, 16 samples, 8.51ms
+_CONFIG_SADCRES_12BIT_32S        = 0x0068 # <<<< ADDED BACK
+_CONFIG_SADCRES_12BIT_64S        = 0x0070 # 12bit, 64 samples, 34.05ms
 _CONFIG_SADCRES_12BIT_128S       = 0x0078 # 12bit, 128 samples, 68.10ms
 
 _CONFIG_MODE_MASK                = 0x0007 # Operating Mode Mask
 _CONFIG_MODE_POWERDOWN           = 0x0000
-# ... other MODE values ...
+_CONFIG_MODE_SVOLT_TRIGGERED     = 0x0001
+_CONFIG_MODE_BVOLT_TRIGGERED     = 0x0002
+_CONFIG_MODE_SANDBVOLT_TRIGGERED = 0x0003
+_CONFIG_MODE_ADCOFF              = 0x0004
+_CONFIG_MODE_SVOLT_CONTINUOUS    = 0x0005
+_CONFIG_MODE_BVOLT_CONTINUOUS    = 0x0006
 _CONFIG_MODE_SANDBVOLT_CONTINUOUS= 0x0007
 
 
@@ -63,12 +84,10 @@ class INA219:
     """
     Driver for the INA219 current/voltage sensor.
     Handles I2C communication, configuration, and reading values.
-    (Implementation unchanged from previous version)
     """
     def __init__(self, i2c_bus=config.INA219_I2C_BUS, addr=config.INA219_I2C_ADDRESS):
         """
         Initializes the INA219 sensor.
-        (Code unchanged)
         """
         self.bus = None
         self.addr = addr
@@ -138,6 +157,7 @@ class INA219:
         self._power_lsb = 0.003048    # Watts per bit
 
         self.write_register(_REG_CALIBRATION, self._cal_value)
+        # Use the now defined constants
         self.configure(_CONFIG_BVOLTAGERANGE_16V,
                        _CONFIG_GAIN_2_80MV,
                        _CONFIG_BADCRES_12BIT_32S, # High resolution/averaging for bus voltage
@@ -151,6 +171,7 @@ class INA219:
         self._power_lsb = 0.002    # Watts per bit (2mW)
 
         self.write_register(_REG_CALIBRATION, self._cal_value)
+        # Use the now defined constants
         self.configure(_CONFIG_BVOLTAGERANGE_32V,
                        _CONFIG_GAIN_8_320MV,
                        _CONFIG_BADCRES_12BIT_32S,
@@ -187,6 +208,7 @@ class INA219:
 
 # ===========================================================
 # === Servo Control Functions START ===
+# (Code unchanged from previous version)
 # ===========================================================
 
 _servo_pwm_exported = False # Module-level state to track PWM export

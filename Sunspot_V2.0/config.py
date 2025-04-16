@@ -5,8 +5,10 @@ config.py
 Configuration constants for the Pi Camera Stream & Record application.
 Handles settings for the camera, hardware, and the web UI.
 Refactored for single-camera (Cam0) operation.
+Includes settings for smooth servo movement.
 """
 import os
+import math # Import math if needed for calculations here, otherwise import in hardware_manager
 from libcamera import controls
 from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
 
@@ -183,6 +185,11 @@ SERVO_MAX_DUTY_NS = 2500000 # Duty cycle for maximum angle (2.5ms)
 SERVO_CENTER_ANGLE = 90 # Angle corresponding to center position
 SERVO_MIN_ANGLE = 0 # Minimum controllable angle
 SERVO_MAX_ANGLE = 180 # Maximum controllable angle
+
+# --- Servo Smooth Movement ---
+SERVO_SMOOTH_MOVE = True # Enable smooth movement logic
+SERVO_SMOOTH_MOVE_STEPS = 25 # Number of steps for smooth movement
+SERVO_SMOOTH_MOVE_DELAY = 0.015 # Delay between steps in seconds (adjust for speed)
 
 # --- Deprecated / Old Config Values ---
 # (Removed for clarity)
