@@ -81,22 +81,25 @@ RECORDING_EXTENSION = ".mp4"
 # ===========================================================
 
 # --- Auto White Balance (AWB) ---
+# Note: AWB Mode is not directly controlled by the primary UI dropdown anymore (replaced by ISO)
 AVAILABLE_AWB_MODES = list(controls.AwbModeEnum.__members__.keys())
 DEFAULT_AWB_MODE_NAME = "Auto"
 if DEFAULT_AWB_MODE_NAME not in AVAILABLE_AWB_MODES:
     DEFAULT_AWB_MODE_NAME = AVAILABLE_AWB_MODES[0] if AVAILABLE_AWB_MODES else "Auto" # Fallback
 
 # --- ISO / Analogue Gain ---
+# This is now controlled by the primary UI dropdown
 AVAILABLE_ISO_SETTINGS = {
-    "Auto": 0.0, # 0.0 typically means Auto Gain in libcamera controls
+    # Name: AnalogueGain Value (0.0 means Auto)
+    "Auto": 0.0,
     "100": 1.0,
     "200": 2.0,
     "400": 4.0,
     "800": 8.0,
     "1600": 16.0,
 }
-DEFAULT_ISO_NAME = "Auto"
-DEFAULT_ANALOGUE_GAIN = AVAILABLE_ISO_SETTINGS.get(DEFAULT_ISO_NAME, 0.0)
+DEFAULT_ISO_NAME = "Auto" # The default NAME to display/select
+DEFAULT_ANALOGUE_GAIN = AVAILABLE_ISO_SETTINGS.get(DEFAULT_ISO_NAME, 0.0) # The corresponding gain value
 
 # --- Auto Exposure (AE) ---
 AVAILABLE_AE_MODES = list(controls.AeExposureModeEnum.__members__.keys())

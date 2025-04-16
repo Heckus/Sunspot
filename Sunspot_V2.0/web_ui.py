@@ -5,6 +5,7 @@ web_ui.py
 Handles the Flask web server and user interface for the Pi Camera application.
 Provides routes for streaming, status updates, and control commands.
 Refactored for single-camera operation. Includes servo control UI.
+Replaced AWB dropdown with ISO control.
 """
 
 import logging
@@ -62,8 +63,8 @@ HTML_TEMPLATE = """
         .status-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; }
         .status-grid span:first-child { font-weight: bold; color: #555; text-align: right;}
         #status, #rec-status, #resolution, #battery-level,
-        #awb-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status,
-        #servo-angle-status /* Status IDs */
+        #iso-mode-status, #ae-mode-status, #metering-mode-status, #nr-mode-status, /* Status IDs */
+        #servo-angle-status
          { color: #0056b3; font-weight: normal;}
         #rec-status.active { color: #D83B01; font-weight: bold;}
 
@@ -123,7 +124,7 @@ HTML_TEMPLATE = """
                      <span>Servo Angle:</span> <span id="servo-angle-status">{{ servo_angle_initial }}&deg;</span>
                      {% endif %}
                      <hr style="grid-column: 1 / -1; border-top: 1px dashed #bbb; border-bottom: none; margin: 5px 0;">
-                     <span>AWB Mode:</span> <span id="awb-mode-status">{{ current_awb_mode_name_initial }}</span>
+                     <span>ISO Level:</span> <span id="iso-mode-status">{{ current_iso_name_initial }}</span> {# Changed from AWB #}
                      <span>AE Mode:</span> <span id="ae-mode-status">{{ current_ae_mode_name_initial }}</span>
                      <span>Metering:</span> <span id="metering-mode-status">{{ current_metering_mode_name_initial }}</span>
                      <span>Noise Red.:</span> <span id="nr-mode-status">{{ current_noise_reduction_mode_name_initial }}</span>
@@ -133,9 +134,10 @@ HTML_TEMPLATE = """
              <div class="controls-panel">
                  <div class="panel-title">Mode Controls</div>
                  <div class="mode-controls">
-                     <label for="awb-select">AWB Mode:</label>
-                     <select id="awb-select" onchange="changeCameraControl('AwbMode', this.value)" title="Select Auto White Balance Mode">
-                         {{ awb_options_html | safe }} {# Use safe filter for HTML options #}
+                     {# --- ISO Control (Replaces AWB) --- #}
+                     <label for="iso-select">ISO Level:</label>
+                     <select id="iso-select" onchange="changeCameraControl('ISOSetting', this.value)" title="Select ISO Level">
+                         {{ iso_options_html | safe }} {# Use safe filter for HTML options #}
                      </select>
 
                      <label for="ae-select">Exposure Mode:</label>
@@ -211,14 +213,16 @@ HTML_TEMPLATE = """
         const btnPowerdown = document.getElementById('btn-powerdown');
         const recStatusElement = document.getElementById('rec-status');
         const batteryLevelElement = document.getElementById('battery-level');
-        const awbStatusElement = document.getElementById('awb-mode-status');
+        // Camera Control Elements
+        const isoModeStatusElement = document.getElementById('iso-mode-status'); // Changed from awb
         const aeStatusElement = document.getElementById('ae-mode-status');
         const meteringStatusElement = document.getElementById('metering-mode-status');
         const nrStatusElement = document.getElementById('nr-mode-status');
-        const awbSelectElement = document.getElementById('awb-select');
+        const isoSelectElement = document.getElementById('iso-select'); // Changed from awb
         const aeSelectElement = document.getElementById('ae-select');
         const meteringSelectElement = document.getElementById('metering-select');
         const nrSelectElement = document.getElementById('nr-select');
+        // Slider Elements
         const brightnessSlider = document.getElementById('brightness-slider');
         const contrastSlider = document.getElementById('contrast-slider');
         const saturationSlider = document.getElementById('saturation-slider');
@@ -297,7 +301,8 @@ HTML_TEMPLATE = """
                     }
 
                     // Update camera control UI elements (dropdowns and sliders)
-                    updateControlUI('awb_mode', data.awb_mode, awbStatusElement, awbSelectElement);
+                    // Use the refactored camera_manager state
+                    updateControlUI('iso_mode', data.iso_mode, isoModeStatusElement, isoSelectElement); // Changed from awb
                     updateControlUI('ae_mode', data.ae_mode, aeStatusElement, aeSelectElement);
                     updateControlUI('metering_mode', data.metering_mode, meteringStatusElement, meteringSelectElement);
                     updateControlUI('noise_reduction_mode', data.noise_reduction_mode, nrStatusElement, nrSelectElement);
@@ -327,7 +332,7 @@ HTML_TEMPLATE = """
                     // Set related UI elements to error state
                     recStatusElement.textContent = "Err";
                     batteryLevelElement.textContent = "Err";
-                    awbStatusElement.textContent = "Err";
+                    isoModeStatusElement.textContent = "Err"; // Changed from awb
                     aeStatusElement.textContent = "Err";
                     meteringStatusElement.textContent = "Err";
                     nrStatusElement.textContent = "Err";
@@ -371,7 +376,7 @@ HTML_TEMPLATE = """
         function disableControls(poweringDown = false) {
             const elementsToDisable = [
                 btnUp, btnDown, btnRecord, btnPowerdown,
-                awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                isoSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement, // Changed from awb
                 brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
             ];
             // Add servo slider if it exists
@@ -389,7 +394,7 @@ HTML_TEMPLATE = """
              if (!isPoweringDown) {
                  const elementsToEnable = [
                     btnUp, btnDown, btnRecord, btnPowerdown,
-                    awbSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement,
+                    isoSelectElement, aeSelectElement, meteringSelectElement, nrSelectElement, // Changed from awb
                     brightnessSlider, contrastSlider, saturationSlider, sharpnessSlider
                  ];
                  if (servoSlider) {
@@ -511,6 +516,7 @@ HTML_TEMPLATE = """
 
         function changeCameraControl(controlName, controlValue) {
              // Prevent action if another operation is in progress
+             // Note: controlName might be 'ISOSetting' here now
              if (isChangingResolution || isTogglingRecording || isChangingControl || isSettingServo || isPoweringDown) return;
 
              console.log(`Requesting control change: ${controlName} = ${controlValue}`);
@@ -816,12 +822,14 @@ def generate_stream_frames():
     logging.info("Stream generator thread exiting.")
 
 
-def build_options_html(available_modes, current_mode_name):
+def build_options_html(available_options, current_selection):
     """Helper to build <option> tags for HTML select dropdowns."""
     options_html = ""
-    for mode_name in available_modes:
-        selected_attr = ' selected' if mode_name == current_mode_name else ''
-        options_html += f'<option value="{mode_name}"{selected_attr}>{mode_name}</option>'
+    # Works for lists of strings or dict keys
+    options_list = available_options if isinstance(available_options, list) else available_options.keys()
+    for option_name in options_list:
+        selected_attr = ' selected' if option_name == current_selection else ''
+        options_html += f'<option value="{option_name}"{selected_attr}>{option_name}</option>'
     return options_html
 
 # ===========================================================
@@ -850,7 +858,7 @@ def index():
         app_state_copy = _app_state.copy() # Get UI specific state
 
     # Combine error messages (prioritize camera errors?)
-    err_msg = cam_state.get('last_error') or hw_state.get('last_error') or ""
+    err_msg = cam_state.get('last_error') or hw_state.get('last_error') or cam_state.get('audio_last_error') or ""
 
     # Get resolution from camera state (using refactored keys)
     current_w, current_h = cam_state.get('resolution_wh', (640, 480)) # Default fallback
@@ -875,7 +883,10 @@ def index():
             servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback
 
     # Build HTML option strings using config lists and current state from CameraManager
-    awb_options_html = build_options_html(config.AVAILABLE_AWB_MODES, cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME))
+    # Use refactored state keys and new ISO options
+    current_iso_name_initial = cam_state.get('iso_mode', config.DEFAULT_ISO_NAME)
+    iso_options_html = build_options_html(config.AVAILABLE_ISO_SETTINGS, current_iso_name_initial) # Use ISO settings
+
     ae_options_html = build_options_html(config.AVAILABLE_AE_MODES, cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME))
     metering_options_html = build_options_html(config.AVAILABLE_METERING_MODES, cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME))
     noise_reduction_options_html = build_options_html(config.AVAILABLE_NOISE_REDUCTION_MODES, cam_state.get('noise_reduction_mode', config.DEFAULT_NOISE_REDUCTION_MODE_NAME))
@@ -889,8 +900,8 @@ def index():
         digital_rec_state_initial=app_state_copy.get('digital_recording_active', False),
         batt_text_initial=batt_text_initial,
         # Camera Controls
-        current_awb_mode_name_initial=cam_state.get('awb_mode', config.DEFAULT_AWB_MODE_NAME),
-        awb_options_html=awb_options_html,
+        current_iso_name_initial=current_iso_name_initial, # Changed from AWB
+        iso_options_html=iso_options_html,                 # Changed from AWB
         current_ae_mode_name_initial=cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME),
         ae_options_html=ae_options_html,
         current_metering_mode_name_initial=cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME),
@@ -991,7 +1002,7 @@ def status():
         'active_recordings': cam_state.get('recording_paths', []),
         'battery_percent': batt_perc,
         # Camera controls
-        'awb_mode': cam_state.get('awb_mode'),
+        'iso_mode': cam_state.get('iso_mode'), # Changed from awb_mode
         'ae_mode': cam_state.get('ae_mode'),
         'metering_mode': cam_state.get('metering_mode'),
         'noise_reduction_mode': cam_state.get('noise_reduction_mode'),
@@ -1087,8 +1098,8 @@ def set_camera_control():
             logging.warning("/set_camera_control called without 'control' or 'value'.")
             return jsonify({'success': False, 'message': 'Missing control or value in request.'}), 400
 
-        control_name = data['control']
-        control_value = data['value']
+        control_name = data['control'] # This might be 'ISOSetting', 'AeExposureMode', etc.
+        control_value = data['value'] # For ISO, this will be the name ("Auto", "100", etc.)
         logging.info(f"Web request: Set control '{control_name}' to '{control_value}'")
 
         control_dict_to_set = {}
@@ -1096,10 +1107,29 @@ def set_camera_control():
         validation_error = None
 
         # --- Validate and Parse Value ---
-        # Mode Controls (convert string name to enum member)
-        if control_name == 'AwbMode':
+
+        # Handle ISO Setting request from UI
+        if control_name == 'ISOSetting':
+            iso_name = control_value
+            analogue_gain = config.AVAILABLE_ISO_SETTINGS.get(iso_name)
+            if analogue_gain is not None:
+                parsed_value = analogue_gain # The value to set for AnalogueGain control
+                control_dict_to_set["AnalogueGain"] = parsed_value
+                # If setting to Auto ISO (gain 0.0), ensure AE is enabled.
+                # If setting specific ISO (gain > 0.0), AE usually remains enabled in libcamera
+                # unless you also want to set manual exposure time.
+                if analogue_gain == 0.0:
+                     control_dict_to_set["AeEnable"] = True
+                     logging.info("Setting ISO to Auto, ensuring AeEnable=True")
+                # We are replacing the control_name here for the camera manager call
+                control_name = 'AnalogueGain'
+            else:
+                validation_error = f"Invalid ISOSetting value: {iso_name}"
+
+        # Handle other Mode Controls (convert string name to enum member)
+        elif control_name == 'AwbMode': # Keep handling AWB if needed elsewhere, though not primary UI
             enum_val = controls.AwbModeEnum.__members__.get(control_value)
-            if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AwbEnable"] = True # Ensure enabled
+            if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AwbEnable"] = True
             else: validation_error = f"Invalid AwbMode value: {control_value}"
         elif control_name == 'AeExposureMode':
             enum_val = controls.AeExposureModeEnum.__members__.get(control_value)
@@ -1139,30 +1169,36 @@ def set_camera_control():
                 parsed_value = max(config.MIN_SHARPNESS, min(config.MAX_SHARPNESS, val))
             except ValueError: validation_error = "Invalid numeric value for Sharpness"
         else:
-            validation_error = f"Unknown control name: {control_name}"
+            # Only raise error if it wasn't handled by ISOSetting logic above
+            if 'AnalogueGain' not in control_dict_to_set:
+                 validation_error = f"Unknown control name: {control_name}"
 
         # --- Handle Validation Result ---
         if validation_error:
-            logging.error(f"Control validation failed for '{control_name}': {validation_error}")
+            logging.error(f"Control validation failed for '{control_name}'='{control_value}': {validation_error}")
             return jsonify({'success': False, 'message': validation_error}), 400
 
         # --- Apply Control ---
-        if parsed_value is not None:
-            control_dict_to_set[control_name] = parsed_value
-            # Call refactored method in camera manager
-            if _camera_manager.apply_camera_controls(control_dict_to_set):
-                 # Value applied successfully by camera manager
-                 logged_value = f"{parsed_value:.2f}" if isinstance(parsed_value, float) else parsed_value.name if hasattr(parsed_value,'name') else str(parsed_value)
-                 logging.info(f"Successfully set {control_name} to: {logged_value}")
-                 return jsonify({'success': True, 'message': f'{control_name} set.'})
-            else:
-                 # apply_camera_controls failed, error should be in manager's last_error
-                 error_msg = _camera_manager.last_error or f"Failed to apply {control_name}"
-                 return jsonify({'success': False, 'message': error_msg}), 500
-        else:
-             # Should have been caught by validation_error check, but as a fallback
-             logging.error(f"Internal error: Parsed value is None for control '{control_name}' after validation.")
+        # Add the parsed value for non-ISO controls
+        if parsed_value is not None and control_name not in control_dict_to_set:
+             control_dict_to_set[control_name] = parsed_value
+
+        if not control_dict_to_set:
+             logging.error(f"Internal error: Control dictionary is empty for request {control_name}={control_value}")
              return jsonify({'success': False, 'message': 'Internal processing error.'}), 500
+
+        # Call refactored method in camera manager
+        if _camera_manager.apply_camera_controls(control_dict_to_set):
+             # Value applied successfully by camera manager
+             # Log the original request name/value for clarity if it was ISO
+             log_key = 'ISOSetting' if 'AnalogueGain' in control_dict_to_set else control_name
+             log_val = iso_name if log_key == 'ISOSetting' else control_value
+             logging.info(f"Successfully applied control request: {log_key}={log_val}")
+             return jsonify({'success': True, 'message': f'{log_key} set.'})
+        else:
+             # apply_camera_controls failed, error should be in manager's last_error
+             error_msg = _camera_manager.last_error or f"Failed to apply {control_name}"
+             return jsonify({'success': False, 'message': error_msg}), 500
 
     except Exception as e:
         # Catch-all for unexpected errors during request processing
@@ -1180,6 +1216,7 @@ def set_servo_angle_route():
     if not _hardware_manager:
         return jsonify({'success': False, 'message': 'Hardware manager not ready.'}), 500
 
+    target_angle = None # Initialize for error logging
     try:
         data = request.get_json()
         if not data or 'angle' not in data:
@@ -1286,6 +1323,7 @@ if __name__ == "__main__":
             self.audio_last_error = None
             self.current_resolution_index = config.DEFAULT_RESOLUTION_INDEX
             self.is_initialized = True
+            self.iso_mode = config.DEFAULT_ISO_NAME # Add dummy iso mode
         def get_latest_frame(self):
             # Create a simple placeholder frame
             img = np.zeros((480, 640, 3), dtype=np.uint8)
@@ -1307,7 +1345,7 @@ if __name__ == "__main__":
                  'recording_paths': [],
                  'last_error': self.last_error,
                  'audio_last_error': self.audio_last_error,
-                 'awb_mode': config.DEFAULT_AWB_MODE_NAME,
+                 'iso_mode': self.iso_mode, # Use dummy iso mode
                  'ae_mode': config.DEFAULT_AE_MODE_NAME,
                  'metering_mode': config.DEFAULT_METERING_MODE_NAME,
                  'noise_reduction_mode': config.DEFAULT_NOISE_REDUCTION_MODE_NAME,
@@ -1316,9 +1354,19 @@ if __name__ == "__main__":
                  'saturation': config.DEFAULT_SATURATION,
                  'sharpness': config.DEFAULT_SHARPNESS,
                  'analogue_gain': config.DEFAULT_ANALOGUE_GAIN,
-                 'iso_mode': config.DEFAULT_ISO_NAME
              }
-        def apply_camera_controls(self, d): print(f"DummyCam: Apply controls {d}"); return True
+        def apply_camera_controls(self, d):
+            print(f"DummyCam: Apply controls {d}")
+            if 'AnalogueGain' in d:
+                 gain_val = d['AnalogueGain']
+                 found_name = "Unknown"
+                 for name, gain in config.AVAILABLE_ISO_SETTINGS.items():
+                      if abs(gain - gain_val) < 0.01:
+                           found_name = name
+                           break
+                 self.iso_mode = found_name
+                 print(f"DummyCam: Updated iso_mode to {self.iso_mode}")
+            return True
         def initialize_camera(self, idx=None):
              print(f"DummyCam: Init camera {idx if idx is not None else self.current_resolution_index}")
              if idx is not None: self.current_resolution_index = idx
@@ -1335,7 +1383,7 @@ if __name__ == "__main__":
     logging.getLogger("werkzeug").setLevel(logging.WARNING) # Quieten Flask's default logging
 
     # --- Setup and Run ---
-    print("--- Web UI Test (Servo UI Added) ---")
+    print("--- Web UI Test (ISO Control UI) ---")
     print(f"--- Running on http://0.0.0.0:{config.WEB_PORT} ---")
     dummy_shutdown = threading.Event()
     setup_web_app(DummyManager(), DummyHWManager(), dummy_shutdown)
