@@ -9,6 +9,8 @@ and audio recording/muxing.
 **Modification:** Updated start_recording FPS hierarchy AGAIN to prioritize
                   MEASURED average FPS over driver-reported/config FPS.
 **Modification:** Changed measured FPS log line to INFO level.
+**Modification:** Changed ffmpeg muxing to RE-ENCODE video using libx264
+                  and explicitly set FPS using the -vf filter, instead of -c:v copy.
 """
 
 import os
@@ -1357,7 +1359,7 @@ class CameraManager:
     def _mux_audio_video(self, video_path, audio_path, recording_fps=None):
         """
         Merges audio and video files using ffmpeg.
-        Optionally uses the provided recording_fps to hint the input video rate.
+        Re-encodes video using libx264, forcing the frame rate via -vf filter.
         """
         if not config.AUDIO_ENABLED: return None # Should not be called if disabled
 
@@ -1380,71 +1382,76 @@ class CameraManager:
              return None # Return None, indicating muxing didn't happen
 
         # --- Determine Output Path ---
-        # Try to remove "_video" suffix from the video path
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
-        # If replacement didn't change the name (e.g., suffix wasn't there), add "_muxed"
         if output_path == video_path:
             output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
 
-        logging.info(f"Muxing video '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
+        # --- Determine FPS for Re-encoding ---
+        # Use the FPS passed in (which should be the one used for VideoWriter)
+        fps_to_use = recording_fps
+        if fps_to_use is None or fps_to_use <= 0:
+             logging.warning("Invalid or missing recording_fps for muxing. Falling back to 30.0.")
+             fps_to_use = 30.0 # Fallback FPS
+
+        logging.info(f"Muxing (re-encoding video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}' at {fps_to_use:.2f} fps...")
 
         # --- Construct ffmpeg Command ---
-        command_base = [
+        command = [
             config.FFMPEG_PATH,
-            "-y", # Overwrite output without asking
+            "-y",               # Overwrite output without asking
+            "-i", video_path,   # Input video file
+            "-i", audio_path,   # Input audio file
+
+            # Video Options (Re-encoding)
+            "-vf", f"fps={fps_to_use:.4f}", # Force video frame rate using video filter
+            "-c:v", "libx264",  # Choose H.264 encoder
+            "-preset", "veryfast", # Encoding speed preset (faster, larger file) - adjust as needed ('medium', 'fast', 'faster')
+            "-crf", "23",       # Constant Rate Factor (quality, 23 is good default) - adjust as needed (18-28 common)
+            # '-b:v', '4000k', # Alternative: Set target bitrate (e.g., 4 Mbps) instead of CRF
+
+            # Audio Options
+            "-c:a", "aac",      # Re-encode audio to AAC
+            "-b:a", "128k",     # Audio bitrate (optional, 128k is decent)
+
+            # Mapping & Timing
+            "-map", "0:v:0",    # Map video stream from first input (0)
+            "-map", "1:a:0",    # Map audio stream from second input (1)
+            "-shortest",        # Finish encoding when the shortest input stream ends
+
+            # Logging
+            "-loglevel", config.FFMPEG_LOG_LEVEL,
+            output_path         # Output file
         ]
-
-        # --- Add Input Frame Rate Hint (if available) ---
-        # Add '-r' *before* the video input '-i'
-        if recording_fps is not None and recording_fps > 0:
-            logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.2f} fps")
-            command_base.extend(["-r", f"{recording_fps:.4f}"]) # Use more precision for ffmpeg
-        else:
-            logging.warning("No valid recording FPS available to hint ffmpeg.")
-
-        command_inputs_outputs = [
-            "-i", video_path, # Input video file
-            "-i", audio_path, # Input audio file
-            "-c:v", "copy",   # Copy video stream without re-encoding (fast)
-            "-c:a", "aac",    # Re-encode audio to AAC (common, good compatibility)
-            "-map", "0:v:0",  # Map video stream from first input (0)
-            "-map", "1:a:0",  # Map audio stream from second input (1)
-            "-shortest",      # Finish encoding when the shortest input stream ends
-            "-loglevel", config.FFMPEG_LOG_LEVEL, # Show only errors (or 'warning', 'info', 'debug')
-            output_path       # Output file
-        ]
-
-        command = command_base + command_inputs_outputs
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         # --- Execute ffmpeg ---
+        mux_start_time = time.monotonic()
         try:
-            process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=config.AUDIO_MUX_TIMEOUT)
-            logging.info(f"ffmpeg muxing successful for {output_path}.")
-            # Log ffmpeg output only if log level is DEBUG or higher
+            process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=config.AUDIO_MUX_TIMEOUT * 3) # Increase timeout for re-encoding
+            mux_duration = time.monotonic() - mux_start_time
+            logging.info(f"ffmpeg muxing (re-encode) successful for {output_path} in {mux_duration:.2f}s.")
             if logging.getLogger().isEnabledFor(logging.DEBUG):
                  logging.debug(f"ffmpeg output:\n--- stdout ---\n{process.stdout}\n--- stderr ---\n{process.stderr}\n---")
-            # Clear audio error on success
             if "Mux Error" in (self.audio_last_error or ""):
                  self.audio_last_error = None
-            return output_path # Return the path of the successfully muxed file
+            return output_path
 
         except subprocess.TimeoutExpired:
-            logging.error(f"!!! ffmpeg muxing timed out ({config.AUDIO_MUX_TIMEOUT}s) for {output_path}.")
-            self.audio_last_error = "Mux Error: ffmpeg timed out"
+            mux_duration = time.monotonic() - mux_start_time
+            logging.error(f"!!! ffmpeg muxing (re-encode) timed out ({config.AUDIO_MUX_TIMEOUT * 3}s) for {output_path} after {mux_duration:.1f}s.")
+            self.audio_last_error = "Mux Error: ffmpeg re-encode timed out"
         except subprocess.CalledProcessError as e:
-            logging.error(f"!!! ffmpeg muxing failed for {output_path}. Return Code: {e.returncode}")
-            # Log stderr which usually contains the error details
+            mux_duration = time.monotonic() - mux_start_time
+            logging.error(f"!!! ffmpeg muxing (re-encode) failed for {output_path} after {mux_duration:.1f}s. Return Code: {e.returncode}")
             logging.error(f"ffmpeg stderr:\n{e.stderr}")
-            # Log stdout as well just in case
             logging.error(f"ffmpeg stdout:\n{e.stdout}")
-            self.audio_last_error = f"Mux Error: ffmpeg failed (code {e.returncode})"
+            self.audio_last_error = f"Mux Error: ffmpeg re-encode failed (code {e.returncode})"
         except Exception as e:
-            logging.error(f"!!! Unexpected error during ffmpeg execution: {e}", exc_info=True)
+            mux_duration = time.monotonic() - mux_start_time
+            logging.error(f"!!! Unexpected error during ffmpeg re-encode execution after {mux_duration:.1f}s: {e}", exc_info=True)
             self.audio_last_error = f"Mux Error: {e}"
 
         # --- Cleanup Failed Output ---
-        # If muxing failed, try to remove the partially created output file
         if os.path.exists(output_path):
              try:
                  logging.warning(f"Attempting to remove failed mux output file: {output_path}")
