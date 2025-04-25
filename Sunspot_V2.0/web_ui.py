@@ -6,12 +6,16 @@ Handles the Flask web server and user interface for the Pi Camera application.
 Provides routes for streaming, status updates, and control commands.
 Refactored for single-camera operation. Includes servo control UI.
 Replaced AWB dropdown with ISO control.
+
+**Modification:** Fixed AttributeError by using correct attribute name
+                  `current_resolution_index0` and config constant `CAM0_RESOLUTIONS`.
 """
 
 import logging
 import time
 import cv2
 import threading # Import threading for lock
+import numpy as np # Needed for dummy frame generation in test block
 from flask import Flask, Response, render_template_string, jsonify, request, url_for
 from libcamera import controls # Needed for control validation
 
@@ -37,8 +41,8 @@ _ui_lock = threading.Lock() # Lock for accessing shared _app_state variables
 
 # ===========================================================
 # === HTML Template ===
+# (Template unchanged from previous version)
 # ===========================================================
-# Keep the template as a large string for simplicity in this single file UI setup
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -754,7 +758,6 @@ def generate_stream_frames():
 
     if not _camera_manager:
         logging.error("Stream: CameraManager not initialized!")
-        # Yield a placeholder or error frame? For now, just exit.
         return
 
     while True:
@@ -764,22 +767,20 @@ def generate_stream_frames():
             logging.info("Stream generator: Shutdown detected, stopping.")
             break
 
-        # Get the latest frame from the camera manager (already handles single camera)
+        # Get the latest frame from the camera manager
         frame_to_encode = _camera_manager.get_latest_frame()
 
         if frame_to_encode is None:
-            # logging.debug("Stream generator: No frame available yet.")
             time.sleep(0.05) # Wait briefly if no frame
             continue
 
         try:
             # Encode the frame as JPEG
-            # Adjust JPEG quality (lower for less bandwidth, higher for better quality)
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
             (flag, encodedImage) = cv2.imencode(".jpg", frame_to_encode, encode_param)
             if not flag:
                 logging.warning("Stream generator: Could not encode frame to JPEG.")
-                time.sleep(0.1) # Wait a bit longer after encoding failure
+                time.sleep(0.1)
                 continue
 
             # Yield the frame in MJPEG format
@@ -789,35 +790,28 @@ def generate_stream_frames():
             frame_counter += 1
 
             # --- Rate limiting (Simple) ---
-            # Aim slightly faster than camera FPS to avoid falling behind,
-            # but also cap to prevent overwhelming client/network.
-            # This is approximate and depends on capture/encode speed.
             current_time = time.monotonic()
             elapsed = current_time - last_frame_time
-            # Get target FPS from config as a baseline, default to 30 if unavailable
-            try:
-                 _, _, target_fps = _camera_manager.get_resolution_config()
+            try: # Get target FPS for rate limiting
+                 _, _, target_fps = _camera_manager.get_cam0_resolution_config() # Use cam0 config
                  if target_fps <= 0: target_fps = 30.0
             except:
                  target_fps = 30.0
 
-            # Calculate delay, ensuring it's not excessively small or large
-            target_delay = 1.0 / (target_fps + 5) # Aim slightly faster than target
-            target_delay = max(0.01, min(target_delay, 0.1)) # Cap delay between 10ms and 100ms (10-100 FPS limit)
+            target_delay = 1.0 / (target_fps + 5) # Aim slightly faster
+            target_delay = max(0.01, min(target_delay, 0.1)) # Cap delay
 
-            sleep_time = max(0, target_delay - elapsed) # Ensure non-negative sleep
+            sleep_time = max(0, target_delay - elapsed)
             time.sleep(sleep_time)
             last_frame_time = time.monotonic()
 
 
         except GeneratorExit:
-            # Client disconnected
             logging.info(f"Streaming client disconnected after {frame_counter} frames.")
             break
         except Exception as e:
-            # Log other errors (e.g., encoding issues)
             logging.exception(f"!!! Error in MJPEG streaming generator: {e}")
-            time.sleep(0.5) # Pause briefly after an error
+            time.sleep(0.5)
 
     logging.info("Stream generator thread exiting.")
 
@@ -825,7 +819,6 @@ def generate_stream_frames():
 def build_options_html(available_options, current_selection):
     """Helper to build <option> tags for HTML select dropdowns."""
     options_html = ""
-    # Works for lists of strings or dict keys
     options_list = available_options if isinstance(available_options, list) else available_options.keys()
     for option_name in options_list:
         selected_attr = ' selected' if option_name == current_selection else ''
@@ -842,32 +835,27 @@ def index():
     global _camera_manager, _hardware_manager, _app_state
 
     if not _camera_manager or not _hardware_manager:
-         # Handle case where managers aren't initialized yet
          logging.error("Web UI: Managers not initialized when rendering index.")
          return "Error: Application not fully initialized.", 500
 
-    # Get initial state from managers and app state
+    # Get initial state
     cam_state = _camera_manager.get_camera_state()
-    hw_state = { # Get relevant hardware state
+    hw_state = {
         'battery_percent': _hardware_manager.battery_percentage,
         'last_error': _hardware_manager.last_error,
-        # Get initial servo angle (duty cycle) from hardware manager state
         'current_servo_duty_ns': getattr(_hardware_manager, 'current_servo_duty_ns', None)
     }
     with _ui_lock:
-        app_state_copy = _app_state.copy() # Get UI specific state
+        app_state_copy = _app_state.copy()
 
-    # Combine error messages (prioritize camera errors?)
     err_msg = cam_state.get('last_error') or hw_state.get('last_error') or cam_state.get('audio_last_error') or ""
 
-    # Get resolution from camera state (using refactored keys)
-    current_w, current_h = cam_state.get('resolution_wh', (640, 480)) # Default fallback
+    current_w, current_h = cam_state.get('resolution_wh', (640, 480))
     resolution_text = f"{current_w}x{current_h}"
     batt_perc_initial = hw_state.get('battery_percent')
     batt_text_initial = f"{batt_perc_initial:.1f}" if batt_perc_initial is not None else "--"
 
-    # Calculate initial servo angle from duty cycle for UI display
-    servo_angle_initial = config.SERVO_CENTER_ANGLE # Default
+    servo_angle_initial = config.SERVO_CENTER_ANGLE
     if config.SERVO_ENABLED and hw_state['current_servo_duty_ns'] is not None:
         try:
             duty_range = config.SERVO_MAX_DUTY_NS - config.SERVO_MIN_DUTY_NS
@@ -875,18 +863,15 @@ def index():
             if duty_range > 0 and angle_range > 0:
                  proportion = (hw_state['current_servo_duty_ns'] - config.SERVO_MIN_DUTY_NS) / duty_range
                  servo_angle_initial = int(round(config.SERVO_MIN_ANGLE + proportion * angle_range))
-                 servo_angle_initial = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, servo_angle_initial)) # Clamp
-            else:
-                 servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback if range is zero
+                 servo_angle_initial = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, servo_angle_initial))
+            else: servo_angle_initial = config.SERVO_CENTER_ANGLE
         except Exception as e:
             logging.warning(f"Could not calculate initial servo angle from duty cycle {hw_state['current_servo_duty_ns']}: {e}")
-            servo_angle_initial = config.SERVO_CENTER_ANGLE # Fallback
+            servo_angle_initial = config.SERVO_CENTER_ANGLE
 
-    # Build HTML option strings using config lists and current state from CameraManager
-    # Use refactored state keys and new ISO options
+    # Build HTML options
     current_iso_name_initial = cam_state.get('iso_mode', config.DEFAULT_ISO_NAME)
-    iso_options_html = build_options_html(config.AVAILABLE_ISO_SETTINGS, current_iso_name_initial) # Use ISO settings
-
+    iso_options_html = build_options_html(config.AVAILABLE_ISO_SETTINGS, current_iso_name_initial)
     ae_options_html = build_options_html(config.AVAILABLE_AE_MODES, cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME))
     metering_options_html = build_options_html(config.AVAILABLE_METERING_MODES, cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME))
     noise_reduction_options_html = build_options_html(config.AVAILABLE_NOISE_REDUCTION_MODES, cam_state.get('noise_reduction_mode', config.DEFAULT_NOISE_REDUCTION_MODE_NAME))
@@ -894,42 +879,29 @@ def index():
     # Render the template string
     return render_template_string(HTML_TEMPLATE,
         resolution_text=resolution_text,
-        current_w=current_w, # Pass dimensions for the img tag
-        current_h=current_h,
+        current_w=current_w, current_h=current_h,
         err_msg=err_msg,
         digital_rec_state_initial=app_state_copy.get('digital_recording_active', False),
         batt_text_initial=batt_text_initial,
         # Camera Controls
-        current_iso_name_initial=current_iso_name_initial, # Changed from AWB
-        iso_options_html=iso_options_html,                 # Changed from AWB
-        current_ae_mode_name_initial=cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME),
-        ae_options_html=ae_options_html,
-        current_metering_mode_name_initial=cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME),
-        metering_options_html=metering_options_html,
-        current_noise_reduction_mode_name_initial=cam_state.get('noise_reduction_mode', config.DEFAULT_NOISE_REDUCTION_MODE_NAME),
-        noise_reduction_options_html=noise_reduction_options_html,
-        brightness_initial=cam_state.get('brightness', config.DEFAULT_BRIGHTNESS),
-        MIN_BRIGHTNESS=config.MIN_BRIGHTNESS, MAX_BRIGHTNESS=config.MAX_BRIGHTNESS, STEP_BRIGHTNESS=config.STEP_BRIGHTNESS,
-        contrast_initial=cam_state.get('contrast', config.DEFAULT_CONTRAST),
-        MIN_CONTRAST=config.MIN_CONTRAST, MAX_CONTRAST=config.MAX_CONTRAST, STEP_CONTRAST=config.STEP_CONTRAST,
-        saturation_initial=cam_state.get('saturation', config.DEFAULT_SATURATION),
-        MIN_SATURATION=config.MIN_SATURATION, MAX_SATURATION=config.MAX_SATURATION, STEP_SATURATION=config.STEP_SATURATION,
-        sharpness_initial=cam_state.get('sharpness', config.DEFAULT_SHARPNESS),
-        MIN_SHARPNESS=config.MIN_SHARPNESS, MAX_SHARPNESS=config.MAX_SHARPNESS, STEP_SHARPNESS=config.STEP_SHARPNESS,
+        current_iso_name_initial=current_iso_name_initial, iso_options_html=iso_options_html,
+        current_ae_mode_name_initial=cam_state.get('ae_mode', config.DEFAULT_AE_MODE_NAME), ae_options_html=ae_options_html,
+        current_metering_mode_name_initial=cam_state.get('metering_mode', config.DEFAULT_METERING_MODE_NAME), metering_options_html=metering_options_html,
+        current_noise_reduction_mode_name_initial=cam_state.get('noise_reduction_mode', config.DEFAULT_NOISE_REDUCTION_MODE_NAME), noise_reduction_options_html=noise_reduction_options_html,
+        brightness_initial=cam_state.get('brightness', config.DEFAULT_BRIGHTNESS), MIN_BRIGHTNESS=config.MIN_BRIGHTNESS, MAX_BRIGHTNESS=config.MAX_BRIGHTNESS, STEP_BRIGHTNESS=config.STEP_BRIGHTNESS,
+        contrast_initial=cam_state.get('contrast', config.DEFAULT_CONTRAST), MIN_CONTRAST=config.MIN_CONTRAST, MAX_CONTRAST=config.MAX_CONTRAST, STEP_CONTRAST=config.STEP_CONTRAST,
+        saturation_initial=cam_state.get('saturation', config.DEFAULT_SATURATION), MIN_SATURATION=config.MIN_SATURATION, MAX_SATURATION=config.MAX_SATURATION, STEP_SATURATION=config.STEP_SATURATION,
+        sharpness_initial=cam_state.get('sharpness', config.DEFAULT_SHARPNESS), MIN_SHARPNESS=config.MIN_SHARPNESS, MAX_SHARPNESS=config.MAX_SHARPNESS, STEP_SHARPNESS=config.STEP_SHARPNESS,
         # Servo Controls
-        servo_enabled=config.SERVO_ENABLED,
-        servo_angle_initial=servo_angle_initial,
-        SERVO_MIN_ANGLE=config.SERVO_MIN_ANGLE,
-        SERVO_MAX_ANGLE=config.SERVO_MAX_ANGLE,
+        servo_enabled=config.SERVO_ENABLED, servo_angle_initial=servo_angle_initial, SERVO_MIN_ANGLE=config.SERVO_MIN_ANGLE, SERVO_MAX_ANGLE=config.SERVO_MAX_ANGLE,
         # Other
-        video_feed_url=url_for('video_feed') # Generate URL dynamically
+        video_feed_url=url_for('video_feed')
     )
 
 
 @app.route("/video_feed")
 def video_feed():
     """Route for the MJPEG video stream."""
-    # generate_stream_frames now handles the single camera stream
     return Response(generate_stream_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -942,44 +914,31 @@ def status():
     if not _camera_manager or not _hardware_manager:
         return jsonify({'error': 'Application not fully initialized.'}), 500
 
-    # Get current state from managers
     cam_state = _camera_manager.get_camera_state()
     batt_perc = _hardware_manager.battery_percentage
     current_servo_duty = getattr(_hardware_manager, 'current_servo_duty_ns', None)
 
-    # Combine error messages
-    err_msg = cam_state.get('last_error') or _hardware_manager.last_error or cam_state.get('audio_last_error') or "" # Include audio error
+    err_msg = cam_state.get('last_error') or _hardware_manager.last_error or cam_state.get('audio_last_error') or ""
 
-    # Auto-clear certain errors if conditions are met (e.g., frames are flowing)
-    latest_frame = _camera_manager.get_latest_frame() # Check if frames are coming
+    # Auto-clear errors
+    latest_frame = _camera_manager.get_latest_frame()
     if latest_frame is not None and err_msg and ("Init Error" in err_msg or "unavailable" in err_msg or "capture" in err_msg or "Capture Error" in err_msg):
-         logging.info("Status: Auto-clearing previous camera/capture error as frames are being received.")
          if _camera_manager.last_error == err_msg: _camera_manager.last_error = None
          if _hardware_manager.last_error == err_msg: _hardware_manager.last_error = None
-         err_msg = "" # Clear for current response
+         err_msg = ""
     if batt_perc is not None and err_msg and ("Battery Monitor" in err_msg or "INA219" in err_msg or "I2C Error" in err_msg):
-         logging.info("Status: Auto-clearing previous battery monitor error as a reading was successful.")
          if _hardware_manager.last_error == err_msg: _hardware_manager.last_error = None
-         # Camera manager shouldn't have battery errors, but check just in case
          if _camera_manager.last_error == err_msg: _camera_manager.last_error = None
          err_msg = ""
 
-    # Build status text
     status_text = "Streaming"
     if cam_state.get('is_recording'):
         rec_count = len(cam_state.get('recording_paths', []))
-        if rec_count > 0:
-            status_text += f" (Recording to {rec_count} USB(s))"
-        else:
-             # This indicates an inconsistent state
-             status_text += " (ERROR: Recording active but no paths!)"
-             if not err_msg: err_msg = "Inconsistent State: Recording active but no paths."
+        status_text += f" (Recording to {rec_count} USB(s))" if rec_count > 0 else " (ERROR: Recording active but no paths!)"
+        if rec_count == 0 and not err_msg: err_msg = "Inconsistent State: Recording active but no paths."
 
-    # Get UI-specific state under lock
-    with _ui_lock:
-        digital_rec_active = _app_state.get("digital_recording_active", False)
+    with _ui_lock: digital_rec_active = _app_state.get("digital_recording_active", False)
 
-    # Calculate current servo angle from duty cycle for status
     current_servo_angle = None
     if config.SERVO_ENABLED and current_servo_duty is not None:
          try:
@@ -988,29 +947,20 @@ def status():
              if duty_range > 0 and angle_range > 0:
                   proportion = (current_servo_duty - config.SERVO_MIN_DUTY_NS) / duty_range
                   current_servo_angle = int(round(config.SERVO_MIN_ANGLE + proportion * angle_range))
-                  current_servo_angle = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, current_servo_angle)) # Clamp
-         except Exception: pass # Ignore calculation errors for status
+                  current_servo_angle = max(config.SERVO_MIN_ANGLE, min(config.SERVO_MAX_ANGLE, current_servo_angle))
+         except Exception: pass
 
-    # Return combined status using refactored state keys
     status_data = {
         'is_recording': cam_state.get('is_recording', False),
         'digital_recording_active': digital_rec_active,
-        # Use resolution_wh tuple directly
         'resolution': f"{cam_state.get('resolution_wh', ['?','?'])[0]}x{cam_state.get('resolution_wh', ['?','?'])[1]}",
-        'status_text': status_text,
-        'error': err_msg,
+        'status_text': status_text, 'error': err_msg,
         'active_recordings': cam_state.get('recording_paths', []),
         'battery_percent': batt_perc,
-        # Camera controls
-        'iso_mode': cam_state.get('iso_mode'), # Changed from awb_mode
-        'ae_mode': cam_state.get('ae_mode'),
-        'metering_mode': cam_state.get('metering_mode'),
-        'noise_reduction_mode': cam_state.get('noise_reduction_mode'),
-        'brightness': cam_state.get('brightness'),
-        'contrast': cam_state.get('contrast'),
-        'saturation': cam_state.get('saturation'),
-        'sharpness': cam_state.get('sharpness'),
-        # Servo status
+        'iso_mode': cam_state.get('iso_mode'), 'ae_mode': cam_state.get('ae_mode'),
+        'metering_mode': cam_state.get('metering_mode'), 'noise_reduction_mode': cam_state.get('noise_reduction_mode'),
+        'brightness': cam_state.get('brightness'), 'contrast': cam_state.get('contrast'),
+        'saturation': cam_state.get('saturation'), 'sharpness': cam_state.get('sharpness'),
         'servo_angle': current_servo_angle,
     }
     return jsonify(status_data)
@@ -1025,11 +975,10 @@ def set_resolution(direction):
 
     with _ui_lock: # Lock access to the request index
         if _app_state.get("reconfigure_resolution_index") is not None:
-            # Prevent concurrent requests
             return jsonify({'success': False, 'message': 'Reconfiguration already in progress.'}), 429
 
-        # Use refactored attribute name
-        current_index = _camera_manager.current_resolution_index
+        # --- FIX: Use correct attribute name ---
+        current_index = _camera_manager.current_resolution_index0
         original_index = current_index
         new_index = current_index
 
@@ -1038,30 +987,28 @@ def set_resolution(direction):
         else:
             return jsonify({'success': False, 'message': 'Invalid direction specified.'}), 400
 
-        # Clamp index within valid range using refactored config constant
-        new_index = max(0, min(len(config.CAMERA_RESOLUTIONS) - 1, new_index))
+        # --- FIX: Use correct config constant name ---
+        num_resolutions = len(config.CAM0_RESOLUTIONS)
+        new_index = max(0, min(num_resolutions - 1, new_index))
 
         if new_index == original_index:
-            # Already at the limit
             msg = 'Already at highest resolution.' if direction == 'up' else 'Already at lowest resolution.'
             return jsonify({'success': False, 'message': msg}), 400
 
         # Store the requested index for the main loop to pick up
         _app_state["reconfigure_resolution_index"] = new_index
-        # Get new resolution details using refactored config constant
-        new_w, new_h, _ = config.CAMERA_RESOLUTIONS[new_index]
+        # --- FIX: Use correct config constant name ---
+        new_w, new_h, _ = config.CAM0_RESOLUTIONS[new_index]
         logging.info(f"Web request: Queue resolution change index {original_index} -> {new_index} ({new_w}x{new_h})")
-        # Clear camera manager's last error on successful request queuing
-        _camera_manager.last_error = None
+        _camera_manager.last_error = None # Clear error on successful queueing
 
-        # Return success and the new resolution string for the UI
         return jsonify({'success': True, 'message': 'Resolution change requested.', 'new_resolution': f"{new_w}x{new_h}"})
 
 
 @app.route('/toggle_recording', methods=['POST'])
 def toggle_recording():
     """Toggles the digital recording trigger state."""
-    global _app_state
+    global _app_state, _camera_manager, _hardware_manager # Added managers for error clearing
     new_state = False
     with _ui_lock:
         current_state = _app_state.get("digital_recording_active", False)
@@ -1070,13 +1017,13 @@ def toggle_recording():
         logging.info(f"Digital recording trigger toggled via web UI to: {'ON' if new_state else 'OFF'}")
         # Clear potential previous recording errors when user interacts
         if _camera_manager:
-            if _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writers" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error or "Mux" in _camera_manager.last_error):
+            if _camera_manager.last_error and ("Recording" in _camera_manager.last_error or "writer" in _camera_manager.last_error or "USB" in _camera_manager.last_error or "sync" in _camera_manager.last_error or "Mux" in _camera_manager.last_error):
                 logging.info(f"Clearing previous video/muxing error via toggle: '{_camera_manager.last_error}'")
                 _camera_manager.last_error = None
-            if _camera_manager.audio_last_error: # Clear audio errors too
+            if _camera_manager.audio_last_error:
                  logging.info(f"Clearing previous audio error via toggle: '{_camera_manager.audio_last_error}'")
                  _camera_manager.audio_last_error = None
-        if _hardware_manager and _hardware_manager.last_error and ("Recording" in _hardware_manager.last_error): # Less likely
+        if _hardware_manager and _hardware_manager.last_error and ("Recording" in _hardware_manager.last_error):
              _hardware_manager.last_error = None
 
     return jsonify({'success': True, 'digital_recording_active': new_state})
@@ -1088,46 +1035,36 @@ def set_camera_control():
     global _camera_manager
 
     if not _camera_manager: return jsonify({'success': False, 'message': 'Camera manager not ready.'}), 500
-    # Use refactored attribute
-    if not _camera_manager.is_initialized: return jsonify({'success': False, 'message': 'Camera not initialized.'}), 503
+    # --- FIX: Check correct attribute ---
+    if not _camera_manager.is_initialized0: return jsonify({'success': False, 'message': 'Camera 0 not initialized.'}), 503
 
-    control_name = None # Initialize for error logging
+    control_name = None
     try:
         data = request.get_json()
         if not data or 'control' not in data or 'value' not in data:
             logging.warning("/set_camera_control called without 'control' or 'value'.")
             return jsonify({'success': False, 'message': 'Missing control or value in request.'}), 400
 
-        control_name = data['control'] # This might be 'ISOSetting', 'AeExposureMode', etc.
-        control_value = data['value'] # For ISO, this will be the name ("Auto", "100", etc.)
+        control_name = data['control']
+        control_value = data['value']
         logging.info(f"Web request: Set control '{control_name}' to '{control_value}'")
 
         control_dict_to_set = {}
         parsed_value = None
         validation_error = None
+        iso_name = None # Store original ISO name if applicable
 
         # --- Validate and Parse Value ---
-
-        # Handle ISO Setting request from UI
         if control_name == 'ISOSetting':
             iso_name = control_value
             analogue_gain = config.AVAILABLE_ISO_SETTINGS.get(iso_name)
             if analogue_gain is not None:
-                parsed_value = analogue_gain # The value to set for AnalogueGain control
+                parsed_value = analogue_gain
                 control_dict_to_set["AnalogueGain"] = parsed_value
-                # If setting to Auto ISO (gain 0.0), ensure AE is enabled.
-                # If setting specific ISO (gain > 0.0), AE usually remains enabled in libcamera
-                # unless you also want to set manual exposure time.
-                if analogue_gain == 0.0:
-                     control_dict_to_set["AeEnable"] = True
-                     logging.info("Setting ISO to Auto, ensuring AeEnable=True")
-                # We are replacing the control_name here for the camera manager call
-                control_name = 'AnalogueGain'
-            else:
-                validation_error = f"Invalid ISOSetting value: {iso_name}"
-
-        # Handle other Mode Controls (convert string name to enum member)
-        elif control_name == 'AwbMode': # Keep handling AWB if needed elsewhere, though not primary UI
+                if analogue_gain == 0.0: control_dict_to_set["AeEnable"] = True
+                control_name = 'AnalogueGain' # Change name for apply_camera_controls
+            else: validation_error = f"Invalid ISOSetting value: {iso_name}"
+        elif control_name == 'AwbMode':
             enum_val = controls.AwbModeEnum.__members__.get(control_value)
             if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AwbEnable"] = True
             else: validation_error = f"Invalid AwbMode value: {control_value}"
@@ -1140,68 +1077,47 @@ def set_camera_control():
             if enum_val is not None: parsed_value = enum_val; control_dict_to_set["AeEnable"] = True
             else: validation_error = f"Invalid AeMeteringMode value: {control_value}"
         elif control_name == 'NoiseReductionMode':
-            try: # Handle potential absence of draft controls
+            try:
                 enum_val = controls.draft.NoiseReductionModeEnum.__members__.get(control_value)
                 if enum_val is not None: parsed_value = enum_val
                 else: validation_error = f"Invalid NoiseReductionMode value: {control_value}"
-            except AttributeError:
-                validation_error = "NoiseReductionMode control not available."
-
-        # Numeric Controls (convert to float and clamp)
+            except AttributeError: validation_error = "NoiseReductionMode control not available."
         elif control_name == 'Brightness':
-            try:
-                val = float(control_value)
-                parsed_value = max(config.MIN_BRIGHTNESS, min(config.MAX_BRIGHTNESS, val))
+            try: val = float(control_value); parsed_value = max(config.MIN_BRIGHTNESS, min(config.MAX_BRIGHTNESS, val))
             except ValueError: validation_error = "Invalid numeric value for Brightness"
         elif control_name == 'Contrast':
-            try:
-                val = float(control_value)
-                parsed_value = max(config.MIN_CONTRAST, min(config.MAX_CONTRAST, val))
+            try: val = float(control_value); parsed_value = max(config.MIN_CONTRAST, min(config.MAX_CONTRAST, val))
             except ValueError: validation_error = "Invalid numeric value for Contrast"
         elif control_name == 'Saturation':
-            try:
-                val = float(control_value)
-                parsed_value = max(config.MIN_SATURATION, min(config.MAX_SATURATION, val))
+            try: val = float(control_value); parsed_value = max(config.MIN_SATURATION, min(config.MAX_SATURATION, val))
             except ValueError: validation_error = "Invalid numeric value for Saturation"
         elif control_name == 'Sharpness':
-            try:
-                val = float(control_value)
-                parsed_value = max(config.MIN_SHARPNESS, min(config.MAX_SHARPNESS, val))
+            try: val = float(control_value); parsed_value = max(config.MIN_SHARPNESS, min(config.MAX_SHARPNESS, val))
             except ValueError: validation_error = "Invalid numeric value for Sharpness"
         else:
-            # Only raise error if it wasn't handled by ISOSetting logic above
-            if 'AnalogueGain' not in control_dict_to_set:
-                 validation_error = f"Unknown control name: {control_name}"
+            if 'AnalogueGain' not in control_dict_to_set: validation_error = f"Unknown control name: {control_name}"
 
-        # --- Handle Validation Result ---
         if validation_error:
             logging.error(f"Control validation failed for '{control_name}'='{control_value}': {validation_error}")
             return jsonify({'success': False, 'message': validation_error}), 400
 
-        # --- Apply Control ---
-        # Add the parsed value for non-ISO controls
         if parsed_value is not None and control_name not in control_dict_to_set:
              control_dict_to_set[control_name] = parsed_value
 
         if not control_dict_to_set:
-             logging.error(f"Internal error: Control dictionary is empty for request {control_name}={control_value}")
+             logging.error(f"Internal error: Control dictionary empty for request {control_name}={control_value}")
              return jsonify({'success': False, 'message': 'Internal processing error.'}), 500
 
-        # Call refactored method in camera manager
         if _camera_manager.apply_camera_controls(control_dict_to_set):
-             # Value applied successfully by camera manager
-             # Log the original request name/value for clarity if it was ISO
-             log_key = 'ISOSetting' if 'AnalogueGain' in control_dict_to_set else control_name
-             log_val = iso_name if log_key == 'ISOSetting' else control_value
+             log_key = 'ISOSetting' if iso_name else control_name
+             log_val = iso_name if iso_name else control_value
              logging.info(f"Successfully applied control request: {log_key}={log_val}")
              return jsonify({'success': True, 'message': f'{log_key} set.'})
         else:
-             # apply_camera_controls failed, error should be in manager's last_error
              error_msg = _camera_manager.last_error or f"Failed to apply {control_name}"
              return jsonify({'success': False, 'message': error_msg}), 500
 
     except Exception as e:
-        # Catch-all for unexpected errors during request processing
         logging.error(f"Error processing set_camera_control '{control_name}': {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
 
@@ -1211,12 +1127,10 @@ def set_servo_angle_route():
     """Sets the servo angle via the hardware manager."""
     global _hardware_manager
 
-    if not config.SERVO_ENABLED:
-        return jsonify({'success': False, 'message': 'Servo control is disabled in config.'}), 403 # Forbidden
-    if not _hardware_manager:
-        return jsonify({'success': False, 'message': 'Hardware manager not ready.'}), 500
+    if not config.SERVO_ENABLED: return jsonify({'success': False, 'message': 'Servo control is disabled in config.'}), 403
+    if not _hardware_manager: return jsonify({'success': False, 'message': 'Hardware manager not ready.'}), 500
 
-    target_angle = None # Initialize for error logging
+    target_angle = None
     try:
         data = request.get_json()
         if not data or 'angle' not in data:
@@ -1226,24 +1140,16 @@ def set_servo_angle_route():
         target_angle = data['angle']
         logging.info(f"Web request: Set servo angle to '{target_angle}'")
 
-        # Validate angle (basic numeric check, hardware manager clamps further)
-        try:
-            angle_float = float(target_angle)
+        try: angle_float = float(target_angle)
         except ValueError:
              logging.error(f"Invalid servo angle value received: {target_angle}")
              return jsonify({'success': False, 'message': 'Invalid angle value.'}), 400
 
-        # Call the hardware manager method
-        # Note: This call might block if smooth movement is enabled
         _hardware_manager.set_servo(angle_float)
-
-        # Assume success if no exception from set_servo (it logs errors internally)
-        # A more robust implementation might have set_servo return True/False
         logging.info(f"Servo angle set to {angle_float} degrees.")
         return jsonify({'success': True, 'message': 'Servo angle set.'})
 
     except Exception as e:
-        # Catch-all for unexpected errors
         logging.error(f"Error processing set_servo_angle '{target_angle}': {e}", exc_info=True)
         return jsonify({'success': False, 'message': f'Unexpected server error: {e}'}), 500
 
@@ -1251,20 +1157,17 @@ def set_servo_angle_route():
 @app.route('/power_down', methods=['POST'])
 def power_down():
     """Signals the main application to initiate shutdown and reboot."""
-    global _app_state
+    global _app_state, _camera_manager, _hardware_manager # Added managers
     logging.warning("Received request for power down via web UI. Setting flags.")
 
     with _ui_lock:
         _app_state["reboot_requested"] = True
-        # Set the shutdown event if it exists
         shutdown_event = _app_state.get("shutdown_event")
-        if shutdown_event:
-            shutdown_event.set() # Signal main loop to stop
+        if shutdown_event: shutdown_event.set()
         else:
             logging.error("Power down requested, but shutdown_event not set in app_state!")
             return jsonify({'success': False, 'message': 'Internal server error: Shutdown event not configured.'}), 500
 
-    # Update manager errors to reflect shutdown trigger
     if _camera_manager: _camera_manager.last_error = "Shutdown initiated via web UI..."
     if _hardware_manager: _hardware_manager.last_error = "Shutdown initiated via web UI..."
 
@@ -1277,116 +1180,29 @@ def power_down():
 def setup_web_app(camera_manager, hardware_manager, shutdown_event_ref):
     """
     Sets up the Flask application context with manager instances and shared event.
-
-    Args:
-        camera_manager (CameraManager): Instance of the camera manager.
-        hardware_manager (HardwareManager): Instance of the hardware manager.
-        shutdown_event_ref (threading.Event): Reference to the main shutdown event.
     """
     global _camera_manager, _hardware_manager, _app_state
     _camera_manager = camera_manager
     _hardware_manager = hardware_manager
     with _ui_lock:
         _app_state["shutdown_event"] = shutdown_event_ref
-        # Reset other UI state flags on setup
         _app_state["digital_recording_active"] = False
         _app_state["reconfigure_resolution_index"] = None
         _app_state["reboot_requested"] = False
-
     logging.info("Web application context configured with manager instances.")
 
 
 def run_web_server():
     """Runs the Flask web server."""
     logging.info(f"Starting Flask web server on 0.0.0.0:{config.WEB_PORT}...")
-    # Use 'threaded=True' for handling multiple clients (stream + status requests)
-    # 'debug=False' and 'use_reloader=False' are important for stability when run as a service
     try:
-        # Use waitress or gunicorn in production for better performance/stability
-        # For simplicity here, using Flask's built-in server
         app.run(host='0.0.0.0', port=config.WEB_PORT, debug=False, use_reloader=False, threaded=True)
     except Exception as e:
         logging.exception(f"!!! Flask web server failed: {e}")
-        # Signal shutdown if Flask fails catastrophically
         with _ui_lock:
             shutdown_event = _app_state.get("shutdown_event")
             if shutdown_event and not shutdown_event.is_set():
                 logging.error("Signaling main thread shutdown due to Flask error.")
                 shutdown_event.set()
 
-# Example Usage (for testing purposes - requires dummy managers)
-if __name__ == "__main__":
-    # --- Create Dummy Managers for testing ---
-    class DummyManager:
-        def __init__(self):
-            self.last_error = None
-            self.audio_last_error = None
-            self.current_resolution_index = config.DEFAULT_RESOLUTION_INDEX
-            self.is_initialized = True
-            self.iso_mode = config.DEFAULT_ISO_NAME # Add dummy iso mode
-        def get_latest_frame(self):
-            # Create a simple placeholder frame
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(img,'No Frame',(50,240),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
-            return img
-        def get_resolution_config(self):
-             return config.CAMERA_RESOLUTIONS[self.current_resolution_index]
-        def get_camera_state(self):
-             w, h, fps = self.get_resolution_config()
-             return {
-                 'is_initialized': self.is_initialized,
-                 'resolution_index': self.current_resolution_index,
-                 'resolution_wh': (w, h),
-                 'output_frame_wh': (w, h),
-                 'target_fps': fps,
-                 'actual_fps': fps,
-                 'measured_fps': fps,
-                 'is_recording': False,
-                 'recording_paths': [],
-                 'last_error': self.last_error,
-                 'audio_last_error': self.audio_last_error,
-                 'iso_mode': self.iso_mode, # Use dummy iso mode
-                 'ae_mode': config.DEFAULT_AE_MODE_NAME,
-                 'metering_mode': config.DEFAULT_METERING_MODE_NAME,
-                 'noise_reduction_mode': config.DEFAULT_NOISE_REDUCTION_MODE_NAME,
-                 'brightness': config.DEFAULT_BRIGHTNESS,
-                 'contrast': config.DEFAULT_CONTRAST,
-                 'saturation': config.DEFAULT_SATURATION,
-                 'sharpness': config.DEFAULT_SHARPNESS,
-                 'analogue_gain': config.DEFAULT_ANALOGUE_GAIN,
-             }
-        def apply_camera_controls(self, d):
-            print(f"DummyCam: Apply controls {d}")
-            if 'AnalogueGain' in d:
-                 gain_val = d['AnalogueGain']
-                 found_name = "Unknown"
-                 for name, gain in config.AVAILABLE_ISO_SETTINGS.items():
-                      if abs(gain - gain_val) < 0.01:
-                           found_name = name
-                           break
-                 self.iso_mode = found_name
-                 print(f"DummyCam: Updated iso_mode to {self.iso_mode}")
-            return True
-        def initialize_camera(self, idx=None):
-             print(f"DummyCam: Init camera {idx if idx is not None else self.current_resolution_index}")
-             if idx is not None: self.current_resolution_index = idx
-             return True
-
-    class DummyHWManager:
-         battery_percentage = 75.3
-         last_error = None
-         current_servo_duty_ns = 1500000 # Example center duty
-         def set_servo(self, angle): print(f"DummyHW: Set servo to {angle}")
-
-    # --- Setup Logging ---
-    logging.basicConfig(level=config.LOG_LEVEL, format=config.LOG_FORMAT, datefmt=config.LOG_DATE_FORMAT)
-    logging.getLogger("werkzeug").setLevel(logging.WARNING) # Quieten Flask's default logging
-
-    # --- Setup and Run ---
-    print("--- Web UI Test (ISO Control UI) ---")
-    print(f"--- Running on http://0.0.0.0:{config.WEB_PORT} ---")
-    dummy_shutdown = threading.Event()
-    setup_web_app(DummyManager(), DummyHWManager(), dummy_shutdown)
-    run_web_server() # This will block until Ctrl+C
-    print("--- Web UI Test Complete ---")
 
