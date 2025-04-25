@@ -11,6 +11,8 @@ and audio recording/muxing.
                   Uses frame duplication if capture lags behind target FPS.
 **Modification 2:** Removed the '-r' (frame rate hint) flag from the ffmpeg muxing
                     command to let ffmpeg infer the rate, potentially improving A/V sync.
+**Modification 3:** Calculate the actual average measured FPS during recording and use
+                    that as the '-r' hint for ffmpeg muxing. Track timestamps during capture.
 """
 
 import os
@@ -91,6 +93,8 @@ class CameraManager:
         self.recording_thread = None # Dedicated thread for writing video frames
         self.stop_recording_event = threading.Event() # Event to signal recording thread to stop
         self.recording_start_time_monotonic = None # Track recording start time precisely
+        self.recording_frame_timestamps = [] # List to store capture timestamps during recording
+        self.recording_actual_frame_count = 0 # Count actual frames captured during recording
 
         # Locks for thread safety
         self.frame_lock = threading.Lock() # Protects access to output_frame
@@ -580,6 +584,10 @@ class CameraManager:
                 )
                 self.recording_thread.daemon = True # Allow exit if main thread exits
 
+                # --- Reset Frame Timestamp Tracking ---
+                self.recording_frame_timestamps = []
+                self.recording_actual_frame_count = 0
+
                 self.is_recording = True # Set flag before starting thread
                 self.recording_start_time_monotonic = time.monotonic()
                 self.recording_thread.start()
@@ -643,10 +651,11 @@ class CameraManager:
             try:
                 # --- Get Frame from Queue (Non-blocking) ---
                 try:
-                    frame = self.recording_frame_queue.get_nowait()
-                    if frame is not None: # Check if it's the sentinel potentially
-                         last_valid_frame = frame # Store the latest good frame
-                         frame_to_write = frame
+                    # Frame tuple now includes (frame_data, timestamp)
+                    frame_data, timestamp = self.recording_frame_queue.get_nowait()
+                    if frame_data is not None: # Check if it's the sentinel potentially
+                         last_valid_frame = frame_data # Store the latest good frame
+                         frame_to_write = frame_data
                          frame_source = "Queue"
                          frame_count += 1
                     # Handle sentinel if we decide to use one later
@@ -733,7 +742,7 @@ class CameraManager:
         audio_file_to_mux = None
         final_output_paths = []
         released_count = 0
-        target_fps_used_for_recording = self.recording_target_fps # Get FPS used for this session
+        measured_avg_fps = None # Calculated average FPS for this recording
 
         with self.recording_lock:
             if not self.is_recording:
@@ -754,12 +763,37 @@ class CameraManager:
                     self._stop_audio_recording() # Stop audio separately
                 self.recording_target_fps = None
                 self.recording_frame_queue = None
+                self.recording_frame_timestamps = [] # Clear timestamps too
+                self.recording_actual_frame_count = 0
                 return
 
             logging.info("Stopping recording (Video Thread and Audio)...")
             self.is_recording = False # Set flag early
-            recording_duration = (time.monotonic() - self.recording_start_time_monotonic) if self.recording_start_time_monotonic else None
+            recording_stop_time_monotonic = time.monotonic()
+            recording_duration = (recording_stop_time_monotonic - self.recording_start_time_monotonic) if self.recording_start_time_monotonic else None
+            start_time_rec = self.recording_start_time_monotonic
             self.recording_start_time_monotonic = None
+
+            # --- Calculate Average Measured FPS ---
+            # Use the recorded timestamps list
+            if recording_duration and recording_duration > 0 and self.recording_actual_frame_count > 1:
+                # More accurate: use time between first and last timestamp
+                if len(self.recording_frame_timestamps) >= 2:
+                     actual_capture_duration = self.recording_frame_timestamps[-1] - self.recording_frame_timestamps[0]
+                     if actual_capture_duration > 0:
+                          measured_avg_fps = (self.recording_actual_frame_count - 1) / actual_capture_duration
+                          logging.info(f"Calculated average measured FPS based on {self.recording_actual_frame_count} timestamps over {actual_capture_duration:.2f}s: {measured_avg_fps:.2f} fps")
+                     else:
+                          logging.warning("Cannot calculate average FPS: Timestamp duration is zero.")
+                else:
+                     logging.warning(f"Cannot calculate average FPS: Only {len(self.recording_frame_timestamps)} timestamps recorded.")
+            elif recording_duration and self.recording_actual_frame_count > 0:
+                 # Fallback: use total duration (less accurate)
+                 measured_avg_fps = self.recording_actual_frame_count / recording_duration
+                 logging.warning(f"Calculating average measured FPS based on total duration ({recording_duration:.2f}s) and {self.recording_actual_frame_count} frames: {measured_avg_fps:.2f} fps (less accurate)")
+            else:
+                logging.warning(f"Cannot calculate average measured FPS (Duration: {recording_duration}, Frames: {self.recording_actual_frame_count}). Will use target FPS for muxing if needed.")
+                measured_avg_fps = self.recording_target_fps # Fallback to target
 
             # --- Signal and Wait for Recording Thread ---
             if self.recording_thread and self.recording_thread.is_alive():
@@ -783,6 +817,8 @@ class CameraManager:
 
             self.recording_thread = None
             self.recording_frame_queue = None # Clear queue reference
+            self.recording_frame_timestamps = [] # Clear timestamps
+            self.recording_actual_frame_count = 0 # Reset frame count
 
             # --- Get Lists for Cleanup (Still under lock) ---
             writers_to_release = list(self.video_writers)
@@ -812,8 +848,8 @@ class CameraManager:
 
                 # --- Muxing ---
                 if audio_file_to_mux and os.path.exists(video_path):
-                    # Pass the TARGET FPS used for this recording session
-                    final_path = self._mux_audio_video(video_path, audio_file_to_mux, target_fps_used_for_recording)
+                    # Pass the CALCULATED AVERAGE FPS used for this recording session
+                    final_path = self._mux_audio_video(video_path, audio_file_to_mux, measured_avg_fps)
                     if final_path:
                         final_output_paths.append(final_path)
                         if final_path != video_path:
@@ -871,24 +907,27 @@ class CameraManager:
     def capture_and_combine_frames(self):
         """
         Captures frames from enabled cameras, combines if necessary,
-        updates the stream frame, and puts Cam0 frame into the recording queue.
+        updates the stream frame, and puts Cam0 frame into the recording queue
+        along with its timestamp.
         """
         frame0 = None
         frame1 = None
         output_frame_for_stream = None
         capture_successful = False # Specifically for Cam0 capture
+        frame0_timestamp = None # Timestamp for the captured frame0
 
         # --- Capture Cam0 ---
         if self.is_initialized0 and self.picam0 and self.picam0.started:
             try:
                 capture_start_time = time.monotonic()
                 frame0 = self.picam0.capture_array("main")
-                capture_end_time = time.monotonic()
+                # Get timestamp immediately after capture
+                frame0_timestamp = time.monotonic()
                 capture_successful = True # Mark Cam0 capture as successful
 
-                # --- Calculate Measured FPS (Informational) ---
+                # --- Calculate Measured FPS (Informational - uses frame0_timestamp now) ---
                 if self.last_cam0_capture_time is not None:
-                    time_diff = capture_end_time - self.last_cam0_capture_time
+                    time_diff = frame0_timestamp - self.last_cam0_capture_time
                     if time_diff > 0.0001:
                         instant_fps = 1.0 / time_diff
                         if self.measured_cam0_fps_avg is None:
@@ -896,14 +935,8 @@ class CameraManager:
                         else:
                             alpha = 0.1 # Smoothing factor
                             self.measured_cam0_fps_avg = alpha * instant_fps + (1 - alpha) * self.measured_cam0_fps_avg
-
-                        # Log measured FPS periodically (optional)
-                        # if capture_start_time - getattr(self, '_last_fps_log_time', 0) > 5.0:
-                        #     avg_fps_str = f", Avg: {self.measured_cam0_fps_avg:.2f}" if self.measured_cam0_fps_avg is not None else ""
-                        #     logging.debug(f"Cam0 Capture Time Diff: {time_diff:.4f}s (Instant FPS: {instant_fps:.2f}{avg_fps_str})")
-                        #     self._last_fps_log_time = capture_start_time
                     # else: logging.warning(f"Cam0 capture time difference too small: {time_diff:.5f}s")
-                self.last_cam0_capture_time = capture_end_time
+                self.last_cam0_capture_time = frame0_timestamp # Store the timestamp of this capture
 
             except Exception as e0:
                 logging.error(f"!!! Error during Cam0 capture: {e0}")
@@ -912,6 +945,7 @@ class CameraManager:
                 self.last_cam0_capture_time = None
                 self.measured_cam0_fps_avg = None
                 frame0 = None # Ensure frame0 is None on error
+                frame0_timestamp = None
         # else: pass # Cam0 not ready
 
         # --- Capture Cam1 (only if enabled) ---
@@ -972,11 +1006,17 @@ class CameraManager:
 
         # --- Put Frame into Recording Queue (if recording and Cam0 captured) ---
         # Check is_recording flag *outside* recording_lock for speed, verify inside if needed
-        if self.is_recording and capture_successful and frame0 is not None:
+        if self.is_recording and capture_successful and frame0 is not None and frame0_timestamp is not None:
+            # --- Store Timestamp for Average FPS Calculation ---
+            # Do this under recording_lock to ensure consistency with is_recording flag check?
+            # Or assume it's safe enough if is_recording is true here? Let's assume safe for now.
+            self.recording_frame_timestamps.append(frame0_timestamp)
+            self.recording_actual_frame_count += 1
+
             if self.recording_frame_queue:
                 try:
-                    # Put the raw frame0 into the queue (non-blocking)
-                    self.recording_frame_queue.put_nowait(frame0)
+                    # Put the raw frame0 and its timestamp into the queue (non-blocking)
+                    self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
                 except queue.Full:
                     # This means the recording thread is falling behind writing frames
                     logging.warning("Recording frame queue is full. Dropping captured frame.")
@@ -1210,10 +1250,10 @@ class CameraManager:
              except OSError as e: logging.error(f"Error checking temp audio file size {temp_file_path_at_start}: {e}"); self.temp_audio_file_path = None; return None
         else: logging.error("Temporary audio file path not set or file does not exist after stop sequence."); self.temp_audio_file_path = None; return None
 
-    def _mux_audio_video(self, video_path, audio_path, recording_fps=None):
+    def _mux_audio_video(self, video_path, audio_path, average_fps=None):
         """
         Merges audio and video files using ffmpeg. Uses '-c:v copy'.
-        Lets ffmpeg infer the video frame rate (removed -r hint).
+        Uses the calculated average_fps (if available) to hint the input video rate.
         """
         if not config.AUDIO_ENABLED: return None
         if not os.path.exists(config.FFMPEG_PATH): logging.error(f"ffmpeg not found at '{config.FFMPEG_PATH}'. Cannot mux audio."); self.audio_last_error = "Mux Error: ffmpeg not found"; return None
@@ -1223,26 +1263,30 @@ class CameraManager:
 
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
-        logging.info(f"Muxing (copy video, infer rate) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
+        logging.info(f"Muxing (copy video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
-        # --- Removed -r hint ---
-        # command_base = [config.FFMPEG_PATH, "-y"]
-        # if recording_fps is not None and recording_fps > 0:
-        #     logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.4f} fps")
-        #     command_base.extend(["-r", f"{recording_fps:.4f}"]) # Use 4 decimal places for accuracy
-        # else: logging.warning("No valid recording FPS available to hint ffmpeg for muxing.")
+        command_base = [config.FFMPEG_PATH, "-y"] # Base command, -y to overwrite output
 
-        command = [config.FFMPEG_PATH, "-y", # Base command, -y to overwrite output
-                   "-i", video_path,         # Input video file
-                   "-i", audio_path,         # Input audio file
-                   "-c:v", "copy",           # Copy video stream without re-encoding
-                   "-c:a", "aac",            # Encode audio stream to AAC (common choice)
-                   "-map", "0:v:0",          # Map video stream from first input
-                   "-map", "1:a:0",          # Map audio stream from second input
-                   "-shortest",              # Finish encoding when the shortest input stream ends
-                   "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
-                   output_path               # Output file path
-                  ]
+        # --- Add -r hint using calculated average FPS if available ---
+        if average_fps is not None and average_fps > 0:
+            logging.info(f"Hinting input video frame rate to ffmpeg using calculated average: {average_fps:.4f} fps")
+            # Insert frame rate hint *before* the video input file
+            command_base.extend(["-r", f"{average_fps:.4f}"])
+        else:
+            logging.warning("No valid calculated average FPS available. Muxing without -r hint.")
+
+        command_inputs_outputs = [
+            "-i", video_path,         # Input video file (now after potential -r hint)
+            "-i", audio_path,         # Input audio file
+            "-c:v", "copy",           # Copy video stream without re-encoding
+            "-c:a", "aac",            # Encode audio stream to AAC (common choice)
+            "-map", "0:v:0",          # Map video stream from first input
+            "-map", "1:a:0",          # Map audio stream from second input
+            "-shortest",              # Finish encoding when the shortest input stream ends
+            "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
+            output_path               # Output file path
+        ]
+        command = command_base + command_inputs_outputs
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         mux_start_time = time.monotonic()
@@ -1322,6 +1366,8 @@ class CameraManager:
         self.last_cam0_capture_time = None
         self.measured_cam0_fps_avg = None
         self.recording_target_fps = None # Reset target FPS
+        self.recording_frame_timestamps = [] # Clear timestamps
+        self.recording_actual_frame_count = 0
         with self.frame_lock: self.output_frame = None
         logging.info("--- CameraManager Shutdown Complete ---")
 
