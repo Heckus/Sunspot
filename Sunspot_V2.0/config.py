@@ -5,7 +5,9 @@ config.py
 Configuration constants for the Pi Camera Stream & Record application.
 Handles settings for multiple cameras, hardware, and the web UI.
 
-**Modification:** Added missing SERVO_SMOOTH_MOVE configuration options.
+**Modification:** Changed CAM0_RECORDING_FORMAT to 'avc1' (H.264) to attempt
+                  better compression and potentially reduce USB write load.
+                  Added fallback note. Added missing SERVO_SMOOTH_MOVE options.
 """
 import os
 from libcamera import controls
@@ -73,13 +75,15 @@ else:
      print("Using default camera tuning for Cam0 (no tuning file specified).")
 
 # --- Cam0 Recording Configuration ---
-CAM0_RECORDING_FORMAT = "mp4v" # Codec for OpenCV VideoWriter
-CAM0_RECORDING_EXTENSION = ".mp4"
+# Try 'avc1' (H.264) for potentially better compression.
+# If this fails (VideoWriter doesn't open), common fallbacks are 'mp4v' (MPEG-4) or 'XVID' (for AVI).
+# Hardware acceleration with cv2.VideoWriter is unlikely without specific OpenCV builds.
+CAM0_RECORDING_FORMAT = "avc1"
+CAM0_RECORDING_EXTENSION = ".mp4" # Keep MP4 extension for H.264
 
 # ===========================================================
 # === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
 # ===========================================================
-# (Unchanged)
 CAM1_ID = 1
 CAM1_RESOLUTION = (640, 480)
 CAM1_FRAME_RATE = 30.0
@@ -100,14 +104,12 @@ else: print("Cam1 is disabled. Skipping Cam1 tuning file load.")
 # ===========================================================
 # === Combined Stream Configuration ===
 # ===========================================================
-# (Unchanged)
 STREAM_BORDER_SIZE = 5
 STREAM_BORDER_COLOR = (64, 64, 64)
 
 # ===========================================================
 # === Common Camera Control Defaults & Ranges ===
 # ===========================================================
-# (Unchanged)
 AVAILABLE_AWB_MODES = list(controls.AwbModeEnum.__members__.keys())
 DEFAULT_AWB_MODE_NAME = "Auto"
 if DEFAULT_AWB_MODE_NAME not in AVAILABLE_AWB_MODES: DEFAULT_AWB_MODE_NAME = AVAILABLE_AWB_MODES[0] if AVAILABLE_AWB_MODES else "Auto"
@@ -140,7 +142,6 @@ DEFAULT_SHARPNESS = 1.0; MIN_SHARPNESS = 0.0; MAX_SHARPNESS = 2.0; STEP_SHARPNES
 # ===========================================================
 # === Audio Configuration ===
 # ===========================================================
-# (Unchanged)
 AUDIO_ENABLED = True
 AUDIO_DEVICE_HINT = "USB"
 AUDIO_SAMPLE_RATE = 44100
@@ -177,7 +178,7 @@ SERVO_CENTER_ANGLE = 90
 SERVO_MIN_ANGLE = 0
 SERVO_MAX_ANGLE = 180
 
-# --- Servo Smooth Movement Settings --- ADDED THIS SECTION ---
+# --- Servo Smooth Movement Settings ---
 SERVO_SMOOTH_MOVE = True  # Enable/disable smooth movement
 SERVO_SMOOTH_MOVE_STEPS = 20  # Number of steps for interpolation
 SERVO_SMOOTH_MOVE_DELAY = 0.01 # Delay (seconds) between steps
