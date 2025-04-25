@@ -18,6 +18,9 @@ and audio recording/muxing.
 **Modification 5:** Changed ffmpeg muxing to re-encode video (`-c:v libx264`) instead
                     of copying (`-c:v copy`), aiming for better sync by allowing
                     ffmpeg to adjust frame timing relative to audio. Removed `-shortest`.
+**Modification 6:** Reverted ffmpeg muxing back to `-c:v copy` to reduce load and
+                    address potential I/O errors caused by re-encoding.
+                    Kept removal of `-shortest`.
 """
 
 import os
@@ -820,7 +823,7 @@ class CameraManager:
 
                 # --- Muxing ---
                 if audio_file_to_mux and os.path.exists(video_path):
-                    # Mux by re-encoding video
+                    # Mux using -c:v copy (reverted from re-encode)
                     final_path = self._mux_audio_video(video_path, audio_file_to_mux)
                     if final_path:
                         final_output_paths.append(final_path)
@@ -1222,7 +1225,7 @@ class CameraManager:
 
     def _mux_audio_video(self, video_path, audio_path):
         """
-        Merges audio and video files using ffmpeg. Re-encodes video using libx264.
+        Merges audio and video files using ffmpeg. Uses '-c:v copy'.
         Lets ffmpeg infer the video frame rate and sync to audio.
         """
         if not config.AUDIO_ENABLED: return None
@@ -1233,47 +1236,40 @@ class CameraManager:
 
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
-        logging.info(f"Muxing (re-encode video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
+        logging.info(f"Muxing (copy video, infer rate) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
-        # --- Command for re-encoding video ---
+        # --- Command using -c:v copy and no -r hint ---
         command = [config.FFMPEG_PATH, "-y",           # Base command, -y to overwrite output
                    "-i", video_path,                   # Input video file
                    "-i", audio_path,                   # Input audio file
-                   "-c:v", "libx264",                  # Re-encode video using H.264
-                   "-preset", "ultrafast",             # Fastest encoding preset (lower quality)
-                   "-crf", "23",                       # Constant Rate Factor (quality, 18-28 is typical)
+                   "-c:v", "copy",                     # Copy video stream without re-encoding
                    "-c:a", "aac",                      # Encode audio stream to AAC
                    "-map", "0:v:0",                    # Map video stream from first input
                    "-map", "1:a:0",                    # Map audio stream from second input
-                   # Removed "-shortest" to let audio dictate length primarily
+                   # Removed "-shortest" previously, keeping it removed
                    "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
                    output_path                         # Output file path
                   ]
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         mux_start_time = time.monotonic()
-        # Increase timeout slightly as re-encoding takes longer than copy
-        timeout = config.AUDIO_MUX_TIMEOUT * config.AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER
-        # Ensure multiplier is at least 1, maybe 2 or 3? Let's set it in config, default 1.
-        # If config.AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER is not set, default to 2
-        timeout_multiplier = getattr(config, 'AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER', 2)
-        timeout = config.AUDIO_MUX_TIMEOUT * timeout_multiplier
-        logging.info(f"Using mux timeout: {timeout}s (Multiplier: {timeout_multiplier})")
-
+        # Use base timeout for copy
+        timeout = config.AUDIO_MUX_TIMEOUT
+        logging.info(f"Using mux timeout: {timeout}s")
 
         try:
             process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=timeout)
             mux_duration = time.monotonic() - mux_start_time
-            logging.info(f"ffmpeg muxing (re-encode) successful for {output_path} in {mux_duration:.2f}s.")
+            logging.info(f"ffmpeg muxing (copy) successful for {output_path} in {mux_duration:.2f}s.")
             if logging.getLogger().isEnabledFor(logging.DEBUG): logging.debug(f"ffmpeg output:\n--- stdout ---\n{process.stdout}\n--- stderr ---\n{process.stderr}\n---")
             if "Mux Error" in (self.audio_last_error or ""): self.audio_last_error = None
             return output_path
         except subprocess.TimeoutExpired:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (re-encode) timed out ({timeout}s) for {output_path} after {mux_duration:.1f}s."); self.audio_last_error = "Mux Error: ffmpeg re-encode timed out"
+            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (copy) timed out ({timeout}s) for {output_path} after {mux_duration:.1f}s."); self.audio_last_error = "Mux Error: ffmpeg copy timed out"
         except subprocess.CalledProcessError as e:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (re-encode) failed for {output_path} after {mux_duration:.1f}s. Return Code: {e.returncode}"); logging.error(f"ffmpeg stderr:\n{e.stderr}"); logging.error(f"ffmpeg stdout:\n{e.stdout}"); self.audio_last_error = f"Mux Error: ffmpeg re-encode failed (code {e.returncode})"
+            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (copy) failed for {output_path} after {mux_duration:.1f}s. Return Code: {e.returncode}"); logging.error(f"ffmpeg stderr:\n{e.stderr}"); logging.error(f"ffmpeg stdout:\n{e.stdout}"); self.audio_last_error = f"Mux Error: ffmpeg copy failed (code {e.returncode})"
         except Exception as e:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! Unexpected error during ffmpeg re-encode execution after {mux_duration:.1f}s: {e}", exc_info=True); self.audio_last_error = f"Mux Error: {e}"
+            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! Unexpected error during ffmpeg copy execution after {mux_duration:.1f}s: {e}", exc_info=True); self.audio_last_error = f"Mux Error: {e}"
         if os.path.exists(output_path):
              try: logging.warning(f"Attempting to remove failed mux output file: {output_path}"); os.remove(output_path)
              except OSError as rm_err: logging.error(f"Could not remove failed mux output {output_path}: {rm_err}")
