@@ -13,6 +13,8 @@ and audio recording/muxing.
                     command to let ffmpeg infer the rate, potentially improving A/V sync.
 **Modification 3:** Calculate the actual average measured FPS during recording and use
                     that as the '-r' hint for ffmpeg muxing. Track timestamps during capture.
+**Modification 4:** Removed frame duplication in the recording thread. The thread now
+                    waits for actual frames. Removed '-r' hint from ffmpeg again.
 """
 
 import os
@@ -525,8 +527,9 @@ class CameraManager:
                      self.last_error = "Rec Param Error: Invalid Target FPS in config"
                      return False
 
-                self.recording_target_fps = target_fps # Store the target FPS
-                logging.info(f"Using TARGET FPS for VideoWriter: {self.recording_target_fps:.2f} fps")
+                # Store the target FPS (used for VideoWriter init and fallback)
+                self.recording_target_fps = target_fps
+                logging.info(f"Using TARGET FPS for VideoWriter initialization: {self.recording_target_fps:.2f} fps")
 
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
@@ -553,6 +556,7 @@ class CameraManager:
                     full_path = os.path.join(drive_path, video_only_filename)
 
                     # Initialize VideoWriter with the TARGET FPS
+                    # This sets the container metadata but doesn't force frame timing
                     writer = cv2.VideoWriter(full_path, fourcc, self.recording_target_fps, (width, height))
                     if not writer.isOpened():
                         raise IOError(f"Failed to open VideoWriter for path: {full_path}")
@@ -572,15 +576,15 @@ class CameraManager:
                 self.recording_paths = temp_paths
 
                 # --- Setup Recording Thread ---
-                # Calculate queue size (e.g., 2 seconds worth of frames)
-                queue_size = int(self.recording_target_fps * 2)
+                # Queue size can be smaller now as we don't buffer for duplication
+                queue_size = max(10, int(self.recording_target_fps)) # e.g., 1 sec buffer or 10 frames min
                 self.recording_frame_queue = queue.Queue(maxsize=queue_size)
                 self.stop_recording_event.clear()
 
                 self.recording_thread = threading.Thread(
                     target=self._recording_thread_loop,
-                    name="VideoWriteThread",
-                    args=(width, height) # Pass dimensions for potential black frame
+                    name="VideoWriteThread"
+                    # No need to pass width/height for black frame anymore
                 )
                 self.recording_thread.daemon = True # Allow exit if main thread exits
 
@@ -591,7 +595,7 @@ class CameraManager:
                 self.is_recording = True # Set flag before starting thread
                 self.recording_start_time_monotonic = time.monotonic()
                 self.recording_thread.start()
-                logging.info(f"Video recording thread started for {success_count} drive(s). Target FPS: {self.recording_target_fps:.2f}")
+                logging.info(f"Video recording thread started for {success_count} drive(s).")
 
                 # --- Start Audio ---
                 if config.AUDIO_ENABLED:
@@ -624,117 +628,86 @@ class CameraManager:
                     except: pass
                 return False
 
-    def _recording_thread_loop(self, frame_width, frame_height):
-        """Dedicated thread to write video frames at the target FPS."""
-        logging.info("Video recording thread loop starting.")
-        if not self.recording_target_fps or self.recording_target_fps <= 0:
-            logging.error("Recording thread: Invalid target FPS. Stopping.")
-            # Signal failure? For now, just exit thread.
-            return
+    def _recording_thread_loop(self):
+        """Dedicated thread to write actual captured video frames as they arrive."""
+        logging.info("Video recording thread loop starting (writing actual frames).")
 
-        frame_interval = 1.0 / self.recording_target_fps
-        last_valid_frame = None
-        frame_count = 0
         frames_written = 0
-        frames_duplicated = 0
-        frames_dropped_queue = 0 # Track frames dropped when queue was full on put
         last_log_time = time.monotonic()
-
-        # Create a black frame for duplication if needed at the very start
-        black_frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+        queue_timeouts = 0
+        max_timeouts_before_warn = 10 # Log a warning if queue is empty for ~5 seconds
 
         while not self.stop_recording_event.is_set():
-            loop_start_time = time.monotonic()
             frame_to_write = None
-            frame_source = "None" # For logging
+            timestamp = None
 
             try:
-                # --- Get Frame from Queue (Non-blocking) ---
+                # --- Get Frame from Queue (Blocking with Timeout) ---
                 try:
-                    # Frame tuple now includes (frame_data, timestamp)
-                    frame_data, timestamp = self.recording_frame_queue.get_nowait()
+                    # Wait up to 0.5 seconds for a frame
+                    frame_data, timestamp = self.recording_frame_queue.get(block=True, timeout=0.5)
                     if frame_data is not None: # Check if it's the sentinel potentially
-                         last_valid_frame = frame_data # Store the latest good frame
                          frame_to_write = frame_data
-                         frame_source = "Queue"
-                         frame_count += 1
-                    # Handle sentinel if we decide to use one later
-                    # elif frame is None:
-                    #    logging.info("Recording thread: Received sentinel. Exiting loop.")
-                    #    break
-
+                         queue_timeouts = 0 # Reset timeout counter on success
+                    elif frame_data is None: # Explicit sentinel check (if we implement one)
+                         logging.info("Recording thread: Received stop sentinel.")
+                         break
                 except queue.Empty:
-                    # Queue is empty - capture thread is lagging or finished
-                    if last_valid_frame is not None:
-                        # --- Duplicate Last Valid Frame ---
-                        frame_to_write = last_valid_frame
-                        frames_duplicated += 1
-                        frame_source = "Duplicated"
-                    else:
-                        # No valid frame received yet, write black frame
-                        frame_to_write = black_frame
-                        frames_duplicated += 1 # Count as duplicated
-                        frame_source = "Black (Initial)"
-
+                    # Timeout waiting for frame - capture thread might be slow or stopped
+                    queue_timeouts += 1
+                    if queue_timeouts >= max_timeouts_before_warn:
+                         logging.warning(f"Recording thread: Waited {queue_timeouts * 0.5:.1f}s for frame, queue empty. Capture thread lagging?")
+                         queue_timeouts = 0 # Reset after warning
+                    # Continue loop to check stop_recording_event
+                    continue
                 except Exception as q_err:
                      logging.error(f"Recording thread: Error getting frame from queue: {q_err}", exc_info=True)
-                     # Continue, might duplicate previous frame if available
+                     time.sleep(0.1) # Avoid busy-looping on queue errors
+                     continue
 
                 # --- Write Frame to All Writers ---
                 if frame_to_write is not None:
                     write_errors = 0
-                    writers_to_remove = [] # Keep track of writers that fail persistently
                     with self.recording_lock: # Access writers list under lock
-                        current_writers = list(self.video_writers) # Copy list for safe iteration
+                        current_writers = list(self.video_writers) # Copy list
+
+                    if not current_writers:
+                        logging.warning("Recording thread: No video writers available, but received frame. Stopping?")
+                        # This state shouldn't normally happen if stop_recording cleans up properly
+                        # self.stop_recording_event.set() # Consider stopping if writers disappear
+                        continue
 
                     for i, writer in enumerate(current_writers):
                         try:
                             writer.write(frame_to_write)
                         except Exception as e:
                             path_str = self.recording_paths[i] if i < len(self.recording_paths) else f"Writer {i}"
-                            logging.error(f"!!! Recording thread: Failed write frame {frames_written+1} ({frame_source}) to {path_str}: {e}")
+                            logging.error(f"!!! Recording thread: Failed write frame {frames_written+1} to {path_str}: {e}")
                             write_errors += 1
-                            # TODO: Implement logic to remove persistently failing writers?
-                            # writers_to_remove.append(writer) # Mark for removal
                             if "write error" not in (self.last_error or ""):
                                  self.last_error = f"Frame write error: {os.path.basename(path_str)}"
 
                     if write_errors == 0:
                         frames_written += 1
-                    elif write_errors == len(current_writers) and len(current_writers) > 0:
+                    elif write_errors == len(current_writers):
                         logging.error("!!! Recording thread: All video writers failed to write frame. Stopping recording.")
                         self.last_error = "Rec stopped: All writers failed."
-                        # Signal main thread or self-stop? For now, signal stop event.
                         self.stop_recording_event.set()
-                        break # Exit loop immediately
-
-                # --- Precise Timing ---
-                elapsed_time = time.monotonic() - loop_start_time
-                sleep_time = frame_interval - elapsed_time
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                # else: # Loop took longer than frame interval
-                #    logging.warning(f"Recording thread loop overrun: took {elapsed_time:.4f}s, target {frame_interval:.4f}s")
-
+                        break
 
                 # --- Periodic Logging ---
                 current_time = time.monotonic()
                 if current_time - last_log_time > 10.0: # Log stats every 10 seconds
                     qsize = self.recording_frame_queue.qsize() if self.recording_frame_queue else -1
-                    logging.info(f"Rec Thread Stats: Written={frames_written}, Duplicated={frames_duplicated}, Dropped(Q)={frames_dropped_queue}, QSize={qsize}")
+                    logging.info(f"Rec Thread Stats: Written={frames_written}, QSize={qsize}")
                     last_log_time = current_time
-                    # Reset transient counters after logging
-                    frames_dropped_queue = 0
-
 
             except Exception as loop_err:
                 logging.exception(f"!!! Unexpected error in recording thread loop: {loop_err}")
-                # Consider signaling stop on major errors
-                # self.stop_recording_event.set()
                 time.sleep(0.5) # Pause after error
 
         # --- Cleanup ---
-        logging.info(f"Video recording thread loop finished. Total frames written: {frames_written}, Duplicated: {frames_duplicated}.")
+        logging.info(f"Video recording thread loop finished. Total actual frames written: {frames_written}.")
         # Note: Releasing writers is handled in stop_recording after thread join
 
     def stop_recording(self):
@@ -742,7 +715,8 @@ class CameraManager:
         audio_file_to_mux = None
         final_output_paths = []
         released_count = 0
-        measured_avg_fps = None # Calculated average FPS for this recording
+        # We don't calculate average FPS here anymore for muxing hint
+        # target_fps_used_for_recording = self.recording_target_fps # Keep for logging maybe?
 
         with self.recording_lock:
             if not self.is_recording:
@@ -752,6 +726,10 @@ class CameraManager:
                     if self.recording_thread and self.recording_thread.is_alive():
                         logging.warning("Signaling potentially orphaned recording thread to stop.")
                         self.stop_recording_event.set()
+                        # Try putting sentinel in case it's blocked on get()
+                        if self.recording_frame_queue:
+                            try: self.recording_frame_queue.put_nowait((None, None))
+                            except queue.Full: pass
                         self.recording_thread.join(timeout=2.0) # Wait briefly
                         if self.recording_thread.is_alive(): logging.error("Orphaned recording thread did not exit!")
                         self.recording_thread = None
@@ -774,34 +752,25 @@ class CameraManager:
             start_time_rec = self.recording_start_time_monotonic
             self.recording_start_time_monotonic = None
 
-            # --- Calculate Average Measured FPS ---
-            # Use the recorded timestamps list
-            if recording_duration and recording_duration > 0 and self.recording_actual_frame_count > 1:
-                # More accurate: use time between first and last timestamp
-                if len(self.recording_frame_timestamps) >= 2:
-                     actual_capture_duration = self.recording_frame_timestamps[-1] - self.recording_frame_timestamps[0]
-                     if actual_capture_duration > 0:
-                          measured_avg_fps = (self.recording_actual_frame_count - 1) / actual_capture_duration
-                          logging.info(f"Calculated average measured FPS based on {self.recording_actual_frame_count} timestamps over {actual_capture_duration:.2f}s: {measured_avg_fps:.2f} fps")
-                     else:
-                          logging.warning("Cannot calculate average FPS: Timestamp duration is zero.")
-                else:
-                     logging.warning(f"Cannot calculate average FPS: Only {len(self.recording_frame_timestamps)} timestamps recorded.")
-            elif recording_duration and self.recording_actual_frame_count > 0:
-                 # Fallback: use total duration (less accurate)
-                 measured_avg_fps = self.recording_actual_frame_count / recording_duration
-                 logging.warning(f"Calculating average measured FPS based on total duration ({recording_duration:.2f}s) and {self.recording_actual_frame_count} frames: {measured_avg_fps:.2f} fps (less accurate)")
-            else:
-                logging.warning(f"Cannot calculate average measured FPS (Duration: {recording_duration}, Frames: {self.recording_actual_frame_count}). Will use target FPS for muxing if needed.")
-                measured_avg_fps = self.recording_target_fps # Fallback to target
+            # --- Log Actual Frame Count and Duration (for debugging) ---
+            if recording_duration and self.recording_actual_frame_count > 0:
+                 actual_avg_fps = self.recording_actual_frame_count / recording_duration
+                 logging.info(f"Recording duration: {recording_duration:.2f}s. Actual frames captured: {self.recording_actual_frame_count} (Avg: {actual_avg_fps:.2f} fps)")
+            elif self.recording_actual_frame_count > 0:
+                 logging.info(f"Actual frames captured: {self.recording_actual_frame_count} (duration unknown).")
 
             # --- Signal and Wait for Recording Thread ---
             if self.recording_thread and self.recording_thread.is_alive():
                 logging.info("Signaling video recording thread to stop...")
                 self.stop_recording_event.set()
-                # Optional: Put a sentinel in the queue if thread waits on get() with timeout
-                # try: self.recording_frame_queue.put_nowait(None)
-                # except queue.Full: pass
+                # Put sentinel in queue to unblock thread if waiting on get()
+                if self.recording_frame_queue:
+                    try:
+                        self.recording_frame_queue.put_nowait((None, None)) # Send sentinel
+                    except queue.Full:
+                        logging.warning("Could not put stop sentinel in full recording queue.")
+                    except Exception as e:
+                         logging.error(f"Error putting sentinel in recording queue: {e}")
 
                 logging.info("Waiting for video recording thread to finish...")
                 self.recording_thread.join(timeout=5.0) # Wait up to 5 seconds
@@ -848,8 +817,8 @@ class CameraManager:
 
                 # --- Muxing ---
                 if audio_file_to_mux and os.path.exists(video_path):
-                    # Pass the CALCULATED AVERAGE FPS used for this recording session
-                    final_path = self._mux_audio_video(video_path, audio_file_to_mux, measured_avg_fps)
+                    # Mux without providing FPS hint
+                    final_path = self._mux_audio_video(video_path, audio_file_to_mux) # Removed FPS argument
                     if final_path:
                         final_output_paths.append(final_path)
                         if final_path != video_path:
@@ -1008,8 +977,6 @@ class CameraManager:
         # Check is_recording flag *outside* recording_lock for speed, verify inside if needed
         if self.is_recording and capture_successful and frame0 is not None and frame0_timestamp is not None:
             # --- Store Timestamp for Average FPS Calculation ---
-            # Do this under recording_lock to ensure consistency with is_recording flag check?
-            # Or assume it's safe enough if is_recording is true here? Let's assume safe for now.
             self.recording_frame_timestamps.append(frame0_timestamp)
             self.recording_actual_frame_count += 1
 
@@ -1020,8 +987,8 @@ class CameraManager:
                 except queue.Full:
                     # This means the recording thread is falling behind writing frames
                     logging.warning("Recording frame queue is full. Dropping captured frame.")
-                    # Increment counter in recording thread? Or here? Let's track in thread.
-                    # self.frames_dropped_queue += 1 # Need thread-safe counter if done here
+                    # We are no longer duplicating, so dropping is the only option here.
+                    # This indicates a potential performance issue in the writing thread or disk I/O.
                 except Exception as e:
                     logging.error(f"Error putting frame into recording queue: {e}")
             # else: # This case should ideally not happen if is_recording is true
@@ -1250,10 +1217,10 @@ class CameraManager:
              except OSError as e: logging.error(f"Error checking temp audio file size {temp_file_path_at_start}: {e}"); self.temp_audio_file_path = None; return None
         else: logging.error("Temporary audio file path not set or file does not exist after stop sequence."); self.temp_audio_file_path = None; return None
 
-    def _mux_audio_video(self, video_path, audio_path, average_fps=None):
+    def _mux_audio_video(self, video_path, audio_path, average_fps=None): # average_fps is no longer used here
         """
         Merges audio and video files using ffmpeg. Uses '-c:v copy'.
-        Uses the calculated average_fps (if available) to hint the input video rate.
+        Lets ffmpeg infer the video frame rate (removed -r hint).
         """
         if not config.AUDIO_ENABLED: return None
         if not os.path.exists(config.FFMPEG_PATH): logging.error(f"ffmpeg not found at '{config.FFMPEG_PATH}'. Cannot mux audio."); self.audio_last_error = "Mux Error: ffmpeg not found"; return None
@@ -1263,30 +1230,20 @@ class CameraManager:
 
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
-        logging.info(f"Muxing (copy video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
+        logging.info(f"Muxing (copy video, infer rate) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
-        command_base = [config.FFMPEG_PATH, "-y"] # Base command, -y to overwrite output
-
-        # --- Add -r hint using calculated average FPS if available ---
-        if average_fps is not None and average_fps > 0:
-            logging.info(f"Hinting input video frame rate to ffmpeg using calculated average: {average_fps:.4f} fps")
-            # Insert frame rate hint *before* the video input file
-            command_base.extend(["-r", f"{average_fps:.4f}"])
-        else:
-            logging.warning("No valid calculated average FPS available. Muxing without -r hint.")
-
-        command_inputs_outputs = [
-            "-i", video_path,         # Input video file (now after potential -r hint)
-            "-i", audio_path,         # Input audio file
-            "-c:v", "copy",           # Copy video stream without re-encoding
-            "-c:a", "aac",            # Encode audio stream to AAC (common choice)
-            "-map", "0:v:0",          # Map video stream from first input
-            "-map", "1:a:0",          # Map audio stream from second input
-            "-shortest",              # Finish encoding when the shortest input stream ends
-            "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
-            output_path               # Output file path
-        ]
-        command = command_base + command_inputs_outputs
+        # --- Command without -r hint ---
+        command = [config.FFMPEG_PATH, "-y", # Base command, -y to overwrite output
+                   "-i", video_path,         # Input video file
+                   "-i", audio_path,         # Input audio file
+                   "-c:v", "copy",           # Copy video stream without re-encoding
+                   "-c:a", "aac",            # Encode audio stream to AAC (common choice)
+                   "-map", "0:v:0",          # Map video stream from first input
+                   "-map", "1:a:0",          # Map audio stream from second input
+                   "-shortest",              # Finish encoding when the shortest input stream ends
+                   "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
+                   output_path               # Output file path
+                  ]
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         mux_start_time = time.monotonic()
@@ -1323,6 +1280,10 @@ class CameraManager:
             if self.recording_thread and self.recording_thread.is_alive():
                  logging.warning("Shutdown: Stopping orphaned video recording thread...")
                  self.stop_recording_event.set()
+                 # Try putting sentinel
+                 if self.recording_frame_queue:
+                     try: self.recording_frame_queue.put_nowait((None, None))
+                     except queue.Full: pass
                  self.recording_thread.join(timeout=2.0)
                  self.recording_thread = None
                  # Release any writers that might be held
