@@ -8,6 +8,7 @@ Handles settings for multiple cameras, hardware, and the web UI.
 **Modification:** Reverted CAM0_RECORDING_FORMAT back to 'mp4v' as 'avc1'
                   failed to initialize with the available OpenCV/FFmpeg backend.
 **Modification 2:** Added VIDEO_START_DELAY_SECONDS for A/V sync adjustment.
+**Modification 3:** Removed VIDEO_START_DELAY_SECONDS, added AUDIO_START_DELAY_SECONDS.
 """
 import os
 from libcamera import controls
@@ -157,9 +158,9 @@ FFMPEG_LOG_LEVEL = "error"
 # ===========================================================
 # === Recording & Sync Configuration ===
 # ===========================================================
-# Delay (in seconds) before starting to save video frames after recording starts.
-# Helps compensate if audio starts slightly before video data is ready/stable.
-VIDEO_START_DELAY_SECONDS = 1.0
+# Delay (in seconds) before starting the actual audio stream capture.
+# Helps compensate if video starts slightly before audio is ready/stable.
+AUDIO_START_DELAY_SECONDS = 1.0
 
 # ===========================================================
 # === Hardware Configuration ===

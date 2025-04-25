@@ -23,6 +23,8 @@ and audio recording/muxing.
                     Kept removal of `-shortest`.
 **Modification 7:** Implemented VIDEO_START_DELAY_SECONDS from config to delay adding
                     video frames to the recording queue, attempting to align with audio.
+**Modification 8:** Removed VIDEO_START_DELAY_SECONDS logic. Implemented AUDIO_START_DELAY_SECONDS
+                    within the audio capture thread before starting the stream.
 """
 
 import os
@@ -105,7 +107,7 @@ class CameraManager:
         self.recording_start_time_monotonic = None # Track recording start time precisely
         self.recording_frame_timestamps = [] # List to store capture timestamps during recording
         self.recording_actual_frame_count = 0 # Count actual frames captured during recording
-        self.video_delay_passed = False # Flag to track if initial video delay has passed
+        # self.video_delay_passed = False # Flag removed in Mod 8
 
         # Locks for thread safety
         self.frame_lock = threading.Lock() # Protects access to output_frame
@@ -600,7 +602,7 @@ class CameraManager:
                 # --- Reset Frame Timestamp Tracking ---
                 self.recording_frame_timestamps = []
                 self.recording_actual_frame_count = 0
-                self.video_delay_passed = False # Reset delay flag
+                # self.video_delay_passed = False # Reset delay flag - REMOVED
 
                 self.is_recording = True # Set flag before starting thread
                 self.recording_start_time_monotonic = time.monotonic() # Record precise start time
@@ -608,6 +610,7 @@ class CameraManager:
                 logging.info(f"Video recording thread started for {success_count} drive(s).")
 
                 # --- Start Audio ---
+                # Audio start delay is now handled INSIDE the audio thread
                 if config.AUDIO_ENABLED:
                     if not self._start_audio_recording(base_filename):
                         logging.error("Failed to start audio recording component.")
@@ -753,7 +756,7 @@ class CameraManager:
                 self.recording_frame_queue = None
                 self.recording_frame_timestamps = [] # Clear timestamps too
                 self.recording_actual_frame_count = 0
-                self.video_delay_passed = False # Reset delay flag
+                # self.video_delay_passed = False # Reset delay flag - REMOVED
                 return
 
             logging.info("Stopping recording (Video Thread and Audio)...")
@@ -762,7 +765,7 @@ class CameraManager:
             recording_duration = (recording_stop_time_monotonic - self.recording_start_time_monotonic) if self.recording_start_time_monotonic else None
             start_time_rec = self.recording_start_time_monotonic
             self.recording_start_time_monotonic = None
-            self.video_delay_passed = False # Reset delay flag
+            # self.video_delay_passed = False # Reset delay flag - REMOVED
 
             # --- Log Actual Frame Count and Duration (for debugging) ---
             if recording_duration and self.recording_actual_frame_count > 0:
@@ -889,7 +892,7 @@ class CameraManager:
         """
         Captures frames from enabled cameras, combines if necessary,
         updates the stream frame, and puts Cam0 frame into the recording queue
-        along with its timestamp, respecting the VIDEO_START_DELAY_SECONDS.
+        along with its timestamp. (Video delay logic removed).
         """
         frame0 = None
         frame1 = None
@@ -985,43 +988,22 @@ class CameraManager:
         with self.frame_lock:
             self.output_frame = output_frame_for_stream.copy() if output_frame_for_stream is not None else None
 
-        # --- Put Frame into Recording Queue (if recording, Cam0 captured, AND delay passed) ---
-        # Check is_recording flag *outside* recording_lock for speed
+        # --- Put Frame into Recording Queue (if recording and Cam0 captured) ---
+        # Video start delay logic removed here
         if self.is_recording and capture_successful and frame0 is not None and frame0_timestamp is not None:
+            # Store timestamp and increment count
+            self.recording_frame_timestamps.append(frame0_timestamp)
+            self.recording_actual_frame_count += 1
 
-            # --- Check Video Start Delay ---
-            # We need recording_start_time_monotonic which is set under recording_lock
-            # Accessing it here without lock *might* be okay if start/stop are infrequent,
-            # but safer to check the video_delay_passed flag which is set once under lock.
-            # Let's set the flag first time the condition is met.
-
-            # Check if the delay has already passed
-            if not self.video_delay_passed:
-                # Need the start time, access under lock for safety? Or assume it's stable after start?
-                # Let's assume it's stable enough after start_recording sets it.
-                start_time = self.recording_start_time_monotonic
-                if start_time is not None and \
-                   (frame0_timestamp - start_time >= config.VIDEO_START_DELAY_SECONDS):
-                    logging.info(f"Video start delay ({config.VIDEO_START_DELAY_SECONDS}s) passed. Starting to queue video frames.")
-                    self.video_delay_passed = True # Set flag: delay has now passed
-                # else: # Delay not yet passed, do nothing this frame (don't queue)
-                #    logging.debug("Video start delay active, discarding frame.") # Optional debug log
-
-            # --- Queue Frame if Delay Has Passed ---
-            if self.video_delay_passed:
-                # Store timestamp and increment count *only* for frames we intend to queue
-                self.recording_frame_timestamps.append(frame0_timestamp)
-                self.recording_actual_frame_count += 1
-
-                if self.recording_frame_queue:
-                    try:
-                        # Put the raw frame0 and its timestamp into the queue (non-blocking)
-                        self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
-                    except queue.Full:
-                        logging.warning("Recording frame queue is full. Dropping captured frame.")
-                    except Exception as e:
-                        logging.error(f"Error putting frame into recording queue: {e}")
-                # else: logging.error("Inconsistent state: Recording active but queue not initialized.")
+            if self.recording_frame_queue:
+                try:
+                    # Put the raw frame0 and its timestamp into the queue (non-blocking)
+                    self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
+                except queue.Full:
+                    logging.warning("Recording frame queue is full. Dropping captured frame.")
+                except Exception as e:
+                    logging.error(f"Error putting frame into recording queue: {e}")
+            # else: logging.error("Inconsistent state: Recording active but queue not initialized.")
 
 
         return output_frame_for_stream # Return the frame for the web stream
@@ -1036,7 +1018,7 @@ class CameraManager:
                 return None
 
     # --- Audio Methods ---
-    # (Audio methods remain unchanged)
+    # (Audio methods remain unchanged EXCEPT _audio_recording_thread)
     def _find_audio_device(self):
         if not config.AUDIO_ENABLED: return False
         self.audio_device_index = None
@@ -1073,23 +1055,42 @@ class CameraManager:
             self.audio_last_error = f"Audio Device Query Error: {e}"; return False
 
     def _audio_recording_thread(self):
+        """Handles audio capture, including the initial start delay."""
         stream_started_successfully = False
         try:
             logging.info(f"Audio capture thread started for device {self.audio_device_index}.")
             self.stop_audio_event.clear()
+
+            # --- Implement Audio Start Delay ---
+            delay_seconds = getattr(config, 'AUDIO_START_DELAY_SECONDS', 0.0)
+            if delay_seconds > 0:
+                logging.info(f"Audio capture thread: Delaying start by {delay_seconds:.2f} seconds...")
+                start_delay_time = time.monotonic()
+                while time.monotonic() - start_delay_time < delay_seconds:
+                    if self.stop_audio_event.is_set():
+                        logging.warning("Audio capture thread: Stop requested during initial delay. Aborting.")
+                        return # Exit thread if stop is requested during delay
+                    time.sleep(0.1) # Sleep briefly during delay check
+                logging.info(f"Audio capture thread: Delay finished.")
+            # ---------------------------------
+
             def audio_callback(indata, frames, time_info, status):
                 if status: logging.warning(f"Audio callback status: {status}")
                 if self.audio_queue:
                     try: self.audio_queue.put(indata.copy(), block=True, timeout=0.1)
                     except queue.Full: logging.warning("Audio queue is full. Discarding audio data.")
                     except Exception as q_err: logging.error(f"Error putting audio data into queue: {q_err}")
+
             self.audio_stream = sd.InputStream(
                 samplerate=config.AUDIO_SAMPLE_RATE, device=self.audio_device_index,
                 channels=config.AUDIO_CHANNELS, dtype=self.audio_dtype,
                 blocksize=config.AUDIO_BLOCK_SIZE, callback=audio_callback)
+
+            # Start the stream only after the potential delay
             self.audio_stream.start()
             stream_started_successfully = True
             logging.info("Audio stream started.")
+
             while not self.stop_audio_event.is_set():
                 self.stop_audio_event.wait(timeout=0.2)
                 if not self.audio_stream.active:
@@ -1183,9 +1184,9 @@ class CameraManager:
             logging.info(f"Starting audio recording. Temp file: {self.temp_audio_file_path}")
             self.stop_audio_event.clear()
             self.audio_thread = threading.Thread(target=self._audio_recording_thread, name="AudioCaptureThread"); self.audio_thread.daemon = True; self.audio_thread.start()
-            time.sleep(0.2)
+            time.sleep(0.2) # Give capture thread a moment to start
             self.audio_write_thread = threading.Thread(target=self._audio_write_file_thread, name="AudioWriteThread"); self.audio_write_thread.daemon = True; self.audio_write_thread.start()
-            time.sleep(0.5)
+            time.sleep(0.5) # Give write thread a moment to start
             if not self.audio_thread.is_alive() or not self.audio_write_thread.is_alive():
                  logging.error("Audio threads did not remain alive shortly after start.")
                  self.audio_last_error = self.audio_last_error or "Audio threads failed to start/stay alive"
@@ -1361,7 +1362,7 @@ class CameraManager:
         self.recording_target_fps = None # Reset target FPS
         self.recording_frame_timestamps = [] # Clear timestamps
         self.recording_actual_frame_count = 0
-        self.video_delay_passed = False # Reset delay flag
+        # self.video_delay_passed = False # Reset delay flag - REMOVED
         with self.frame_lock: self.output_frame = None
         logging.info("--- CameraManager Shutdown Complete ---")
 
