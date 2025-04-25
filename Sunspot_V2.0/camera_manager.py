@@ -21,6 +21,8 @@ and audio recording/muxing.
 **Modification 6:** Reverted ffmpeg muxing back to `-c:v copy` to reduce load and
                     address potential I/O errors caused by re-encoding.
                     Kept removal of `-shortest`.
+**Modification 7:** Implemented VIDEO_START_DELAY_SECONDS from config to delay adding
+                    video frames to the recording queue, attempting to align with audio.
 """
 
 import os
@@ -103,6 +105,7 @@ class CameraManager:
         self.recording_start_time_monotonic = None # Track recording start time precisely
         self.recording_frame_timestamps = [] # List to store capture timestamps during recording
         self.recording_actual_frame_count = 0 # Count actual frames captured during recording
+        self.video_delay_passed = False # Flag to track if initial video delay has passed
 
         # Locks for thread safety
         self.frame_lock = threading.Lock() # Protects access to output_frame
@@ -597,9 +600,10 @@ class CameraManager:
                 # --- Reset Frame Timestamp Tracking ---
                 self.recording_frame_timestamps = []
                 self.recording_actual_frame_count = 0
+                self.video_delay_passed = False # Reset delay flag
 
                 self.is_recording = True # Set flag before starting thread
-                self.recording_start_time_monotonic = time.monotonic()
+                self.recording_start_time_monotonic = time.monotonic() # Record precise start time
                 self.recording_thread.start()
                 logging.info(f"Video recording thread started for {success_count} drive(s).")
 
@@ -749,6 +753,7 @@ class CameraManager:
                 self.recording_frame_queue = None
                 self.recording_frame_timestamps = [] # Clear timestamps too
                 self.recording_actual_frame_count = 0
+                self.video_delay_passed = False # Reset delay flag
                 return
 
             logging.info("Stopping recording (Video Thread and Audio)...")
@@ -757,6 +762,7 @@ class CameraManager:
             recording_duration = (recording_stop_time_monotonic - self.recording_start_time_monotonic) if self.recording_start_time_monotonic else None
             start_time_rec = self.recording_start_time_monotonic
             self.recording_start_time_monotonic = None
+            self.video_delay_passed = False # Reset delay flag
 
             # --- Log Actual Frame Count and Duration (for debugging) ---
             if recording_duration and self.recording_actual_frame_count > 0:
@@ -883,7 +889,7 @@ class CameraManager:
         """
         Captures frames from enabled cameras, combines if necessary,
         updates the stream frame, and puts Cam0 frame into the recording queue
-        along with its timestamp.
+        along with its timestamp, respecting the VIDEO_START_DELAY_SECONDS.
         """
         frame0 = None
         frame1 = None
@@ -894,7 +900,7 @@ class CameraManager:
         # --- Capture Cam0 ---
         if self.is_initialized0 and self.picam0 and self.picam0.started:
             try:
-                capture_start_time = time.monotonic()
+                # capture_start_time = time.monotonic() # Less relevant now
                 frame0 = self.picam0.capture_array("main")
                 # Get timestamp immediately after capture
                 frame0_timestamp = time.monotonic()
@@ -979,26 +985,43 @@ class CameraManager:
         with self.frame_lock:
             self.output_frame = output_frame_for_stream.copy() if output_frame_for_stream is not None else None
 
-        # --- Put Frame into Recording Queue (if recording and Cam0 captured) ---
-        # Check is_recording flag *outside* recording_lock for speed, verify inside if needed
+        # --- Put Frame into Recording Queue (if recording, Cam0 captured, AND delay passed) ---
+        # Check is_recording flag *outside* recording_lock for speed
         if self.is_recording and capture_successful and frame0 is not None and frame0_timestamp is not None:
-            # --- Store Timestamp for Average FPS Calculation ---
-            self.recording_frame_timestamps.append(frame0_timestamp)
-            self.recording_actual_frame_count += 1
 
-            if self.recording_frame_queue:
-                try:
-                    # Put the raw frame0 and its timestamp into the queue (non-blocking)
-                    self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
-                except queue.Full:
-                    # This means the recording thread is falling behind writing frames
-                    logging.warning("Recording frame queue is full. Dropping captured frame.")
-                    # We are no longer duplicating, so dropping is the only option here.
-                    # This indicates a potential performance issue in the writing thread or disk I/O.
-                except Exception as e:
-                    logging.error(f"Error putting frame into recording queue: {e}")
-            # else: # This case should ideally not happen if is_recording is true
-            #    logging.error("Inconsistent state: Recording active but queue not initialized.")
+            # --- Check Video Start Delay ---
+            # We need recording_start_time_monotonic which is set under recording_lock
+            # Accessing it here without lock *might* be okay if start/stop are infrequent,
+            # but safer to check the video_delay_passed flag which is set once under lock.
+            # Let's set the flag first time the condition is met.
+
+            # Check if the delay has already passed
+            if not self.video_delay_passed:
+                # Need the start time, access under lock for safety? Or assume it's stable after start?
+                # Let's assume it's stable enough after start_recording sets it.
+                start_time = self.recording_start_time_monotonic
+                if start_time is not None and \
+                   (frame0_timestamp - start_time >= config.VIDEO_START_DELAY_SECONDS):
+                    logging.info(f"Video start delay ({config.VIDEO_START_DELAY_SECONDS}s) passed. Starting to queue video frames.")
+                    self.video_delay_passed = True # Set flag: delay has now passed
+                # else: # Delay not yet passed, do nothing this frame (don't queue)
+                #    logging.debug("Video start delay active, discarding frame.") # Optional debug log
+
+            # --- Queue Frame if Delay Has Passed ---
+            if self.video_delay_passed:
+                # Store timestamp and increment count *only* for frames we intend to queue
+                self.recording_frame_timestamps.append(frame0_timestamp)
+                self.recording_actual_frame_count += 1
+
+                if self.recording_frame_queue:
+                    try:
+                        # Put the raw frame0 and its timestamp into the queue (non-blocking)
+                        self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
+                    except queue.Full:
+                        logging.warning("Recording frame queue is full. Dropping captured frame.")
+                    except Exception as e:
+                        logging.error(f"Error putting frame into recording queue: {e}")
+                # else: logging.error("Inconsistent state: Recording active but queue not initialized.")
 
 
         return output_frame_for_stream # Return the frame for the web stream
@@ -1338,6 +1361,7 @@ class CameraManager:
         self.recording_target_fps = None # Reset target FPS
         self.recording_frame_timestamps = [] # Clear timestamps
         self.recording_actual_frame_count = 0
+        self.video_delay_passed = False # Reset delay flag
         with self.frame_lock: self.output_frame = None
         logging.info("--- CameraManager Shutdown Complete ---")
 
