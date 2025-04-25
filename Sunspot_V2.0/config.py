@@ -5,9 +5,8 @@ config.py
 Configuration constants for the Pi Camera Stream & Record application.
 Handles settings for multiple cameras, hardware, and the web UI.
 
-**Modification:** Changed CAM0_RECORDING_FORMAT to 'avc1' (H.264) to attempt
-                  better compression and potentially reduce USB write load.
-                  Added fallback note. Added missing SERVO_SMOOTH_MOVE options.
+**Modification:** Reverted CAM0_RECORDING_FORMAT back to 'mp4v' as 'avc1'
+                  failed to initialize with the available OpenCV/FFmpeg backend.
 """
 import os
 from libcamera import controls
@@ -75,11 +74,10 @@ else:
      print("Using default camera tuning for Cam0 (no tuning file specified).")
 
 # --- Cam0 Recording Configuration ---
-# Try 'avc1' (H.264) for potentially better compression.
-# If this fails (VideoWriter doesn't open), common fallbacks are 'mp4v' (MPEG-4) or 'XVID' (for AVI).
-# Hardware acceleration with cv2.VideoWriter is unlikely without specific OpenCV builds.
-CAM0_RECORDING_FORMAT = "avc1"
-CAM0_RECORDING_EXTENSION = ".mp4" # Keep MP4 extension for H.264
+# Reverted back to 'mp4v' as 'avc1' was not supported by the backend.
+# 'mp4v' is a widely compatible MPEG-4 codec.
+CAM0_RECORDING_FORMAT = "mp4v"
+CAM0_RECORDING_EXTENSION = ".mp4"
 
 # ===========================================================
 # === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
