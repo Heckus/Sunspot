@@ -9,6 +9,8 @@ and audio recording/muxing.
 **Modification:** Overhauled recording logic to use a dedicated thread and queue
                   to strictly enforce the target FPS, aiming to fix A/V desync.
                   Uses frame duplication if capture lags behind target FPS.
+**Modification 2:** Removed the '-r' (frame rate hint) flag from the ffmpeg muxing
+                    command to let ffmpeg infer the rate, potentially improving A/V sync.
 """
 
 import os
@@ -1154,8 +1156,8 @@ class CameraManager:
                  self.stop_audio_event.set()
                  if self.audio_thread.is_alive(): self.audio_thread.join(timeout=1.0)
                  if self.audio_write_thread.is_alive(): self.audio_write_thread.join(timeout=1.0)
-                 if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path): 
-                    try: os.remove(self.temp_audio_file_path) 
+                 if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path):
+                    try: os.remove(self.temp_audio_file_path)
                     except OSError: pass
                  self.temp_audio_file_path = None; self.audio_thread = None; self.audio_write_thread = None; return False
             self.audio_last_error = None; logging.info("Audio recording threads started successfully."); return True
@@ -1164,8 +1166,8 @@ class CameraManager:
             self.audio_last_error = f"Audio Start Error: {e}"; self.stop_audio_event.set()
             if self.audio_thread and self.audio_thread.is_alive(): self.audio_thread.join(timeout=1.0)
             if self.audio_write_thread and self.audio_write_thread.is_alive(): self.audio_write_thread.join(timeout=1.0)
-            if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path): 
-                try: os.remove(self.temp_audio_file_path) 
+            if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path):
+                try: os.remove(self.temp_audio_file_path)
                 except OSError: pass
             self.temp_audio_file_path = None; self.audio_thread = None; self.audio_write_thread = None; return False
 
@@ -1211,8 +1213,7 @@ class CameraManager:
     def _mux_audio_video(self, video_path, audio_path, recording_fps=None):
         """
         Merges audio and video files using ffmpeg. Uses '-c:v copy'.
-        Uses the provided recording_fps (TARGET FPS) to hint the input video rate.
-        (Unchanged logic, but relies on recording_fps being accurate now)
+        Lets ffmpeg infer the video frame rate (removed -r hint).
         """
         if not config.AUDIO_ENABLED: return None
         if not os.path.exists(config.FFMPEG_PATH): logging.error(f"ffmpeg not found at '{config.FFMPEG_PATH}'. Cannot mux audio."); self.audio_last_error = "Mux Error: ffmpeg not found"; return None
@@ -1222,23 +1223,26 @@ class CameraManager:
 
         output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
         if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
-        logging.info(f"Muxing (copy video) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
+        logging.info(f"Muxing (copy video, infer rate) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
 
-        command_base = [config.FFMPEG_PATH, "-y"]
-        if recording_fps is not None and recording_fps > 0:
-            logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.4f} fps")
-            command_base.extend(["-r", f"{recording_fps:.4f}"]) # Use 4 decimal places for accuracy
-        else: logging.warning("No valid recording FPS available to hint ffmpeg for muxing.")
+        # --- Removed -r hint ---
+        # command_base = [config.FFMPEG_PATH, "-y"]
+        # if recording_fps is not None and recording_fps > 0:
+        #     logging.info(f"Hinting input video frame rate to ffmpeg: {recording_fps:.4f} fps")
+        #     command_base.extend(["-r", f"{recording_fps:.4f}"]) # Use 4 decimal places for accuracy
+        # else: logging.warning("No valid recording FPS available to hint ffmpeg for muxing.")
 
-        command_inputs_outputs = [
-            "-i", video_path, "-i", audio_path,
-            "-c:v", "copy", "-c:a", "aac", # Copy video, encode audio to AAC
-            "-map", "0:v:0", "-map", "1:a:0", # Map streams explicitly
-            "-shortest", # Finish encoding when the shortest input stream ends
-            "-loglevel", config.FFMPEG_LOG_LEVEL,
-            output_path
-        ]
-        command = command_base + command_inputs_outputs
+        command = [config.FFMPEG_PATH, "-y", # Base command, -y to overwrite output
+                   "-i", video_path,         # Input video file
+                   "-i", audio_path,         # Input audio file
+                   "-c:v", "copy",           # Copy video stream without re-encoding
+                   "-c:a", "aac",            # Encode audio stream to AAC (common choice)
+                   "-map", "0:v:0",          # Map video stream from first input
+                   "-map", "1:a:0",          # Map audio stream from second input
+                   "-shortest",              # Finish encoding when the shortest input stream ends
+                   "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
+                   output_path               # Output file path
+                  ]
         logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
 
         mux_start_time = time.monotonic()
@@ -1279,8 +1283,8 @@ class CameraManager:
                  self.recording_thread = None
                  # Release any writers that might be held
                  with self.recording_lock:
-                     for writer in self.video_writers: 
-                        try: writer.release() 
+                     for writer in self.video_writers:
+                        try: writer.release()
                         except: pass
                      self.video_writers.clear(); self.recording_paths.clear()
             if config.AUDIO_ENABLED:
