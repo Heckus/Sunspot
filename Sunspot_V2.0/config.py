@@ -5,9 +5,7 @@ config.py
 Configuration constants for the Pi Camera Stream & Record application.
 Handles settings for multiple cameras, hardware, and the web UI.
 
-**Modification:** No changes needed for FPS guarantee logic, but ensure
-                  the FPS values in CAM0_RESOLUTIONS are the desired *target*
-                  rates for recording.
+**Modification:** Added missing SERVO_SMOOTH_MOVE configuration options.
 """
 import os
 from libcamera import controls
@@ -158,7 +156,6 @@ FFMPEG_LOG_LEVEL = "error"
 # ===========================================================
 # === Hardware Configuration ===
 # ===========================================================
-# (Unchanged)
 SWITCH_GPIO_PIN = 17
 SWITCH_BOUNCE_TIME = 0.1
 
@@ -179,3 +176,9 @@ SERVO_MAX_DUTY_NS = 2500000
 SERVO_CENTER_ANGLE = 90
 SERVO_MIN_ANGLE = 0
 SERVO_MAX_ANGLE = 180
+
+# --- Servo Smooth Movement Settings --- ADDED THIS SECTION ---
+SERVO_SMOOTH_MOVE = True  # Enable/disable smooth movement
+SERVO_SMOOTH_MOVE_STEPS = 20  # Number of steps for interpolation
+SERVO_SMOOTH_MOVE_DELAY = 0.01 # Delay (seconds) between steps
+# -----------------------------------------------------------
