@@ -50,8 +50,8 @@ CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA @ 30 FPS
     (1332, 990, 60.0),     # Custom @ 60 FPS
     (1920, 1080, 30.0),    # 1080p FHD @ 25 FPS
-    (2028, 1080, 40.0),    # Specific HQ mode @ 50 FPS
-    (2028, 1520, 40.0),    # Specific HQ mode @ 40 FPS
+    (2028, 1080, 30.0),    # Specific HQ mode @ 50 FPS
+    (2028, 1520, 30.0),    # Specific HQ mode @ 40 FPS
     (4056, 3040, 10.0)     # Max Res @ 10 FPS
 ]
 CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ Target 25 FPS
