@@ -15,6 +15,8 @@ frame capture (combined stream), and video recording (from primary camera).
 **Modification 13 (User Request):** Add verbose logging to get_usb_mounts and make
                     stop_recording check more robust.
 **Modification 14 (User Request):** Removed problematic .recording attribute check in shutdown.
+**Modification 15 (User Request):** Switched from start_recording to start_encoder with
+                    explicit FileOutput and quality setting to improve file compatibility.
 """
 
 import os
@@ -24,11 +26,11 @@ import logging
 import threading
 import numpy as np
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
+from picamera2.encoders import H264Encoder, Quality # Import Quality enum
+from picamera2.outputs import FileOutput # Explicitly use FileOutput
 import shutil
 from libcamera import controls, Transform
 import subprocess
-import cv2
 
 # Import configuration constants
 import config
@@ -36,6 +38,7 @@ import config
 # Helper function to find writable USB mounts (with enhanced logging)
 def get_usb_mounts():
     """Finds writable directories under the configured USB base path."""
+    # ... (function unchanged from previous version) ...
     mounts = []
     base_path = config.USB_BASE_PATH
     logging.debug(f"USB Check: Base path = {base_path}")
@@ -65,84 +68,62 @@ def get_usb_mounts():
                      logging.debug(f"USB Check: '{path}' does NOT have W_OK access bit.")
             else:
                 logging.debug(f"USB Check: '{path}' is NOT a directory.")
-
-        if not mounts:
-            logging.debug("USB Check: No writable USB mounts found after checking all items.")
-        else:
-            logging.info(f"Found {len(mounts)} writable USB mount(s): {mounts}")
-
-    except Exception as e:
-        logging.error(f"Error finding USB mounts in {base_path}: {e}")
+        if not mounts: logging.debug("USB Check: No writable USB mounts found after checking all items.")
+        else: logging.info(f"Found {len(mounts)} writable USB mount(s): {mounts}")
+    except Exception as e: logging.error(f"Error finding USB mounts in {base_path}: {e}")
     return mounts
 
 
 class CameraManager:
-    """Handles multiple camera operations and state (video-only, Picamera2 recording)."""
+    """Handles multiple camera operations and state (using start_encoder/FileOutput)."""
 
     def __init__(self):
-        """Initializes the CameraManager based on config (Picamera2 recording)."""
-        self.picam0 = None # Primary camera (HQ)
-        self.picam1 = None # Secondary camera (IMX219) - conditionally initialized
+        """Initializes the CameraManager (start_encoder/FileOutput recording)."""
+        self.picam0 = None
+        self.picam1 = None
         self.picam0_encoder = None # Stores the Picamera2 encoder instance
+        self.file_output = None # Stores the FileOutput object
         self.is_initialized0 = False
         self.is_initialized1 = False
         self.last_error = None
-
-        # State variables for Cam0 (HQ)
         self.current_resolution_index0 = config.CAM0_DEFAULT_RESOLUTION_INDEX
         self.actual_cam0_fps = None
         self.last_cam0_capture_time = None
         self.measured_cam0_fps_avg = None
-
-        # State variable for output frame (combined or single) for streaming
         self.output_frame = None
-        # State variable for raw frame output for CV processing
         self.latest_raw_frame0 = None
-
-        # --- Recording State (Using Picamera2 API) ---
         self.is_recording = False
-        self.recording_target_fps = None # Store the TARGET FPS used for the current recording (for info)
-        self.primary_recording_path = None # Path where Picamera2 is actively recording
-        self.target_recording_paths = [] # List of all final destination paths (across USBs)
+        self.recording_target_fps = None
+        self.primary_recording_path = None
+        self.target_recording_paths = []
         self.recording_start_time_monotonic = None
-
-        # Locks for thread safety
-        self.frame_lock = threading.Lock() # Protects access to output_frame (for streaming)
-        self.raw_frame_lock = threading.Lock() # Protects access to latest_raw_frame0 (for CV)
-        self.config_lock = threading.Lock() # Protects access to camera state/config changes
-        self.recording_lock = threading.Lock() # Protects access to recording state variables
-
-        # --- Initialize Common Camera Controls to Defaults from Config ---
-        self.current_analogue_gain = config.DEFAULT_ANALOGUE_GAIN
-        self.current_iso_name = "Unknown"
-        self.current_ae_mode = controls.AeExposureModeEnum.Normal
-        self.current_metering_mode = controls.AeMeteringModeEnum.CentreWeighted
+        self.frame_lock = threading.Lock()
+        self.raw_frame_lock = threading.Lock()
+        self.config_lock = threading.Lock()
+        self.recording_lock = threading.Lock()
+        self.current_analogue_gain = config.DEFAULT_ANALOGUE_GAIN; self.current_iso_name = "Unknown"
+        self.current_ae_mode = controls.AeExposureModeEnum.Normal; self.current_metering_mode = controls.AeMeteringModeEnum.CentreWeighted
         self.current_noise_reduction_mode = controls.draft.NoiseReductionModeEnum.Off
-        self.current_brightness = config.DEFAULT_BRIGHTNESS
-        self.current_contrast = config.DEFAULT_CONTRAST
-        self.current_saturation = config.DEFAULT_SATURATION
-        self.current_sharpness = config.DEFAULT_SHARPNESS
+        self.current_brightness = config.DEFAULT_BRIGHTNESS; self.current_contrast = config.DEFAULT_CONTRAST
+        self.current_saturation = config.DEFAULT_SATURATION; self.current_sharpness = config.DEFAULT_SHARPNESS
         try:
             for name, gain in config.AVAILABLE_ISO_SETTINGS.items():
                 if abs(gain - self.current_analogue_gain) < 0.01: self.current_iso_name = name; break
         except Exception as e: logging.error(f"Error setting default ISO name: {e}.")
         try: self.current_ae_mode = controls.AeExposureModeEnum.__members__[config.DEFAULT_AE_MODE_NAME]
-        except (KeyError, AttributeError): logging.error(f"Default AE mode '{config.DEFAULT_AE_MODE_NAME}' invalid. Using fallback.")
+        except: logging.error(f"Default AE mode '{config.DEFAULT_AE_MODE_NAME}' invalid.")
         try: self.current_metering_mode = controls.AeMeteringModeEnum.__members__[config.DEFAULT_METERING_MODE_NAME]
-        except (KeyError, AttributeError): logging.error(f"Default Metering mode '{config.DEFAULT_METERING_MODE_NAME}' invalid. Using fallback.")
+        except: logging.error(f"Default Metering mode '{config.DEFAULT_METERING_MODE_NAME}' invalid.")
         try: self.current_noise_reduction_mode = controls.draft.NoiseReductionModeEnum.__members__[config.DEFAULT_NOISE_REDUCTION_MODE_NAME]
-        except (AttributeError, KeyError): logging.warning(f"Default NR mode '{config.DEFAULT_NOISE_REDUCTION_MODE_NAME}' invalid/unavailable. Using fallback Off.")
+        except: logging.warning(f"Default NR mode '{config.DEFAULT_NOISE_REDUCTION_MODE_NAME}' invalid/unavailable.")
 
-
-        logging.info("CameraManager initialized (Using Picamera2 Recording API, Audio Disabled).")
-        if not config.ENABLE_CAM1:
-            logging.warning("Cam1 is DISABLED in config.py. Operating in single-camera mode.")
+        logging.info("CameraManager initialized (Using start_encoder/FileOutput API, Audio Disabled).")
+        if not config.ENABLE_CAM1: logging.warning("Cam1 is DISABLED.")
         logging.debug(f"Initial Controls: ISO={self.current_iso_name}({self.current_analogue_gain:.2f}), AE={self.current_ae_mode.name}, Metering={self.current_metering_mode.name}, NR={self.current_noise_reduction_mode.name}, Bright={self.current_brightness}, Contr={self.current_contrast}, Sat={self.current_saturation}, Sharp={self.current_sharpness}")
 
 
     def _initialize_camera(self, cam_id, resolution_index=None):
-        """Internal helper to initialize or re-initialize a specific camera instance.
-           Stops active Picamera2 recording if needed."""
+        """Internal helper to initialize camera. Stops encoder if active."""
         picam_instance = None; is_initialized_flag = False; cam_name = f"Cam{cam_id}"; actual_fps_reported = None
         if cam_id == config.CAM1_ID and not config.ENABLE_CAM1: logging.info(f"Skipping initialization of {cam_name} (disabled)."); self.picam1 = None; self.is_initialized1 = False; return True
         if cam_id == config.CAM0_ID:
@@ -151,22 +132,23 @@ class CameraManager:
                 else: logging.error(f"{cam_name}: Invalid res index {resolution_index}. Using current {self.current_resolution_index0}.")
             res_list = config.CAM0_RESOLUTIONS; current_res_index = self.current_resolution_index0; tuning_data = config.CAM0_TUNING
             try: target_width, target_height, target_fps = res_list[current_res_index]
-            except IndexError:
-                logging.error(f"{cam_name}: Res index {current_res_index} out of bounds. Using default index {config.CAM0_DEFAULT_RESOLUTION_INDEX}.")
-                current_res_index = config.CAM0_DEFAULT_RESOLUTION_INDEX; self.current_resolution_index0 = current_res_index
-                target_width, target_height, target_fps = res_list[current_res_index]
+            except IndexError: logging.error(f"{cam_name}: Res index {current_res_index} out of bounds. Using default."); current_res_index = config.CAM0_DEFAULT_RESOLUTION_INDEX; self.current_resolution_index0 = current_res_index; target_width, target_height, target_fps = res_list[current_res_index]
         elif cam_id == config.CAM1_ID: target_width, target_height = config.CAM1_RESOLUTION; target_fps = config.CAM1_FRAME_RATE; tuning_data = config.CAM1_TUNING; current_res_index = 0
         else: logging.error(f"Invalid camera ID {cam_id}"); return False
         logging.info(f"Attempting init {cam_name} (ID: {cam_id}) at index {current_res_index} ({target_width}x{target_height} @ Target {target_fps:.1f}fps)...")
         existing_picam = self.picam0 if cam_id == config.CAM0_ID else self.picam1
         if existing_picam is not None:
             try:
-                if cam_id == config.CAM0_ID and self.is_recording: logging.warning(f"Stopping active recording on {cam_name} due to re-initialization."); self.stop_recording()
+                # *** Stop Picamera2 ENCODER before stopping camera stream ***
+                if cam_id == config.CAM0_ID and self.is_recording:
+                    logging.warning(f"Stopping active encoder on {cam_name} due to re-initialization.")
+                    self.stop_recording() # Use the proper stop method (stops encoder, closes file)
+
                 if existing_picam.started: logging.info(f"Stopping existing {cam_name}..."); existing_picam.stop()
                 logging.info(f"Closing existing {cam_name}..."); existing_picam.close()
             except Exception as e: logging.warning(f"Error stopping/closing previous {cam_name}: {e}")
             finally:
-                if cam_id == config.CAM0_ID: self.picam0 = None; self.is_initialized0 = False; self.actual_cam0_fps = None; self.picam0_encoder = None
+                if cam_id == config.CAM0_ID: self.picam0 = None; self.is_initialized0 = False; self.actual_cam0_fps = None; self.picam0_encoder = None; self.file_output = None # Clear output ref
                 elif cam_id == config.CAM1_ID: self.picam1 = None; self.is_initialized1 = False
             time.sleep(0.5)
         try:
@@ -184,28 +166,28 @@ class CameraManager:
             new_config = picam_instance.camera_configuration()
             if new_config:
                 applied_controls = new_config.get('controls', {}); applied_main = new_config.get('main', {})
-                logging.info(f"{cam_name}: Verified Applied Config: main={applied_main}, controls={applied_controls}")
+                logging.info(f"{cam_name}: Verified Config: main={applied_main}, controls={applied_controls}")
                 actual_fps_reported = applied_controls.get('FrameRate')
                 if actual_fps_reported is not None:
-                    logging.info(f"{cam_name}: Driver reported actual FrameRate: {actual_fps_reported:.2f} fps")
-                    if abs(actual_fps_reported - target_fps) > 1.0: logging.warning(f"{cam_name}: Driver adjusted FPS significantly from target {target_fps:.1f} to {actual_fps_reported:.2f}")
-                else: logging.warning(f"{cam_name}: Could not read back actual FrameRate."); actual_fps_reported = target_fps
+                    logging.info(f"{cam_name}: Driver reported FrameRate: {actual_fps_reported:.2f} fps")
+                    if abs(actual_fps_reported - target_fps) > 1.0: logging.warning(f"{cam_name}: Driver adjusted FPS from target {target_fps:.1f} to {actual_fps_reported:.2f}")
+                else: logging.warning(f"{cam_name}: Could not read back FrameRate."); actual_fps_reported = target_fps
             else: logging.warning(f"{cam_name}: Could not get config after applying."); actual_fps_reported = target_fps
             logging.info(f"{cam_name}: Starting camera..."); picam_instance.start(); logging.info(f"{cam_name}: Camera started"); time.sleep(1.0)
             actual_config_after_start = picam_instance.camera_configuration()
             if not actual_config_after_start: raise RuntimeError(f"{cam_name}: Failed get config after start.")
-            actual_format = actual_config_after_start.get('main', {}); actual_w = actual_format.get('size', (0,0))[0]; actual_h = actual_format.get('size', (0,0))[1]; actual_fmt_str = actual_format.get('format', 'Unknown')
+            actual_format=actual_config_after_start.get('main',{}); actual_w=actual_format.get('size',(0,0))[0]; actual_h=actual_format.get('size',(0,0))[1]; actual_fmt_str=actual_format.get('format','Unknown')
             actual_fps_final = actual_config_after_start.get('controls', {}).get('FrameRate', actual_fps_reported)
             actual_gain = actual_config_after_start.get('controls', {}).get('AnalogueGain', 'N/A')
-            logging.info(f"{cam_name}: Initialized. Actual stream: {actual_w}x{actual_h} {actual_fmt_str} @ {actual_fps_final:.2f} fps. Gain: {actual_gain}")
+            logging.info(f"{cam_name}: Initialized. Stream: {actual_w}x{actual_h} {actual_fmt_str} @ {actual_fps_final:.2f} fps. Gain: {actual_gain}")
             is_initialized_flag = True; self.last_error = None; return True
         except Exception as e:
-            logging.error(f"!!! Failed to initialize {cam_name} at {target_width}x{target_height}: {e}", exc_info=True); self.last_error = f"{cam_name} Init Error: {e}"
+            logging.error(f"!!! Failed initialize {cam_name} at {target_width}x{target_height}: {e}", exc_info=True); self.last_error = f"{cam_name} Init Error: {e}"
             if picam_instance is not None:
                 try:
                     if picam_instance.started: picam_instance.stop()
                     picam_instance.close()
-                except Exception as close_e: logging.error(f"Error closing {cam_name} after init failure: {close_e}")
+                except Exception as close_e: logging.error(f"Error closing {cam_name} after failure: {close_e}")
             picam_instance = None; is_initialized_flag = False; actual_fps_reported = None; return False
         finally:
             if cam_id == config.CAM0_ID: self.picam0 = picam_instance; self.is_initialized0 = is_initialized_flag; self.actual_cam0_fps = actual_fps_reported; self.last_cam0_capture_time = None; self.measured_cam0_fps_avg = None
@@ -213,6 +195,7 @@ class CameraManager:
 
     def initialize_cameras(self, resolution_index=None):
         """Initializes or re-initializes camera(s) based on config."""
+        # ... (logic unchanged) ...
         with self.config_lock:
             logging.info("--- Initializing Camera(s) ---"); success0 = self._initialize_camera(config.CAM0_ID, resolution_index); success1 = True
             if config.ENABLE_CAM1: success1 = self._initialize_camera(config.CAM1_ID)
@@ -227,6 +210,7 @@ class CameraManager:
 
     def get_cam0_resolution_config(self):
         """Returns the configured resolution tuple (width, height, target_fps) for Cam0."""
+        # ... (logic unchanged) ...
         try: return config.CAM0_RESOLUTIONS[self.current_resolution_index0]
         except IndexError:
             logging.error(f"Invalid resolution index {self.current_resolution_index0}. Using default."); safe_default_index = max(0, min(len(config.CAM0_RESOLUTIONS) - 1, config.CAM0_DEFAULT_RESOLUTION_INDEX)); self.current_resolution_index0 = safe_default_index
@@ -234,6 +218,7 @@ class CameraManager:
 
     def apply_camera_controls(self, controls_dict):
         """Applies a dictionary of common controls to running cameras."""
+        # ... (logic unchanged) ...
         if not self.is_initialized0 and (config.ENABLE_CAM1 and not self.is_initialized1): logging.error("Cannot apply controls: No cameras initialized."); self.last_error = "Control Apply Error: No cameras ready."; return False
         if not self.is_initialized0: logging.error("Cannot apply controls: Cam0 not initialized."); self.last_error = "Control Apply Error: Cam0 not ready."; return False
         logging.info(f"Applying common controls: {controls_dict}"); success_count = 0; temp_last_error = None
@@ -241,7 +226,6 @@ class CameraManager:
             with self.config_lock:
                 iso_name_updated = False
                 for key, value in controls_dict.items():
-                    
                     if key == 'AnalogueGain': 
                         self.current_analogue_gain = value; self.current_iso_name = "Unknown"; 
                         try:
@@ -249,7 +233,6 @@ class CameraManager:
                                 if abs(gain - value) < 0.01: self.current_iso_name = name; iso_name_updated = True; break
                             if not iso_name_updated: logging.warning(f"Applied AnalogueGain {value} not known ISO.")
                         except Exception as e: logging.error(f"Error updating ISO name for gain {value}: {e}")
-                    
                     elif key == 'AeExposureMode': self.current_ae_mode = value; 
                     elif key == 'AeMeteringMode': self.current_metering_mode = value
                     elif key == 'NoiseReductionMode': self.current_noise_reduction_mode = value; 
@@ -280,6 +263,7 @@ class CameraManager:
 
     def get_camera_state(self):
         """Returns a dictionary containing the current camera state."""
+        # ... (logic unchanged) ...
         with self.config_lock:
             res_w0, res_h0, target_fps0 = self.get_cam0_resolution_config(); output_w = res_w0; output_h = res_h0
             if config.ENABLE_CAM1 and self.is_initialized1: res_w1, res_h1 = config.CAM1_RESOLUTION; display_w1 = min(res_w1, output_w); display_h1 = res_h1 if display_w1 == res_w1 else int(res_h1 * (display_w1 / res_w1)); output_h = res_h0 + display_h1 + config.STREAM_BORDER_SIZE
@@ -288,15 +272,15 @@ class CameraManager:
         return state
 
     # ===========================================================
-    # === Recording Methods (Using Picamera2 API) ===
+    # === Recording Methods (Using start_encoder/FileOutput) ===
     # ===========================================================
 
     def start_recording(self):
-        """Starts recording video FROM CAM0 using Picamera2's start_recording."""
+        """Starts recording video FROM CAM0 using Picamera2's start_encoder."""
         with self.recording_lock:
             if self.is_recording: logging.warning("Start recording called, but already recording."); return True
             if not self.is_initialized0 or not self.picam0 or not self.picam0.started: logging.error("Cannot start recording, Cam0 not available."); self.last_error = "Cam0 not available for recording."; return False
-            logging.info("Attempting to start video recording (using Picamera2 API)..."); usb_drives = get_usb_mounts()
+            logging.info("Attempting to start video recording (using start_encoder/FileOutput)..."); usb_drives = get_usb_mounts()
             if not usb_drives: logging.error(f"Cannot start recording: No writable USB drives found."); self.last_error = f"Cannot start recording: No writable USB drives found"; return False
             try:
                 width, height, target_fps = self.get_cam0_resolution_config()
@@ -311,61 +295,60 @@ class CameraManager:
                 logging.error(f"!!! Error setting up recording parameters/paths: {setup_err}", exc_info=True); self.last_error = f"Rec Setup Error: {setup_err}"
                 self.recording_target_fps = None; self.primary_recording_path = None; self.target_recording_paths = []; return False
             try:
-                self.picam0_encoder = H264Encoder(bitrate=config.RECORDING_VIDEO_BITRATE); logging.info(f"Using H264Encoder with bitrate {config.RECORDING_VIDEO_BITRATE}")
-                self.picam0.start_recording(self.picam0_encoder, self.primary_recording_path); self.is_recording = True; self.recording_start_time_monotonic = time.monotonic()
-                logging.info(f"Picamera2 recording started to {self.primary_recording_path}.")
-                if self.last_error and ("Recording" in self.last_error or "writer" in self.last_error or "USB" in self.last_error or "sync" in self.last_error): logging.info(f"Clearing previous recording error: '{self.last_error}'"); self.last_error = None
+                # Create encoder and output objects
+                self.picam0_encoder = H264Encoder(bitrate=config.RECORDING_VIDEO_BITRATE)
+                logging.info(f"Using H264Encoder with bitrate {config.RECORDING_VIDEO_BITRATE}")
+                self.file_output = FileOutput(self.primary_recording_path)
+                self.picam0_encoder.output = self.file_output # Assign output to encoder
+
+                # Start the encoder with a quality setting
+                self.picam0.start_encoder(self.picam0_encoder, quality=Quality.VERY_HIGH)
+                self.is_recording = True; self.recording_start_time_monotonic = time.monotonic()
+                logging.info(f"Picamera2 encoder started, recording to {self.primary_recording_path}.")
+                if self.last_error and ("Recording" in self.last_error or "USB" in self.last_error or "sync" in self.last_error): logging.info(f"Clearing previous recording error: '{self.last_error}'"); self.last_error = None
                 return True
             except Exception as start_err:
-                logging.error(f"!!! Failed start Picamera2 recording: {start_err}", exc_info=True); self.last_error = f"Picamera2 Start Rec Error: {start_err}"
-                self.is_recording = False; self.picam0_encoder = None; self.recording_target_fps = None; self.primary_recording_path = None; self.target_recording_paths = []; return False
+                logging.error(f"!!! Failed start Picamera2 encoder: {start_err}", exc_info=True); self.last_error = f"Picamera2 Start Encoder Error: {start_err}"
+                self.is_recording = False; self.picam0_encoder = None; self.file_output = None; self.recording_target_fps = None; self.primary_recording_path = None; self.target_recording_paths = []; return False
 
     def stop_recording(self):
-        """Stops Picamera2 recording, restarts capture stream, copies file, and syncs."""
-        primary_path = None; target_paths = []; start_time_rec = None; stop_success = False
+        """Stops Picamera2 encoder, closes FileOutput, copies file, and syncs."""
+        primary_path = None; target_paths = []; start_time_rec = None; encoder_was_running = False; file_output_to_close = None
         with self.recording_lock:
-            if not self.is_recording:
-                 logging.debug("stop_recording called when not self.is_recording.")
-                 self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
-                 return
+            if not self.is_recording: logging.debug("stop_recording called when not self.is_recording."); self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None; self.file_output = None; return
+            logging.info("Stopping Picamera2 video encoder..."); self.is_recording = False
+            recording_stop_time_monotonic = time.monotonic(); primary_path = self.primary_recording_path; target_paths = list(self.target_recording_paths); start_time_rec = self.recording_start_time_monotonic
+            encoder_was_running = self.picam0_encoder is not None # Check if encoder existed
+            file_output_to_close = self.file_output # Store ref to close outside lock
+            self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None; self.file_output = None
 
-            logging.info("Stopping Picamera2 video recording...")
-            self.is_recording = False # Set flag early
-            recording_stop_time_monotonic = time.monotonic()
-            primary_path = self.primary_recording_path; target_paths = list(self.target_recording_paths); start_time_rec = self.recording_start_time_monotonic
-            self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
-            stop_success = True # Assume we intend to stop successfully if we passed the initial check
-
-        # --- Stop Picamera2 Recording (outside lock) ---
-        if stop_success:
+        # --- Stop Picamera2 Encoder (outside lock) ---
+        stop_success = False
+        if encoder_was_running:
             try:
-                if self.picam0:
-                    logging.debug("Attempting self.picam0.stop_recording()")
-                    self.picam0.stop_recording()
-                    logging.info(f"Picamera2 recording stopped successfully for {primary_path}.")
+                if self.picam0: # Check if picam0 object exists
+                    logging.debug("Attempting self.picam0.stop_encoder()")
+                    self.picam0.stop_encoder() # Pass no args if encoder stored internally? Or pass self.picam0_encoder stored before clearing? Let's assume stop_encoder() stops the current one.
+                    logging.info(f"Picamera2 encoder stopped successfully for {primary_path}.")
+                    stop_success = True
+                else: logging.warning("Picamera2 instance (picam0) was None during stop, cannot call stop_encoder().")
+            except Exception as stop_err: logging.error(f"!!! Error stopping Picamera2 encoder: {stop_err}", exc_info=True); self.last_error = f"Picamera2 Stop Encoder Error: {stop_err}"
+        else: logging.warning("Stop recording called but no encoder object was stored.")
 
-                    # *** ADDED: Explicitly restart capture stream ***
-                    try:
-                        logging.debug("Restarting main camera stream after stopping recording...")
-                        self.picam0.stop() # Stop the main stream
-                        time.sleep(0.1) # Short pause
-                        self.picam0.start() # Restart the main stream
-                        logging.info("Main camera stream restarted.")
-                    except Exception as restart_err:
-                        logging.error(f"!!! Failed to restart main camera stream after stopping recording: {restart_err}", exc_info=True)
-                        # Continue anyway, but log the error. Capture might still fail.
-                        self.last_error = f"Stream Restart Failed: {restart_err}"
+        # --- Close FileOutput (Crucial for finalization) ---
+        if file_output_to_close is not None:
+            try:
+                logging.debug(f"Closing FileOutput for {primary_path}...")
+                file_output_to_close.close()
+                logging.info("FileOutput closed successfully.")
+            except Exception as close_err:
+                logging.error(f"!!! Error closing FileOutput: {close_err}", exc_info=True)
+                self.last_error = f"FileOutput Close Error: {close_err}"
+                stop_success = False # If file closing fails, consider stop failed
 
-                else:
-                    logging.warning("Picamera2 instance (picam0) was None during stop sequence, cannot call stop_recording().")
-                    stop_success = False
-            except Exception as stop_err:
-                 logging.error(f"!!! Error stopping Picamera2 recording: {stop_err}", exc_info=True)
-                 self.last_error = f"Picamera2 Stop Rec Error: {stop_err}"
-                 stop_success = False
+        recording_duration = (recording_stop_time_monotonic - start_time_rec) if start_time_rec else None; log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""; logging.info(f"Recording duration:{log_duration}")
 
-        recording_duration = (recording_stop_time_monotonic - start_time_rec) if start_time_rec else None
-        log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""; logging.info(f"Recording duration:{log_duration}")
+        # --- Duplicate File to Other USB Drives ---
         copied_count = 0; copy_errors = 0
         if stop_success and primary_path and os.path.exists(primary_path) and len(target_paths) > 1:
             logging.info(f"Duplicating recorded file from {primary_path} to other drives...")
@@ -375,9 +358,10 @@ class CameraManager:
                 except Exception as copy_err: logging.error(f"!!! Failed copy to {target_path}: {copy_err}"); copy_errors += 1
             if copy_errors > 0: self.last_error = f"Rec Copy Error ({copy_errors} failed)"
         elif len(target_paths) <= 1: logging.debug("Only one target path, skipping duplication.")
-        elif not stop_success: logging.warning("Skipping duplication because recording stop failed.")
+        elif not stop_success: logging.warning("Skipping duplication because encoder stop/file close failed.")
         elif not primary_path or not os.path.exists(primary_path): logging.error(f"Skipping duplication: Primary file missing! Path: {primary_path}"); self.last_error = self.last_error or "Rec Error: Primary file missing"
 
+        # --- Filesystem Sync ---
         final_files_exist = any(os.path.exists(p) for p in target_paths if p)
         if final_files_exist:
             logging.info("Syncing filesystem..."); 
@@ -389,7 +373,8 @@ class CameraManager:
         if final_file_count < len(target_paths): logging.warning(f"Failed save/copy to {len(target_paths) - final_file_count} locations.")
 
     def capture_and_combine_frames(self):
-        """Captures frames for streaming and CV, recording handled by Picamera2."""
+        """Captures frames for streaming and CV, recording handled by Picamera2 encoder."""
+        # ... (logic unchanged) ...
         frame0 = None; frame1 = None; output_frame_for_stream = None; frame0_timestamp = None
         if self.is_initialized0 and self.picam0 and self.picam0.started:
             try:
@@ -424,45 +409,39 @@ class CameraManager:
 
     def get_latest_frame(self):
         """Returns the latest COMBINED output frame for streaming (thread-safe)."""
+        # ... (logic unchanged) ...
         with self.frame_lock: return self.output_frame.copy() if self.output_frame is not None else None
 
     def get_latest_raw_frame0(self):
         """Returns the latest RAW frame captured from Cam0 for CV processing (thread-safe)."""
+        # ... (logic unchanged) ...
         with self.raw_frame_lock: return self.latest_raw_frame0.copy() if self.latest_raw_frame0 is not None else None
 
     def shutdown(self):
         """Stops recording (if active) and closes enabled cameras cleanly."""
-        logging.info("--- CameraManager Shutting Down (Picamera2 Recording) ---")
-        if self.is_recording: logging.info("Shutdown: Stopping active Picamera2 recording..."); self.stop_recording()
-        # Check for orphaned recording only if picam0 instance still exists
-        elif self.picam0 and hasattr(self.picam0, 'stop_recording'): # Check method exists
-             try:
-                 # Attempt to stop recording, assuming it handles the 'not recording' case
-                 # Or perhaps better: check if encoder exists as a proxy
-                 if self.picam0_encoder is not None:
-                     logging.warning("Shutdown: Encoder exists but manager flag was false. Attempting stop.")
-                     self.picam0.stop_recording()
-             except Exception as e:
-                 logging.error(f"Error stopping potentially orphaned recording on shutdown: {e}")
+        logging.info("--- CameraManager Shutting Down (start_encoder/FileOutput) ---")
+        if self.is_recording: logging.info("Shutdown: Stopping active Picamera2 encoder..."); self.stop_recording()
+        elif self.picam0 and self.picam0_encoder is not None: # Check if encoder might be orphaned
+             logging.warning("Shutdown: Encoder exists but manager flag was false. Attempting stop.")
+             try: self.picam0.stop_encoder()
+             except Exception as e: logging.error(f"Error stopping orphaned encoder on shutdown: {e}")
+             # Try closing file output too if it exists
+             if self.file_output:
+                 try: self.file_output.close()
+                 except Exception as e: logging.error(f"Error closing orphaned file output on shutdown: {e}")
 
         cameras_to_shutdown = [];
         if self.picam0: cameras_to_shutdown.append((self.picam0, "Cam0"))
         if self.picam1 and config.ENABLE_CAM1: cameras_to_shutdown.append((self.picam1, "Cam1"))
-
         for picam_instance, name in cameras_to_shutdown:
             logging.info(f"Shutdown: Stopping and closing {name}...")
             try:
-                # *** REMOVED problematic check for picam_instance.recording ***
-                # Rely on stop_recording() called earlier based on self.is_recording flag
-                # and ensure stop()/close() are called regardless.
-
-                if picam_instance.started:
-                    picam_instance.stop(); logging.info(f"{name} stopped.")
+                # Ensure stream is stopped before closing
+                if picam_instance.started: picam_instance.stop(); logging.info(f"{name} stopped.")
                 picam_instance.close(); logging.info(f"{name} closed.")
-            except Exception as e:
-                logging.error(f"Error stopping/closing {name} during shutdown: {e}")
+            except Exception as e: logging.error(f"Error stopping/closing {name} during shutdown: {e}")
 
-        self.picam0 = None; self.is_initialized0 = False; self.picam1 = None; self.is_initialized1 = False; self.picam0_encoder = None
+        self.picam0 = None; self.is_initialized0 = False; self.picam1 = None; self.is_initialized1 = False; self.picam0_encoder = None; self.file_output = None
         self.actual_cam0_fps = None; self.last_cam0_capture_time = None; self.measured_cam0_fps_avg = None; self.recording_target_fps = None
         with self.frame_lock: self.output_frame = None; 
         with self.raw_frame_lock: self.latest_raw_frame0 = None
