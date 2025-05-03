@@ -9,10 +9,13 @@ Handles settings for multiple cameras, hardware, and the web UI.
                   failed to initialize with the available OpenCV/FFmpeg backend.
 **Modification 2:** Added VIDEO_START_DELAY_SECONDS for A/V sync adjustment.
 **Modification 3:** Removed VIDEO_START_DELAY_SECONDS, added AUDIO_START_DELAY_SECONDS.
+**Modification 4 (User Request):** Disabled audio, removed audio-specific config.
+**Modification 5 (User Request):** Added placeholder for camera intrinsic calibration data.
 """
 import os
 from libcamera import controls
 from picamera2 import Picamera2 # Needed for Picamera2.load_tuning_file
+import numpy as np # Added for camera intrinsic data
 
 # --- General ---
 LOG_LEVEL = "INFO" # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -39,7 +42,7 @@ MAX_CONSECUTIVE_CAPTURE_ERRORS = 15
 # ===========================================================
 # === Camera Enable Flags ===
 # ===========================================================
-ENABLE_CAM1 = False
+ENABLE_CAM1 = False # Keeping secondary camera disabled as per original file
 
 # ===========================================================
 # === Camera 0 (Primary - e.g., HQ Camera) Configuration ===
@@ -52,12 +55,12 @@ CAM0_ID = 0
 CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA - Target 30 FPS recording
     (1332, 990, 60.0),     # Custom - Target 60 FPS recording (Adjust if camera struggles)
-    (1920, 1080, 25.0),    # 1080p FHD - Target 30 FPS recording
+    (1920, 1080, 25.0),    # 1080p FHD - Target 25 FPS recording (Matches original default)
     (2028, 1080, 50.0),    # Specific HQ mode - Target 50 FPS recording
     (2028, 1520, 40.0),    # Specific HQ mode - Target 40 FPS recording
     (4056, 3040, 10.0)     # Max Res - Target 10 FPS recording
 ]
-CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ Target 30 FPS
+CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ Target 25 FPS
 
 # --- Cam0 Tuning ---
 CAM0_TUNING_FILE_PATH = None
@@ -84,6 +87,7 @@ CAM0_RECORDING_EXTENSION = ".mp4"
 # ===========================================================
 # === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
 # ===========================================================
+# Cam1 remains disabled, config kept for potential future use but not active
 CAM1_ID = 1
 CAM1_RESOLUTION = (640, 480)
 CAM1_FRAME_RATE = 30.0
@@ -105,7 +109,7 @@ else: print("Cam1 is disabled. Skipping Cam1 tuning file load.")
 # === Combined Stream Configuration ===
 # ===========================================================
 STREAM_BORDER_SIZE = 5
-STREAM_BORDER_COLOR = (64, 64, 64)
+STREAM_BORDER_COLOR = (64, 64, 64) # Gray
 
 # ===========================================================
 # === Common Camera Control Defaults & Ranges ===
@@ -140,27 +144,33 @@ DEFAULT_SATURATION = 1.0; MIN_SATURATION = 0.0; MAX_SATURATION = 2.0; STEP_SATUR
 DEFAULT_SHARPNESS = 1.0; MIN_SHARPNESS = 0.0; MAX_SHARPNESS = 2.0; STEP_SHARPNESS = 0.1
 
 # ===========================================================
-# === Audio Configuration ===
+# === Audio Configuration (DISABLED) ===
 # ===========================================================
-AUDIO_ENABLED = True
-AUDIO_DEVICE_HINT = "USB"
-AUDIO_SAMPLE_RATE = 44100
-AUDIO_CHANNELS = 1
-AUDIO_FORMAT = 'int16'
-AUDIO_BLOCK_SIZE = 1024
-AUDIO_TEMP_EXTENSION = ".wav"
-AUDIO_MUX_TIMEOUT = 60
-# Set multiplier for re-encoding timeout (if used, currently not)
-AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 1 # Keep at 1 for copy
-FFMPEG_PATH = "/usr/bin/ffmpeg"
-FFMPEG_LOG_LEVEL = "error"
+AUDIO_ENABLED = False # Requirement 1: Disable audio completely
+# All other audio-related constants removed as they are no longer needed.
 
 # ===========================================================
-# === Recording & Sync Configuration ===
+# === Computer Vision (CV) Configuration ===
 # ===========================================================
-# Delay (in seconds) before starting the actual audio stream capture.
-# Helps compensate if video starts slightly before audio is ready/stable.
-AUDIO_START_DELAY_SECONDS = 1.0
+# Requirement 5: Add spot for intrinsic calibration data
+# Replace with your actual calibrated data
+CAMERA_INTRINSIC_MATRIX = np.array([
+    [1000.0,    0.0, 640.0], # [fx, 0, cx]
+    [   0.0, 1000.0, 480.0], # [0, fy, cy]
+    [   0.0,    0.0,   1.0]  # [0, 0,  1]
+]) # Example for 1280x960 assumed principal point, adjust fx, fy based on calibration
+CAMERA_DISTORTION_COEFFS = np.array([0.0, 0.0, 0.0, 0.0, 0.0]) # Example: [k1, k2, p1, p2, k3], adjust based on calibration
+
+CV_PROCESSING_ENABLED = True # Flag to enable/disable CV processing pipeline
+CV_INPUT_SCALING_FACTOR = 0.5 # Example: Process CV on frames scaled down by 50%
+CV_APPLY_GRAYSCALE = False # Example: Flag for potential grayscale preprocessing
+# Add other CV-related config parameters here as needed
+
+# ===========================================================
+# === Recording Configuration ===
+# ===========================================================
+# Recording configuration is now solely video-based
+# Target FPS/Resolution enforcement handled in camera_manager based on CAM0_RESOLUTIONS
 
 # ===========================================================
 # === Hardware Configuration ===

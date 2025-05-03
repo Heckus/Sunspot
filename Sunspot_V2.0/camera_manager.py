@@ -3,8 +3,7 @@
 camera_manager.py
 
 Manages multiple Picamera2 cameras, including initialization, configuration,
-frame capture (combined stream), video recording (from primary camera),
-and audio recording/muxing.
+frame capture (combined stream), and video recording (from primary camera).
 
 **Modification:** Overhauled recording logic to use a dedicated thread and queue
                   to strictly enforce the target FPS, aiming to fix A/V desync.
@@ -25,6 +24,11 @@ and audio recording/muxing.
                     video frames to the recording queue, attempting to align with audio.
 **Modification 8:** Removed VIDEO_START_DELAY_SECONDS logic. Implemented AUDIO_START_DELAY_SECONDS
                     within the audio capture thread before starting the stream.
+**Modification 9 (User Request):** Removed all audio recording and processing components.
+**Modification 10 (User Request):** Ensured camera manager uses designated FPS/resolution from config
+                    for recording (VideoWriter initialization) and capture (camera controls).
+**Modification 11 (User Request):** Modified frame capture to make the raw frame from Cam0
+                    available for external CV processing via a new getter method.
 """
 
 import os
@@ -32,18 +36,12 @@ import time
 import datetime
 import logging
 import threading
-import cv2
-import numpy as np
+import cv2 # Used for video writing and frame manipulation
+import numpy as np # Used for frame manipulation
 from picamera2 import Picamera2
 from libcamera import controls, Transform
-
-# Audio related imports
-import sounddevice as sd
-import soundfile as sf
-import subprocess
-import queue # Use queue for frame passing
-import tempfile
-import numpy # Explicit import for audio dtype check
+import queue # Use queue for frame passing to recording thread
+import subprocess # Only needed for 'sync' command now
 
 # Import configuration constants
 import config
@@ -77,10 +75,10 @@ def get_usb_mounts():
 
 
 class CameraManager:
-    """Handles multiple camera operations and state, including audio."""
+    """Handles multiple camera operations and state (now video-only)."""
 
     def __init__(self):
-        """Initializes the CameraManager based on config."""
+        """Initializes the CameraManager based on config (audio removed)."""
         self.picam0 = None # Primary camera (HQ)
         self.picam1 = None # Secondary camera (IMX219) - conditionally initialized
         self.is_initialized0 = False
@@ -93,26 +91,26 @@ class CameraManager:
         self.last_cam0_capture_time = None # For calculating instantaneous FPS
         self.measured_cam0_fps_avg = None # Simple moving average for measured FPS
 
-        # State variable for output frame (combined or single)
+        # State variable for output frame (combined or single) for streaming
         self.output_frame = None # Stores the latest frame for streaming
+        # State variable for raw frame output for CV processing (Req 4)
+        self.latest_raw_frame0 = None # Stores the latest raw frame from Cam0 for CV
 
-        # --- Recording State (Refactored) ---
+        # --- Recording State (Video Only) ---
         self.is_recording = False
         self.recording_target_fps = None # Store the TARGET FPS used for the current recording
         self.video_writers = [] # List of OpenCV VideoWriter objects for Cam0
-        self.recording_paths = [] # List of corresponding file paths for Cam0 (video-only initially)
+        self.recording_paths = [] # List of corresponding file paths for Cam0
         self.recording_frame_queue = None # Queue for passing frames to recording thread
         self.recording_thread = None # Dedicated thread for writing video frames
         self.stop_recording_event = threading.Event() # Event to signal recording thread to stop
         self.recording_start_time_monotonic = None # Track recording start time precisely
-        self.recording_frame_timestamps = [] # List to store capture timestamps during recording
-        self.recording_actual_frame_count = 0 # Count actual frames captured during recording
-        # self.video_delay_passed = False # Flag removed in Mod 8
 
         # Locks for thread safety
-        self.frame_lock = threading.Lock() # Protects access to output_frame
+        self.frame_lock = threading.Lock() # Protects access to output_frame (for streaming)
+        self.raw_frame_lock = threading.Lock() # Protects access to latest_raw_frame0 (for CV)
         self.config_lock = threading.Lock() # Protects access to camera state/config changes
-        self.recording_lock = threading.Lock() # Protects access to recording state variables (is_recording, paths, etc.)
+        self.recording_lock = threading.Lock() # Protects access to recording state variables
 
         # --- Initialize Common Camera Controls to Defaults from Config ---
         # (Control initialization unchanged)
@@ -136,32 +134,17 @@ class CameraManager:
         try: self.current_noise_reduction_mode = controls.draft.NoiseReductionModeEnum.__members__[config.DEFAULT_NOISE_REDUCTION_MODE_NAME]
         except (AttributeError, KeyError): logging.warning(f"Default NR mode '{config.DEFAULT_NOISE_REDUCTION_MODE_NAME}' invalid/unavailable. Using fallback Off.")
 
-        # --- Audio Recording State ---
-        # (Audio state variables unchanged)
-        self.audio_stream = None
-        self.audio_thread = None
-        self.audio_write_thread = None
-        self.audio_queue = queue.Queue()
-        self.temp_audio_file_path = None
-        self.audio_device_index = None
-        self.audio_last_error = None
-        self.stop_audio_event = threading.Event()
-        self.audio_dtype = None
-        if config.AUDIO_ENABLED:
-            try:
-                self.audio_dtype = np.dtype(config.AUDIO_FORMAT).type
-            except TypeError:
-                 logging.error(f"Unsupported audio format '{config.AUDIO_FORMAT}' in config. Disabling audio.")
-                 config.AUDIO_ENABLED = False
+        # --- Audio Recording State REMOVED ---
 
-        logging.info("CameraManager initialized.")
+        logging.info("CameraManager initialized (Audio Disabled).")
         if not config.ENABLE_CAM1:
             logging.warning("Cam1 is DISABLED in config.py. Operating in single-camera mode.")
         logging.debug(f"Initial Controls: ISO={self.current_iso_name}({self.current_analogue_gain:.2f}), AE={self.current_ae_mode.name}, Metering={self.current_metering_mode.name}, NR={self.current_noise_reduction_mode.name}, Bright={self.current_brightness}, Contr={self.current_contrast}, Sat={self.current_saturation}, Sharp={self.current_sharpness}")
 
 
     def _initialize_camera(self, cam_id, resolution_index=None):
-        """Internal helper to initialize or re-initialize a specific camera instance. (Unchanged)"""
+        """Internal helper to initialize or re-initialize a specific camera instance.
+           Ensures camera controls (including FrameRate) are set according to config."""
         picam_instance = None
         is_initialized_flag = False
         cam_name = f"Cam{cam_id}"
@@ -185,7 +168,7 @@ class CameraManager:
             current_res_index = self.current_resolution_index0
             tuning_data = config.CAM0_TUNING
             try:
-                target_width, target_height, target_fps = res_list[current_res_index]
+                target_width, target_height, target_fps = res_list[current_res_index] # Get target FPS from config
             except IndexError:
                 logging.error(f"{cam_name}: Res index {current_res_index} out of bounds for {len(res_list)} resolutions. Using default index {config.CAM0_DEFAULT_RESOLUTION_INDEX}.")
                 current_res_index = config.CAM0_DEFAULT_RESOLUTION_INDEX
@@ -194,7 +177,7 @@ class CameraManager:
 
         elif cam_id == config.CAM1_ID: # Only executes if ENABLE_CAM1 is True
             target_width, target_height = config.CAM1_RESOLUTION
-            target_fps = config.CAM1_FRAME_RATE
+            target_fps = config.CAM1_FRAME_RATE # Use Cam1 specific FPS
             tuning_data = config.CAM1_TUNING
             current_res_index = 0 # Cam1 has fixed resolution
         else:
@@ -229,10 +212,11 @@ class CameraManager:
             picam_instance = Picamera2(camera_num=cam_id, tuning=tuning_data)
             logging.info(f"{cam_name}: Picamera2 object created.")
 
+            # Ensure FrameRate is set based on the config (Requirement 2)
             controls_to_set = {
-                "FrameRate": target_fps,
+                "FrameRate": target_fps, # Explicitly set target frame rate
                 "NoiseReductionMode": self.current_noise_reduction_mode,
-                "AeEnable": True,
+                "AeEnable": True, # Default to AE enabled
                 "AeExposureMode": self.current_ae_mode,
                 "AeMeteringMode": self.current_metering_mode,
                 "AnalogueGain": self.current_analogue_gain,
@@ -242,25 +226,32 @@ class CameraManager:
                 "Sharpness": self.current_sharpness,
             }
             if self.current_analogue_gain == 0.0:
-                controls_to_set["AeEnable"] = True
+                controls_to_set["AeEnable"] = True # Auto ISO needs AE enabled
                 logging.info(f"{cam_name}: AnalogueGain is 0.0 (Auto ISO), ensuring AE is enabled.")
+            else:
+                # If specific ISO is set, consider disabling AE? Depends on desired behavior.
+                # For now, keep AE enabled, allowing it to adjust exposure time.
+                # controls_to_set["AeEnable"] = False # Uncomment to fix exposure time
+                pass
 
             controls_to_set = {k: v for k, v in controls_to_set.items() if v is not None}
 
             transform = Transform()
-            if cam_id == config.CAM1_ID:
+            if cam_id == config.CAM1_ID: # Apply flips only to Cam1 if enabled
                 if config.CAM1_VFLIP: transform.vflip = True
                 if config.CAM1_HFLIP: transform.hflip = True
 
+            # Configure with specified resolution, format, and controls
             cam_config = picam_instance.create_video_configuration(
-                main={"size": (target_width, target_height), "format": "RGB888"},
+                main={"size": (target_width, target_height), "format": "RGB888"}, # Using RGB for CV compatibility
                 controls=controls_to_set,
                 transform=transform
             )
             logging.info(f"{cam_name}: Configuring with: main={cam_config['main']}, controls={cam_config['controls']}")
             picam_instance.configure(cam_config)
-            time.sleep(0.5)
+            time.sleep(0.5) # Allow config to apply
 
+            # Verify applied configuration and actual frame rate
             new_config = picam_instance.camera_configuration()
             if new_config:
                 applied_controls = new_config.get('controls', {})
@@ -269,20 +260,21 @@ class CameraManager:
                 actual_fps_reported = applied_controls.get('FrameRate')
                 if actual_fps_reported is not None:
                     logging.info(f"{cam_name}: Driver reported actual FrameRate: {actual_fps_reported:.2f} fps")
-                    if abs(actual_fps_reported - target_fps) > 1.0:
+                    if abs(actual_fps_reported - target_fps) > 1.0: # Log significant deviation
                         logging.warning(f"{cam_name}: Driver adjusted FrameRate significantly from target {target_fps:.1f} to {actual_fps_reported:.2f}")
                 else:
                      logging.warning(f"{cam_name}: Could not read back actual FrameRate from config.")
-                     actual_fps_reported = target_fps
+                     actual_fps_reported = target_fps # Assume target if readback fails
             else:
                 logging.warning(f"{cam_name}: Could not get camera configuration after applying.")
-                actual_fps_reported = target_fps
+                actual_fps_reported = target_fps # Assume target if config read fails
 
             logging.info(f"{cam_name}: Starting camera...")
             picam_instance.start()
             logging.info(f"{cam_name}: Camera started");
-            time.sleep(1.0)
+            time.sleep(1.0) # Allow camera sensor to stabilize
 
+            # Final check on configuration after start
             actual_config_after_start = picam_instance.camera_configuration()
             if not actual_config_after_start:
                 raise RuntimeError(f"{cam_name}: Failed get config after start.")
@@ -291,6 +283,7 @@ class CameraManager:
             actual_w = actual_format.get('size', (0,0))[0]
             actual_h = actual_format.get('size', (0,0))[1]
             actual_fmt_str = actual_format.get('format', 'Unknown')
+            # Read back FPS again after start, might differ slightly
             actual_fps_final = actual_config_after_start.get('controls', {}).get('FrameRate', actual_fps_reported)
             actual_gain = actual_config_after_start.get('controls', {}).get('AnalogueGain', 'N/A')
 
@@ -315,10 +308,11 @@ class CameraManager:
             return False
 
         finally:
+            # Update the corresponding camera instance and state
             if cam_id == config.CAM0_ID:
                 self.picam0 = picam_instance
                 self.is_initialized0 = is_initialized_flag
-                self.actual_cam0_fps = actual_fps_reported
+                self.actual_cam0_fps = actual_fps_reported # Store the reported FPS
                 self.last_cam0_capture_time = None
                 self.measured_cam0_fps_avg = None
             elif cam_id == config.CAM1_ID:
@@ -327,17 +321,17 @@ class CameraManager:
 
 
     def initialize_cameras(self, resolution_index=None):
-        """Initializes or re-initializes camera(s) based on config. (Unchanged)"""
+        """Initializes or re-initializes camera(s) based on config."""
         with self.config_lock:
             logging.info("--- Initializing Camera(s) ---")
             success0 = self._initialize_camera(config.CAM0_ID, resolution_index)
-            success1 = True
+            success1 = True # Assume success if Cam1 is disabled
 
-            if config.ENABLE_CAM1:
+            if config.ENABLE_CAM1: # Only initialize Cam1 if enabled
                 success1 = self._initialize_camera(config.CAM1_ID)
             else:
                 logging.info("Cam1 initialization skipped (disabled in config).")
-                self.picam1 = None
+                self.picam1 = None # Ensure Cam1 instance is None if disabled
                 self.is_initialized1 = False
 
             if success0 and success1:
@@ -346,23 +340,26 @@ class CameraManager:
                 return True
             else:
                 logging.error("!!! Failed to initialize one or both required cameras. Check logs. !!!")
+                # Set appropriate error messages
                 if not success0 and not self.last_error: self.last_error = "Cam0 Initialization Failed"
                 if not success1 and config.ENABLE_CAM1 and not self.last_error: self.last_error = "Cam1 Initialization Failed"
                 elif not success1 and config.ENABLE_CAM1: self.last_error += " / Cam1 Initialization Failed"
                 return False
 
     def get_cam0_resolution_config(self):
-        """Returns the configured resolution tuple (width, height, target_fps) for Cam0. (Unchanged)"""
+        """Returns the configured resolution tuple (width, height, target_fps) for Cam0."""
         try:
+            # Return the currently selected resolution config tuple
             return config.CAM0_RESOLUTIONS[self.current_resolution_index0]
         except IndexError:
             logging.error(f"Invalid resolution index {self.current_resolution_index0} for Cam0. Using default.")
+            # Fallback to default index, ensuring it's within bounds
             safe_default_index = max(0, min(len(config.CAM0_RESOLUTIONS) - 1, config.CAM0_DEFAULT_RESOLUTION_INDEX))
             self.current_resolution_index0 = safe_default_index
             return config.CAM0_RESOLUTIONS[safe_default_index]
 
     def apply_camera_controls(self, controls_dict):
-        """Applies a dictionary of common controls to running cameras. (Unchanged)"""
+        """Applies a dictionary of common controls to running cameras. (Unchanged logic)"""
         if not self.is_initialized0 and (config.ENABLE_CAM1 and not self.is_initialized1):
             logging.error("Cannot apply controls: No cameras initialized.")
             self.last_error = "Control Apply Error: No cameras ready."
@@ -418,7 +415,7 @@ class CameraManager:
                 else:
                     logging.warning("Skipping control application for Cam0 (not ready).")
 
-                # Apply to Cam1
+                # Apply to Cam1 (only if enabled)
                 if config.ENABLE_CAM1:
                     logging.debug(f"Applying to Cam1...")
                     if self.is_initialized1 and self.picam1 and self.picam1.started:
@@ -439,13 +436,14 @@ class CameraManager:
             # --- Post-Application ---
             required_successes = 1 if not config.ENABLE_CAM1 else 2
             if success_count > 0:
+                # Allow some time for controls like gain/exposure to settle
                 if any(k in controls_dict for k in ['AnalogueGain', 'AeExposureMode', 'AeMeteringMode', 'Brightness', 'ExposureTime']):
                     time.sleep(0.5)
                 else:
                     time.sleep(0.1)
 
                 if temp_last_error is None and success_count >= required_successes:
-                     self.last_error = None
+                     self.last_error = None # Clear error if all succeeded
 
                 logging.info(f"Controls applied successfully to {success_count} camera(s).")
                 return True
@@ -461,17 +459,18 @@ class CameraManager:
 
 
     def get_camera_state(self):
-        """Returns a dictionary containing the current camera state and common control values. (Unchanged)"""
+        """Returns a dictionary containing the current camera state (no audio state)."""
         with self.config_lock:
             res_w0, res_h0, target_fps0 = self.get_cam0_resolution_config()
 
+            # Determine output frame dimensions (for streaming)
             output_w = res_w0
             output_h = res_h0
-            if config.ENABLE_CAM1 and self.is_initialized1:
+            if config.ENABLE_CAM1 and self.is_initialized1: # Adjust if Cam1 enabled
                 res_w1, res_h1 = config.CAM1_RESOLUTION
-                display_w1 = min(res_w1, output_w)
+                display_w1 = min(res_w1, output_w) # Scale cam1 width if needed
                 display_h1 = res_h1 if display_w1 == res_w1 else int(res_h1 * (display_w1 / res_w1))
-                output_h = res_h0 + display_h1 + config.STREAM_BORDER_SIZE
+                output_h = res_h0 + display_h1 + config.STREAM_BORDER_SIZE # Stack vertically
 
             ae_mode_name = getattr(self.current_ae_mode, 'name', str(self.current_ae_mode))
             metering_mode_name = getattr(self.current_metering_mode, 'name', str(self.current_metering_mode))
@@ -484,15 +483,15 @@ class CameraManager:
                 'is_cam1_enabled': config.ENABLE_CAM1,
                 'resolution_index': self.current_resolution_index0,
                 'resolution_wh': (res_w0, res_h0),
-                'output_frame_wh': (output_w, output_h),
-                'target_cam0_fps': target_fps0,
+                'output_frame_wh': (output_w, output_h), # Dimensions of the combined streaming frame
+                'target_cam0_fps': target_fps0, # Target FPS from config for Cam0
                 'actual_cam0_fps': self.actual_cam0_fps, # Actual reported by driver (for info)
                 'measured_cam0_fps': self.measured_cam0_fps_avg, # Measured capture rate (for info)
-                'recording_target_fps': self.recording_target_fps, # The FPS being enforced for recording
+                'recording_target_fps': self.recording_target_fps, # The target FPS used for current recording
                 'is_recording': self.is_recording,
                 'recording_paths': list(self.recording_paths), # Paths being written to
                 'last_error': self.last_error,
-                'audio_last_error': self.audio_last_error,
+                # 'audio_last_error': None, # Removed audio error
                 'iso_mode': self.current_iso_name,
                 'analogue_gain': self.current_analogue_gain,
                 'ae_mode': ae_mode_name,
@@ -506,11 +505,11 @@ class CameraManager:
         return state
 
     # ===========================================================
-    # === Recording Methods (Overhauled) ===
+    # === Recording Methods (Video Only) ===
     # ===========================================================
 
     def start_recording(self):
-        """Starts recording video FROM CAM0 (using dedicated thread) and audio (if enabled)."""
+        """Starts recording video FROM CAM0 using a dedicated thread."""
         with self.recording_lock:
             if self.is_recording:
                 logging.warning("Start recording called, but already recording.")
@@ -521,7 +520,7 @@ class CameraManager:
                 self.last_error = "Cam0 not available for recording."
                 return False
 
-            logging.info("Attempting to start recording (Video: Cam0)...")
+            logging.info("Attempting to start video recording (Cam0)...")
             usb_drives = get_usb_mounts()
             if not usb_drives:
                 logging.error(f"Cannot start recording: No writable USB drives found in {config.USB_BASE_PATH}.")
@@ -532,22 +531,24 @@ class CameraManager:
             try:
                 width, height, target_fps = self.get_cam0_resolution_config()
 
-                # --- CRITICAL: Use TARGET FPS from config ---
+                # --- CRITICAL: Use TARGET FPS from config (Requirement 2) ---
                 if target_fps <= 0:
                      logging.error(f"Invalid TARGET FPS ({target_fps}) in config for resolution index {self.current_resolution_index0}. Cannot record.")
                      self.last_error = "Rec Param Error: Invalid Target FPS in config"
                      return False
 
-                # Store the target FPS (used for VideoWriter init and fallback)
+                # Store the target FPS (used for VideoWriter init)
                 self.recording_target_fps = target_fps
                 logging.info(f"Using TARGET FPS for VideoWriter initialization: {self.recording_target_fps:.2f} fps")
 
                 if width <= 0 or height <= 0:
                     raise ValueError(f"Invalid Cam0 dimensions: {width}x{height}")
 
+                # Get codec and timestamp for filenames
                 fourcc = cv2.VideoWriter_fourcc(*config.CAM0_RECORDING_FORMAT)
                 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                base_filename = f"recording_{timestamp}_{width}x{height}"
+                # Use final filename directly, no intermediate "_video" suffix needed
+                base_filename = f"recording_{timestamp}_{width}x{height}{config.CAM0_RECORDING_EXTENSION}"
 
             except Exception as setup_err:
                 logging.error(f"!!! Error getting recording parameters: {setup_err}", exc_info=True)
@@ -563,11 +564,10 @@ class CameraManager:
 
             for drive_path in usb_drives:
                 try:
-                    video_only_filename = f"{base_filename}_video{config.CAM0_RECORDING_EXTENSION}"
-                    full_path = os.path.join(drive_path, video_only_filename)
+                    full_path = os.path.join(drive_path, base_filename) # Use final filename
 
-                    # Initialize VideoWriter with the TARGET FPS
-                    # This sets the container metadata but doesn't force frame timing
+                    # Initialize VideoWriter with the TARGET FPS (Requirement 2)
+                    # This sets the container metadata FPS.
                     writer = cv2.VideoWriter(full_path, fourcc, self.recording_target_fps, (width, height))
                     if not writer.isOpened():
                         raise IOError(f"Failed to open VideoWriter for path: {full_path}")
@@ -587,45 +587,30 @@ class CameraManager:
                 self.recording_paths = temp_paths
 
                 # --- Setup Recording Thread ---
-                # Queue size can be smaller now as we don't buffer for duplication
-                queue_size = max(10, int(self.recording_target_fps)) # e.g., 1 sec buffer or 10 frames min
+                # Queue size based on target FPS (e.g., 1 sec buffer or 10 frames min)
+                queue_size = max(10, int(self.recording_target_fps))
                 self.recording_frame_queue = queue.Queue(maxsize=queue_size)
                 self.stop_recording_event.clear()
 
                 self.recording_thread = threading.Thread(
                     target=self._recording_thread_loop,
                     name="VideoWriteThread"
-                    # No need to pass width/height for black frame anymore
                 )
                 self.recording_thread.daemon = True # Allow exit if main thread exits
-
-                # --- Reset Frame Timestamp Tracking ---
-                self.recording_frame_timestamps = []
-                self.recording_actual_frame_count = 0
-                # self.video_delay_passed = False # Reset delay flag - REMOVED
 
                 self.is_recording = True # Set flag before starting thread
                 self.recording_start_time_monotonic = time.monotonic() # Record precise start time
                 self.recording_thread.start()
                 logging.info(f"Video recording thread started for {success_count} drive(s).")
 
-                # --- Start Audio ---
-                # Audio start delay is now handled INSIDE the audio thread
-                if config.AUDIO_ENABLED:
-                    if not self._start_audio_recording(base_filename):
-                        logging.error("Failed to start audio recording component.")
-                        self.audio_last_error = self.audio_last_error or "Audio start failed"
-                        # Continue video recording even if audio fails
-                    else:
-                        logging.info("Audio recording component started.")
-                        self.audio_last_error = None
+                # --- Audio Start REMOVED ---
 
                 # Handle partial success
                 if start_error and success_count < len(usb_drives):
                     self.last_error = f"Partial Rec Start: {start_error}"
                 elif not start_error:
                      # Clear previous recording-related errors on full success
-                    if self.last_error and ("Recording" in self.last_error or "writer" in self.last_error or "USB" in self.last_error or "sync" in self.last_error or "Mux" in self.last_error):
+                    if self.last_error and ("Recording" in self.last_error or "writer" in self.last_error or "USB" in self.last_error or "sync" in self.last_error):
                         logging.info(f"Clearing previous video error on successful start: '{self.last_error}'")
                         self.last_error = None
                 return True
@@ -635,14 +620,14 @@ class CameraManager:
                 self.recording_target_fps = None
                 logging.error("Failed to start video recording on ANY drive.")
                 self.last_error = f"Rec Start Failed: {start_error or 'No writers opened'}"
-                # Ensure any partially opened writers are released (though unlikely)
+                # Ensure any partially opened writers are released
                 for writer in temp_writers:
                     try: writer.release()
                     except: pass
                 return False
 
     def _recording_thread_loop(self):
-        """Dedicated thread to write actual captured video frames as they arrive."""
+        """Dedicated thread to write captured video frames as they arrive from the queue."""
         logging.info("Video recording thread loop starting (writing actual frames).")
 
         frames_written = 0
@@ -652,24 +637,26 @@ class CameraManager:
 
         while not self.stop_recording_event.is_set():
             frame_to_write = None
-            timestamp = None
 
             try:
                 # --- Get Frame from Queue (Blocking with Timeout) ---
                 try:
-                    # Wait up to 0.5 seconds for a frame
-                    frame_data, timestamp = self.recording_frame_queue.get(block=True, timeout=0.5)
-                    if frame_data is not None: # Check if it's the sentinel potentially
-                         frame_to_write = frame_data
-                         queue_timeouts = 0 # Reset timeout counter on success
-                    elif frame_data is None: # Explicit sentinel check (if we implement one)
+                    # Wait up to 0.5 seconds for a frame (tuple of frame, timestamp)
+                    # Timestamp is captured in capture_and_combine_frames but not used here directly
+                    frame_data, _ = self.recording_frame_queue.get(block=True, timeout=0.5)
+
+                    if frame_data is None: # Check for sentinel value
                          logging.info("Recording thread: Received stop sentinel.")
                          break
+                    else:
+                         frame_to_write = frame_data
+                         queue_timeouts = 0 # Reset timeout counter on success
+
                 except queue.Empty:
-                    # Timeout waiting for frame - capture thread might be slow or stopped
+                    # Timeout waiting for frame - capture loop might be slow or stopped
                     queue_timeouts += 1
                     if queue_timeouts >= max_timeouts_before_warn:
-                         logging.warning(f"Recording thread: Waited {queue_timeouts * 0.5:.1f}s for frame, queue empty. Capture thread lagging?")
+                         logging.warning(f"Recording thread: Waited {queue_timeouts * 0.5:.1f}s for frame, queue empty. Capture loop lagging?")
                          queue_timeouts = 0 # Reset after warning
                     # Continue loop to check stop_recording_event
                     continue
@@ -682,30 +669,33 @@ class CameraManager:
                 if frame_to_write is not None:
                     write_errors = 0
                     with self.recording_lock: # Access writers list under lock
-                        current_writers = list(self.video_writers) # Copy list
+                        # Make a copy of the list to avoid issues if modified during iteration (unlikely here)
+                        current_writers = list(self.video_writers)
 
                     if not current_writers:
                         logging.warning("Recording thread: No video writers available, but received frame. Stopping?")
                         # This state shouldn't normally happen if stop_recording cleans up properly
-                        # self.stop_recording_event.set() # Consider stopping if writers disappear
                         continue
 
                     for i, writer in enumerate(current_writers):
                         try:
                             writer.write(frame_to_write)
                         except Exception as e:
+                            # Try to get path for error message, fallback if index out of bounds
                             path_str = self.recording_paths[i] if i < len(self.recording_paths) else f"Writer {i}"
                             logging.error(f"!!! Recording thread: Failed write frame {frames_written+1} to {path_str}: {e}")
                             write_errors += 1
+                            # Set last_error only if it's a new write error type
                             if "write error" not in (self.last_error or ""):
                                  self.last_error = f"Frame write error: {os.path.basename(path_str)}"
 
                     if write_errors == 0:
                         frames_written += 1
                     elif write_errors == len(current_writers):
+                        # If all writers failed, stop the recording process
                         logging.error("!!! Recording thread: All video writers failed to write frame. Stopping recording.")
                         self.last_error = "Rec stopped: All writers failed."
-                        self.stop_recording_event.set()
+                        self.stop_recording_event.set() # Signal stop
                         break
 
                 # --- Periodic Logging ---
@@ -717,19 +707,16 @@ class CameraManager:
 
             except Exception as loop_err:
                 logging.exception(f"!!! Unexpected error in recording thread loop: {loop_err}")
-                time.sleep(0.5) # Pause after error
+                time.sleep(0.5) # Pause briefly after an unexpected error
 
         # --- Cleanup ---
-        logging.info(f"Video recording thread loop finished. Total actual frames written: {frames_written}.")
+        logging.info(f"Video recording thread loop finished. Total frames written by thread: {frames_written}.")
         # Note: Releasing writers is handled in stop_recording after thread join
 
     def stop_recording(self):
-        """Stops video (signals thread) / audio recording, releases writers, muxes files, syncs."""
-        audio_file_to_mux = None
-        final_output_paths = []
+        """Stops video recording thread, releases writers, and syncs filesystem."""
+        final_output_paths = [] # Store paths of successfully saved files
         released_count = 0
-        # We don't calculate average FPS here anymore for muxing hint
-        # target_fps_used_for_recording = self.recording_target_fps # Keep for logging maybe?
 
         with self.recording_lock:
             if not self.is_recording:
@@ -741,38 +728,24 @@ class CameraManager:
                         self.stop_recording_event.set()
                         # Try putting sentinel in case it's blocked on get()
                         if self.recording_frame_queue:
-                            try: self.recording_frame_queue.put_nowait((None, None))
-                            except queue.Full: pass
+                            try: self.recording_frame_queue.put_nowait((None, None)) # Frame is None for sentinel
+                            except queue.Full: pass # Ignore if queue is full
                         self.recording_thread.join(timeout=2.0) # Wait briefly
                         if self.recording_thread.is_alive(): logging.error("Orphaned recording thread did not exit!")
                         self.recording_thread = None
                     # Clear lists even if thread join failed
                     self.video_writers.clear()
                     self.recording_paths.clear()
-                if config.AUDIO_ENABLED and (self.audio_thread and self.audio_thread.is_alive()):
-                    logging.warning("Stopping orphaned audio recording during stop_recording call...")
-                    self._stop_audio_recording() # Stop audio separately
+                # No audio thread to check
                 self.recording_target_fps = None
                 self.recording_frame_queue = None
-                self.recording_frame_timestamps = [] # Clear timestamps too
-                self.recording_actual_frame_count = 0
-                # self.video_delay_passed = False # Reset delay flag - REMOVED
                 return
 
-            logging.info("Stopping recording (Video Thread and Audio)...")
+            logging.info("Stopping video recording...")
             self.is_recording = False # Set flag early
             recording_stop_time_monotonic = time.monotonic()
             recording_duration = (recording_stop_time_monotonic - self.recording_start_time_monotonic) if self.recording_start_time_monotonic else None
-            start_time_rec = self.recording_start_time_monotonic
-            self.recording_start_time_monotonic = None
-            # self.video_delay_passed = False # Reset delay flag - REMOVED
-
-            # --- Log Actual Frame Count and Duration (for debugging) ---
-            if recording_duration and self.recording_actual_frame_count > 0:
-                 actual_avg_fps = self.recording_actual_frame_count / recording_duration
-                 logging.info(f"Recording duration: {recording_duration:.2f}s. Actual frames captured: {self.recording_actual_frame_count} (Avg: {actual_avg_fps:.2f} fps)")
-            elif self.recording_actual_frame_count > 0:
-                 logging.info(f"Actual frames captured: {self.recording_actual_frame_count} (duration unknown).")
+            self.recording_start_time_monotonic = None # Reset start time
 
             # --- Signal and Wait for Recording Thread ---
             if self.recording_thread and self.recording_thread.is_alive():
@@ -781,7 +754,8 @@ class CameraManager:
                 # Put sentinel in queue to unblock thread if waiting on get()
                 if self.recording_frame_queue:
                     try:
-                        self.recording_frame_queue.put_nowait((None, None)) # Send sentinel
+                        # Put a tuple (None frame, None timestamp) as sentinel
+                        self.recording_frame_queue.put_nowait((None, None))
                     except queue.Full:
                         logging.warning("Could not put stop sentinel in full recording queue.")
                     except Exception as e:
@@ -799,29 +773,22 @@ class CameraManager:
             else:
                  logging.warning("Recording thread object did not exist during stop sequence.")
 
+            # Clear thread and queue references
             self.recording_thread = None
-            self.recording_frame_queue = None # Clear queue reference
-            self.recording_frame_timestamps = [] # Clear timestamps
-            self.recording_actual_frame_count = 0 # Reset frame count
+            self.recording_frame_queue = None
 
             # --- Get Lists for Cleanup (Still under lock) ---
             writers_to_release = list(self.video_writers)
             video_paths_recorded = list(self.recording_paths)
 
-            # Clear manager's lists
+            # Clear manager's lists immediately
             self.video_writers.clear()
             self.recording_paths.clear()
             self.recording_target_fps = None # Reset target FPS
 
-        # --- Stop Audio (Outside recording lock) ---
-        if config.AUDIO_ENABLED:
-            audio_file_to_mux = self._stop_audio_recording()
-            if audio_file_to_mux:
-                logging.info(f"Audio recording stopped. Temp file ready for muxing: {audio_file_to_mux}")
-            else:
-                logging.warning("Audio recording stop failed or was not running.")
+        # --- Stop Audio REMOVED ---
 
-        # --- Release Video Writers and Mux (Outside recording lock) ---
+        # --- Release Video Writers (Outside recording lock) ---
         logging.info(f"Releasing {len(writers_to_release)} video writer(s)...")
         for i, writer in enumerate(writers_to_release):
             video_path = video_paths_recorded[i] if i < len(video_paths_recorded) else f"Unknown_Path_{i}"
@@ -830,47 +797,28 @@ class CameraManager:
                 logging.info(f"Released video writer for: {video_path}")
                 released_count += 1
 
-                # --- Muxing ---
-                if audio_file_to_mux and os.path.exists(video_path):
-                    # Mux using -c:v copy (reverted from re-encode)
-                    final_path = self._mux_audio_video(video_path, audio_file_to_mux)
-                    if final_path:
-                        final_output_paths.append(final_path)
-                        if final_path != video_path:
-                            try:
-                                os.remove(video_path)
-                                logging.info(f"Removed temporary video-only file: {video_path}")
-                            except OSError as rm_err:
-                                logging.warning(f"Could not remove temporary video file {video_path}: {rm_err}")
-                    else:
-                        logging.error(f"Muxing failed for {video_path}. Keeping video-only file.")
-                        final_output_paths.append(video_path)
-                        self.last_error = self.last_error or "Muxing Failed"
-                elif os.path.exists(video_path):
-                    # Keep video-only file if audio failed or wasn't enabled
-                    final_output_paths.append(video_path)
+                # --- Muxing REMOVED ---
+                # Since audio is gone, the video_path is the final output path
+                if os.path.exists(video_path):
+                     final_output_paths.append(video_path)
                 else:
-                     logging.warning(f"Video file {video_path} not found after writer release. Cannot mux or keep.")
+                     logging.warning(f"Video file {video_path} not found after writer release.")
 
             except Exception as e:
                 logging.error(f"Error releasing VideoWriter for {video_path}: {e}", exc_info=True)
+                # If release fails but file exists, still add it to potential output
                 if os.path.exists(video_path):
                      final_output_paths.append(video_path)
                      logging.warning(f"Keeping video file {video_path} despite release error.")
 
-        # --- Cleanup Temporary Audio File ---
-        if audio_file_to_mux and os.path.exists(audio_file_to_mux):
-            try:
-                os.remove(audio_file_to_mux)
-                logging.info(f"Removed temporary audio file: {audio_file_to_mux}")
-            except OSError as e:
-                logging.warning(f"Could not remove temporary audio file {audio_file_to_mux}: {e}")
+        # --- Cleanup Temporary Audio File REMOVED ---
 
         # --- Filesystem Sync ---
         if released_count > 0 or final_output_paths:
             logging.info("Syncing filesystem to ensure data is written to USB drives...")
             try:
                 sync_start_time = time.monotonic()
+                # Use subprocess.run for sync
                 subprocess.run(['sync'], check=True, timeout=15)
                 sync_duration = time.monotonic() - sync_start_time
                 logging.info(f"Sync completed in {sync_duration:.2f}s.")
@@ -878,90 +826,112 @@ class CameraManager:
                  logging.error("!!! Filesystem sync timed out after 15s!")
                  self.last_error = "Sync timed out after recording."
             except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
+                # Log error if sync command fails
                 logging.error(f"!!! Failed execute 'sync': {e}", exc_info=True)
                 self.last_error = "Sync failed after recording."
         else:
             logging.warning("No writers released or final files generated, skipping sync.")
 
         log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""
-        logging.info(f"Recording stopped (Duration:{log_duration}). Released {released_count} writer(s). Final files created: {len(final_output_paths)}")
+        logging.info(f"Recording stopped (Duration:{log_duration}). Released {released_count} writer(s). Final files: {len(final_output_paths)}")
         for fpath in final_output_paths: logging.debug(f" - Final file: {fpath}")
 
 
     def capture_and_combine_frames(self):
         """
-        Captures frames from enabled cameras, combines if necessary,
-        updates the stream frame, and puts Cam0 frame into the recording queue
-        along with its timestamp. (Video delay logic removed).
+        Captures frames from enabled cameras, combines if necessary (for streaming),
+        updates the stream frame, makes raw frame0 available for CV,
+        and puts Cam0 frame into the recording queue if recording is active.
         """
         frame0 = None
         frame1 = None
         output_frame_for_stream = None
-        capture_successful = False # Specifically for Cam0 capture
+        capture_successful_cam0 = False # Specifically for Cam0 capture
         frame0_timestamp = None # Timestamp for the captured frame0
 
         # --- Capture Cam0 ---
         if self.is_initialized0 and self.picam0 and self.picam0.started:
             try:
-                # capture_start_time = time.monotonic() # Less relevant now
-                frame0 = self.picam0.capture_array("main")
-                # Get timestamp immediately after capture
-                frame0_timestamp = time.monotonic()
-                capture_successful = True # Mark Cam0 capture as successful
+                capture_time = time.monotonic() # Get time before capture
+                frame0 = self.picam0.capture_array("main") # Capture in RGB format (set during init)
+                frame0_timestamp = time.monotonic() # Get timestamp immediately after capture
+                capture_successful_cam0 = True # Mark Cam0 capture as successful
 
-                # --- Calculate Measured FPS (Informational - uses frame0_timestamp now) ---
+                # --- Update latest raw frame for CV (Requirement 4) ---
+                with self.raw_frame_lock:
+                    # Store a copy so the CV thread gets a consistent frame
+                    self.latest_raw_frame0 = frame0.copy()
+
+                # --- Calculate Measured FPS (Informational) ---
                 if self.last_cam0_capture_time is not None:
                     time_diff = frame0_timestamp - self.last_cam0_capture_time
-                    if time_diff > 0.0001:
+                    if time_diff > 0.0001: # Avoid division by zero or tiny values
                         instant_fps = 1.0 / time_diff
+                        # Use simple moving average for smoothing
                         if self.measured_cam0_fps_avg is None:
                             self.measured_cam0_fps_avg = instant_fps
                         else:
                             alpha = 0.1 # Smoothing factor
                             self.measured_cam0_fps_avg = alpha * instant_fps + (1 - alpha) * self.measured_cam0_fps_avg
-                    # else: logging.warning(f"Cam0 capture time difference too small: {time_diff:.5f}s")
                 self.last_cam0_capture_time = frame0_timestamp # Store the timestamp of this capture
 
             except Exception as e0:
                 logging.error(f"!!! Error during Cam0 capture: {e0}")
-                if self.last_error != f"Cam0 Capture Error: {e0}":
-                     self.last_error = f"Cam0 Capture Error: {e0}"
-                self.last_cam0_capture_time = None
-                self.measured_cam0_fps_avg = None
+                # Set specific error message if it's different from the last one
+                error_msg = f"Cam0 Capture Error: {e0}"
+                if self.last_error != error_msg: self.last_error = error_msg
+                self.last_cam0_capture_time = None # Reset time on error
+                self.measured_cam0_fps_avg = None # Reset measured FPS
                 frame0 = None # Ensure frame0 is None on error
                 frame0_timestamp = None
-        # else: pass # Cam0 not ready
+                # Clear the raw frame on error too
+                with self.raw_frame_lock:
+                    self.latest_raw_frame0 = None
+        # else: Cam0 not ready, frame0 remains None
 
-        # --- Capture Cam1 (only if enabled) ---
-        # (Unchanged)
+        # --- Capture Cam1 (only if enabled and initialized) ---
         if config.ENABLE_CAM1 and self.is_initialized1 and self.picam1 and self.picam1.started:
             try:
                 frame1 = self.picam1.capture_array("main")
             except Exception as e1:
                 logging.error(f"!!! Error during Cam1 capture: {e1}")
                 err_msg = f"Cam1 Capture Error: {e1}"
+                # Append Cam1 error if Cam0 error also occurred, otherwise set it
                 self.last_error = (self.last_error + " / " + err_msg) if (self.last_error and "Cam0" in self.last_error) else err_msg
+                frame1 = None # Ensure frame1 is None on error
         # elif config.ENABLE_CAM1: pass # Cam1 enabled but not ready
 
-        # --- Prepare Output Frame (Combine or Single) ---
-        # (Unchanged)
+        # --- Prepare Output Frame (Combine or Single) for Streaming ---
+        # (Unchanged combination logic)
         if frame0 is not None and frame1 is not None and config.ENABLE_CAM1:
+            # Combine frame0 and frame1 for streaming if both are available and Cam1 enabled
             try:
                 h0, w0, _ = frame0.shape
                 h1, w1, _ = frame1.shape
-                target_w1, target_h1 = config.CAM1_RESOLUTION
+                target_w1, target_h1 = config.CAM1_RESOLUTION # Use configured target size for resizing
 
+                # Resize frame1 if its dimensions don't match target or if wider than frame0
                 if w1 != target_w1 or h1 != target_h1 or w1 > w0:
-                    frame1_resized = cv2.resize(frame1, (target_w1, target_h1), interpolation=cv2.INTER_AREA)
-                    h1, w1, _ = frame1_resized.shape
+                    # Maintain aspect ratio if width needs scaling
+                    if w1 > w0:
+                        scale = w0 / w1
+                        target_w1_scaled = w0
+                        target_h1_scaled = int(h1 * scale)
+                        frame1_resized = cv2.resize(frame1, (target_w1_scaled, target_h1_scaled), interpolation=cv2.INTER_AREA)
+                    else:
+                        # Resize to target Cam1 resolution if dimensions mismatch
+                        frame1_resized = cv2.resize(frame1, (target_w1, target_h1), interpolation=cv2.INTER_AREA)
+                    h1, w1, _ = frame1_resized.shape # Update dimensions after potential resize
                 else:
-                    frame1_resized = frame1
+                    frame1_resized = frame1 # Use original frame1
 
+                # Create combined frame (Cam0 on top, Cam1 below with border)
                 final_w = w0
                 final_h = h0 + h1 + config.STREAM_BORDER_SIZE
                 output_frame_for_stream = np.zeros((final_h, final_w, 3), dtype=np.uint8)
-                output_frame_for_stream[:, :] = config.STREAM_BORDER_COLOR
-                output_frame_for_stream[0:h0, 0:w0] = frame0
+                output_frame_for_stream[:, :] = config.STREAM_BORDER_COLOR # Fill with border color
+                output_frame_for_stream[0:h0, 0:w0] = frame0 # Place Cam0 frame
+                # Center Cam1 frame horizontally below border
                 y_start1 = h0 + config.STREAM_BORDER_SIZE
                 x_start1 = (final_w - w1) // 2
                 output_frame_for_stream[y_start1:y_start1 + h1, x_start1:x_start1 + w1] = frame1_resized
@@ -971,401 +941,122 @@ class CameraManager:
                 self.last_error = f"Frame Combine Error: {e_comb}"
                 output_frame_for_stream = frame0 # Fallback to frame0 if combine fails
         elif frame0 is not None:
+            # Use only frame0 if Cam1 disabled or frame1 unavailable
             output_frame_for_stream = frame0
         elif frame1 is not None and config.ENABLE_CAM1:
-            # Fallback if only frame1 is available
+            # Fallback to showing frame1 if only it is available (and enabled)
             try:
                 target_w1, target_h1 = config.CAM1_RESOLUTION
                 output_frame_for_stream = cv2.resize(frame1, (target_w1, target_h1), interpolation=cv2.INTER_AREA)
             except Exception as e_resize1:
                 logging.error(f"Could not resize fallback frame1: {e_resize1}")
-                output_frame_for_stream = None
+                output_frame_for_stream = None # Set to None if resize fails
         else:
             # No frames captured
             output_frame_for_stream = None
 
         # --- Update Shared Frame for Streaming ---
         with self.frame_lock:
+            # Store a copy for the streaming thread
             self.output_frame = output_frame_for_stream.copy() if output_frame_for_stream is not None else None
 
         # --- Put Frame into Recording Queue (if recording and Cam0 captured) ---
-        # Video start delay logic removed here
-        if self.is_recording and capture_successful and frame0 is not None and frame0_timestamp is not None:
-            # Store timestamp and increment count
-            self.recording_frame_timestamps.append(frame0_timestamp)
-            self.recording_actual_frame_count += 1
-
+        if self.is_recording and capture_successful_cam0 and frame0 is not None and frame0_timestamp is not None:
             if self.recording_frame_queue:
                 try:
                     # Put the raw frame0 and its timestamp into the queue (non-blocking)
+                    # The recording thread will handle writing this frame
                     self.recording_frame_queue.put_nowait((frame0, frame0_timestamp))
                 except queue.Full:
+                    # Log if the queue is full, indicating recording thread can't keep up
                     logging.warning("Recording frame queue is full. Dropping captured frame.")
                 except Exception as e:
                     logging.error(f"Error putting frame into recording queue: {e}")
-            # else: logging.error("Inconsistent state: Recording active but queue not initialized.")
+            # else: Should not happen if recording is True, but log just in case
+            #    logging.error("Inconsistent state: Recording active but queue not initialized.")
+
+        # Return the frame prepared for streaming (combined or single)
+        return output_frame_for_stream
 
 
-        return output_frame_for_stream # Return the frame for the web stream
-
-
-    def get_latest_frame(self): # Renamed for clarity
-        """Returns the latest output frame for streaming (thread-safe)."""
+    def get_latest_frame(self):
+        """Returns the latest COMBINED output frame for streaming (thread-safe)."""
         with self.frame_lock:
             if self.output_frame is not None:
-                return self.output_frame.copy()
+                return self.output_frame.copy() # Return a copy for thread safety
             else:
                 return None
 
-    # --- Audio Methods ---
-    # (Audio methods remain unchanged EXCEPT _audio_recording_thread)
-    def _find_audio_device(self):
-        if not config.AUDIO_ENABLED: return False
-        self.audio_device_index = None
-        logging.info(f"Searching for audio input device containing hint: '{config.AUDIO_DEVICE_HINT}'")
-        try:
-            devices = sd.query_devices()
-            candidate_indices = []
-            for i, device in enumerate(devices):
-                if device['max_input_channels'] > 0 and \
-                   config.AUDIO_DEVICE_HINT.lower() in device['name'].lower() and \
-                   'output' not in device['name'].lower():
-                    logging.debug(f"Found potential audio device: Index {i}, Name: {device['name']}, Inputs: {device['max_input_channels']}, Rate: {device['default_samplerate']}")
-                    candidate_indices.append(i)
-            if not candidate_indices:
-                 logging.warning(f"No audio input device found matching hint '{config.AUDIO_DEVICE_HINT}'.")
-                 self.audio_last_error = "Audio Device: Not Found"; return False
-            for index in candidate_indices:
-                 try:
-                     if not self.audio_dtype:
-                          logging.error("Cannot check audio settings: Invalid audio format in config.")
-                          self.audio_last_error = "Audio Device: Invalid config format"; return False
-                     sd.check_input_settings(device=index, samplerate=config.AUDIO_SAMPLE_RATE, channels=config.AUDIO_CHANNELS, dtype=self.audio_dtype)
-                     logging.info(f"Device {index} ('{devices[index]['name']}') supports required settings. Selecting.")
-                     self.audio_device_index = index
-                     if "Audio Device" in (self.audio_last_error or ""): self.audio_last_error = None
-                     return True
-                 except Exception as check_err:
-                     logging.warning(f"Device {index} ('{devices[index]['name']}') does not support required settings ({config.AUDIO_SAMPLE_RATE}Hz, {config.AUDIO_CHANNELS}ch, {config.AUDIO_FORMAT}): {check_err}")
-            logging.error(f"Found devices matching hint, but none support required audio settings.")
-            self.audio_last_error = "Audio Device: Found but incompatible settings"
-            self.audio_device_index = None; return False
-        except Exception as e:
-            logging.error(f"Error querying audio devices: {e}", exc_info=True)
-            self.audio_last_error = f"Audio Device Query Error: {e}"; return False
-
-    def _audio_recording_thread(self):
-        """Handles audio capture, including the initial start delay."""
-        stream_started_successfully = False
-        try:
-            logging.info(f"Audio capture thread started for device {self.audio_device_index}.")
-            self.stop_audio_event.clear()
-
-            # --- Implement Audio Start Delay ---
-            delay_seconds = getattr(config, 'AUDIO_START_DELAY_SECONDS', 0.0)
-            if delay_seconds > 0:
-                logging.info(f"Audio capture thread: Delaying start by {delay_seconds:.2f} seconds...")
-                start_delay_time = time.monotonic()
-                while time.monotonic() - start_delay_time < delay_seconds:
-                    if self.stop_audio_event.is_set():
-                        logging.warning("Audio capture thread: Stop requested during initial delay. Aborting.")
-                        return # Exit thread if stop is requested during delay
-                    time.sleep(0.1) # Sleep briefly during delay check
-                logging.info(f"Audio capture thread: Delay finished.")
-            # ---------------------------------
-
-            def audio_callback(indata, frames, time_info, status):
-                if status: logging.warning(f"Audio callback status: {status}")
-                if self.audio_queue:
-                    try: self.audio_queue.put(indata.copy(), block=True, timeout=0.1)
-                    except queue.Full: logging.warning("Audio queue is full. Discarding audio data.")
-                    except Exception as q_err: logging.error(f"Error putting audio data into queue: {q_err}")
-
-            self.audio_stream = sd.InputStream(
-                samplerate=config.AUDIO_SAMPLE_RATE, device=self.audio_device_index,
-                channels=config.AUDIO_CHANNELS, dtype=self.audio_dtype,
-                blocksize=config.AUDIO_BLOCK_SIZE, callback=audio_callback)
-
-            # Start the stream only after the potential delay
-            self.audio_stream.start()
-            stream_started_successfully = True
-            logging.info("Audio stream started.")
-
-            while not self.stop_audio_event.is_set():
-                self.stop_audio_event.wait(timeout=0.2)
-                if not self.audio_stream.active:
-                     logging.warning("Audio stream became inactive unexpectedly.")
-                     if not self.audio_last_error: self.audio_last_error = "Audio stream stopped unexpectedly"
-                     break
-        except sd.PortAudioError as pae:
-             logging.error(f"!!! PortAudioError in audio recording thread: {pae}", exc_info=True)
-             self.audio_last_error = f"Audio PortAudioError: {pae}"
-        except Exception as e:
-            logging.error(f"!!! Error in audio recording thread: {e}", exc_info=True)
-            if not self.audio_last_error: self.audio_last_error = f"Audio Thread Error: {e}"
-        finally:
-            if self.audio_stream and stream_started_successfully:
-                try:
-                    if not self.audio_stream.closed:
-                         logging.info("Aborting and closing audio stream...")
-                         self.audio_stream.abort(ignore_errors=True)
-                         self.audio_stream.close(ignore_errors=True)
-                         logging.info("Audio stream aborted and closed.")
-                except Exception as e_close: logging.error(f"Error closing audio stream during cleanup: {e_close}")
-            elif self.audio_stream: logging.warning("Audio stream object exists but was not started successfully.")
-            logging.info("Audio capture thread finished.")
-            if self.audio_queue:
-                 try: self.audio_queue.put(None, block=False) # Sentinel for write thread
-                 except queue.Full: logging.warning("Could not add sentinel to full audio queue during cleanup.")
-                 except Exception as q_err: logging.error(f"Error adding sentinel to queue during cleanup: {q_err}")
-
-    def _audio_write_file_thread(self):
-        sound_file = None; data_written = False; items_processed = 0
-        try:
-            if not self.temp_audio_file_path: logging.error("Audio write thread: Temp audio file path not set."); return
-            if not self.audio_dtype: logging.error("Audio write thread: Audio dtype not set."); return
-            subtype = None
-            if self.audio_dtype == np.int16: subtype = 'PCM_16'
-            elif self.audio_dtype == np.int32: subtype = 'PCM_32'
-            elif self.audio_dtype == np.float32: subtype = 'FLOAT'
-            elif self.audio_dtype == np.int8: subtype = 'PCM_S8'
-            elif self.audio_dtype == np.uint8: subtype = 'PCM_U8'
-            if subtype is None:
-                 logging.error(f"Audio write thread: Unsupported audio format '{config.AUDIO_FORMAT}' ({self.audio_dtype}) for soundfile.")
-                 self.audio_last_error = f"Audio Write Error: Unsupported format {config.AUDIO_FORMAT}"; return
-            logging.info(f"Audio write thread: Opening {self.temp_audio_file_path} (subtype: {subtype}) for writing.")
-            sound_file = sf.SoundFile(self.temp_audio_file_path, mode='w', samplerate=config.AUDIO_SAMPLE_RATE, channels=config.AUDIO_CHANNELS, subtype=subtype)
-            logging.info(f"Audio write thread: File opened successfully.")
-            while True:
-                try:
-                    audio_data = self.audio_queue.get(block=True, timeout=0.5)
-                    if audio_data is None: logging.info(f"Audio write thread: Received stop sentinel after processing {items_processed} blocks."); break
-                    if isinstance(audio_data, np.ndarray):
-                        sound_file.write(audio_data); data_written = True; items_processed += 1
-                    else: logging.warning(f"Audio write thread: Received non-numpy data from queue: {type(audio_data)}")
-                except queue.Empty:
-                    if self.stop_audio_event.is_set(): logging.info(f"Audio write thread: Stop event detected during queue wait after processing {items_processed} blocks."); break
-                    continue
-                except sf.SoundFileError as sf_err:
-                     logging.error(f"!!! SoundFileError writing audio data: {sf_err}", exc_info=True)
-                     self.audio_last_error = f"Audio File Write Error: {sf_err}"; break
-                except Exception as write_err:
-                     logging.error(f"!!! Unexpected error writing audio data: {write_err}", exc_info=True)
-                     self.audio_last_error = f"Audio File Write Error: {write_err}"; break
-        except sf.SoundFileError as sf_open_err:
-             logging.error(f"!!! SoundFileError opening {self.temp_audio_file_path}: {sf_open_err}", exc_info=True)
-             self.audio_last_error = f"Audio File Open Error: {sf_open_err}"
-        except Exception as e:
-            logging.error(f"!!! Error in audio write thread setup/loop: {e}", exc_info=True)
-            self.audio_last_error = f"Audio Write Thread Error: {e}"
-        finally:
-            if sound_file:
-                try: logging.info(f"Audio write thread: Closing {self.temp_audio_file_path}..."); sound_file.close(); logging.info(f"Audio write thread: Closed sound file.")
-                except Exception as e_close: logging.error(f"Error closing sound file: {e_close}")
-            file_exists = self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path)
-            if file_exists and not data_written: logging.warning(f"Audio write thread finished, but no data seems written to {self.temp_audio_file_path}.")
-            elif not file_exists and data_written: logging.error("Audio write thread: Data processed, but output file does not exist!"); self.audio_last_error = self.audio_last_error or "Audio file missing after write"
-            logging.info("Audio write thread finished.")
-
-    def _start_audio_recording(self, base_filename):
-        if not config.AUDIO_ENABLED: return False
-        if not self.audio_dtype: self.audio_last_error = "Audio Start Failed: Invalid config format"; return False
-        if self.audio_thread and self.audio_thread.is_alive(): logging.warning("Audio start called while capture thread alive. Stopping first."); self._stop_audio_recording()
-        elif self.audio_write_thread and self.audio_write_thread.is_alive(): logging.warning("Audio start called while write thread alive. Stopping first."); self._stop_audio_recording()
-        while not self.audio_queue.empty():
-            try: self.audio_queue.get_nowait()
-            except queue.Empty: break
-            except Exception: pass
-        if not self._find_audio_device() or self.audio_device_index is None: logging.error(f"Audio Start Failed: Could not find suitable audio device. Last error: {self.audio_last_error}"); return False
-        try:
-            temp_dir = tempfile.gettempdir()
-            self.temp_audio_file_path = os.path.join(temp_dir, f"{base_filename}_audio{config.AUDIO_TEMP_EXTENSION}")
-            if os.path.exists(self.temp_audio_file_path): logging.warning(f"Removing existing temp audio file: {self.temp_audio_file_path}"); os.remove(self.temp_audio_file_path)
-            logging.info(f"Starting audio recording. Temp file: {self.temp_audio_file_path}")
-            self.stop_audio_event.clear()
-            self.audio_thread = threading.Thread(target=self._audio_recording_thread, name="AudioCaptureThread"); self.audio_thread.daemon = True; self.audio_thread.start()
-            time.sleep(0.2) # Give capture thread a moment to start
-            self.audio_write_thread = threading.Thread(target=self._audio_write_file_thread, name="AudioWriteThread"); self.audio_write_thread.daemon = True; self.audio_write_thread.start()
-            time.sleep(0.5) # Give write thread a moment to start
-            if not self.audio_thread.is_alive() or not self.audio_write_thread.is_alive():
-                 logging.error("Audio threads did not remain alive shortly after start.")
-                 self.audio_last_error = self.audio_last_error or "Audio threads failed to start/stay alive"
-                 self.stop_audio_event.set()
-                 if self.audio_thread.is_alive(): self.audio_thread.join(timeout=1.0)
-                 if self.audio_write_thread.is_alive(): self.audio_write_thread.join(timeout=1.0)
-                 if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path):
-                    try: os.remove(self.temp_audio_file_path)
-                    except OSError: pass
-                 self.temp_audio_file_path = None; self.audio_thread = None; self.audio_write_thread = None; return False
-            self.audio_last_error = None; logging.info("Audio recording threads started successfully."); return True
-        except Exception as e:
-            logging.error(f"!!! Failed to start audio recording setup: {e}", exc_info=True)
-            self.audio_last_error = f"Audio Start Error: {e}"; self.stop_audio_event.set()
-            if self.audio_thread and self.audio_thread.is_alive(): self.audio_thread.join(timeout=1.0)
-            if self.audio_write_thread and self.audio_write_thread.is_alive(): self.audio_write_thread.join(timeout=1.0)
-            if self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path):
-                try: os.remove(self.temp_audio_file_path)
-                except OSError: pass
-            self.temp_audio_file_path = None; self.audio_thread = None; self.audio_write_thread = None; return False
-
-    def _stop_audio_recording(self):
-        if not config.AUDIO_ENABLED: return None
-        capture_thread_running = self.audio_thread and self.audio_thread.is_alive()
-        write_thread_running = self.audio_write_thread and self.audio_write_thread.is_alive()
-        temp_file_path_at_start = self.temp_audio_file_path
-        if not capture_thread_running and not write_thread_running:
-            logging.info("Audio recording threads were not running.")
-            if temp_file_path_at_start and os.path.exists(temp_file_path_at_start) and os.path.getsize(temp_file_path_at_start) > 44:
-                 logging.info(f"Found potentially valid existing temp audio file: {temp_file_path_at_start}")
-                 self.temp_audio_file_path = None; return temp_file_path_at_start
+    def get_latest_raw_frame0(self):
+        """Returns the latest RAW frame captured from Cam0 for CV processing (thread-safe). (Req 4)"""
+        with self.raw_frame_lock:
+            if self.latest_raw_frame0 is not None:
+                return self.latest_raw_frame0.copy() # Return a copy for thread safety
             else:
-                 if temp_file_path_at_start and os.path.exists(temp_file_path_at_start):
-                      try: logging.info(f"Cleaning up empty/invalid temp audio file: {temp_file_path_at_start}"); os.remove(temp_file_path_at_start)
-                      except OSError as e: logging.warning(f"Could not remove temp audio file {temp_file_path_at_start}: {e}")
-                 self.temp_audio_file_path = None; return None
-        logging.info("Stopping audio recording threads..."); self.stop_audio_event.set()
-        if capture_thread_running:
-            logging.debug("Waiting for audio capture thread to join..."); self.audio_thread.join(timeout=2.0)
-            if self.audio_thread.is_alive(): logging.warning("Audio capture thread did not stop cleanly within timeout.")
-            else: logging.debug("Audio capture thread joined.")
-        if write_thread_running:
-            logging.debug("Waiting for audio write thread to join..."); self.audio_write_thread.join(timeout=5.0) # Give write thread longer
-            if self.audio_write_thread.is_alive(): logging.warning("Audio write thread did not stop cleanly within timeout.")
-            else: logging.debug("Audio write thread joined.")
-        self.audio_thread = None; self.audio_write_thread = None; self.audio_stream = None
-        if temp_file_path_at_start and os.path.exists(temp_file_path_at_start):
-             try:
-                 file_size = os.path.getsize(temp_file_path_at_start)
-                 if file_size > 44: # Basic WAV header check
-                     logging.info(f"Audio stop successful. Temp file ready: {temp_file_path_at_start} (Size: {file_size} bytes)")
-                     self.temp_audio_file_path = None; return temp_file_path_at_start
-                 else:
-                     logging.warning(f"Temporary audio file {temp_file_path_at_start} seems empty/invalid after stop (Size: {file_size}).")
-                     try: os.remove(temp_file_path_at_start); logging.info("Cleaned up empty/invalid temp audio file.")
-                     except OSError as e: logging.warning(f"Could not remove empty temp audio file: {e}")
-                     self.temp_audio_file_path = None; return None
-             except OSError as e: logging.error(f"Error checking temp audio file size {temp_file_path_at_start}: {e}"); self.temp_audio_file_path = None; return None
-        else: logging.error("Temporary audio file path not set or file does not exist after stop sequence."); self.temp_audio_file_path = None; return None
+                return None
 
-    def _mux_audio_video(self, video_path, audio_path):
-        """
-        Merges audio and video files using ffmpeg. Uses '-c:v copy'.
-        Lets ffmpeg infer the video frame rate and sync to audio.
-        """
-        if not config.AUDIO_ENABLED: return None
-        if not os.path.exists(config.FFMPEG_PATH): logging.error(f"ffmpeg not found at '{config.FFMPEG_PATH}'. Cannot mux audio."); self.audio_last_error = "Mux Error: ffmpeg not found"; return None
-        if not os.path.exists(video_path): logging.error(f"Video file not found for muxing: {video_path}"); self.audio_last_error = "Mux Error: Video file missing"; return None
-        if not os.path.exists(audio_path): logging.error(f"Audio file not found for muxing: {audio_path}"); self.audio_last_error = "Mux Error: Audio file missing"; return None
-        if os.path.getsize(audio_path) <= 44: logging.error(f"Audio file {audio_path} is too small, likely invalid. Skipping mux."); self.audio_last_error = "Mux Error: Audio file invalid/empty"; return None
-
-        output_path = video_path.replace("_video" + config.CAM0_RECORDING_EXTENSION, config.CAM0_RECORDING_EXTENSION)
-        if output_path == video_path: output_path = video_path.replace(config.CAM0_RECORDING_EXTENSION, "_muxed" + config.CAM0_RECORDING_EXTENSION)
-        logging.info(f"Muxing (copy video, infer rate) '{os.path.basename(video_path)}' and audio '{os.path.basename(audio_path)}' into '{os.path.basename(output_path)}'...")
-
-        # --- Command using -c:v copy and no -r hint ---
-        command = [config.FFMPEG_PATH, "-y",           # Base command, -y to overwrite output
-                   "-i", video_path,                   # Input video file
-                   "-i", audio_path,                   # Input audio file
-                   "-c:v", "copy",                     # Copy video stream without re-encoding
-                   "-c:a", "aac",                      # Encode audio stream to AAC
-                   "-map", "0:v:0",                    # Map video stream from first input
-                   "-map", "1:a:0",                    # Map audio stream from second input
-                   # Removed "-shortest" previously, keeping it removed
-                   "-loglevel", config.FFMPEG_LOG_LEVEL, # Set logging level
-                   output_path                         # Output file path
-                  ]
-        logging.debug(f"Executing ffmpeg command: {' '.join(command)}")
-
-        mux_start_time = time.monotonic()
-        # Use base timeout for copy
-        timeout = config.AUDIO_MUX_TIMEOUT
-        logging.info(f"Using mux timeout: {timeout}s")
-
-        try:
-            process = subprocess.run(command, capture_output=True, text=True, check=True, timeout=timeout)
-            mux_duration = time.monotonic() - mux_start_time
-            logging.info(f"ffmpeg muxing (copy) successful for {output_path} in {mux_duration:.2f}s.")
-            if logging.getLogger().isEnabledFor(logging.DEBUG): logging.debug(f"ffmpeg output:\n--- stdout ---\n{process.stdout}\n--- stderr ---\n{process.stderr}\n---")
-            if "Mux Error" in (self.audio_last_error or ""): self.audio_last_error = None
-            return output_path
-        except subprocess.TimeoutExpired:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (copy) timed out ({timeout}s) for {output_path} after {mux_duration:.1f}s."); self.audio_last_error = "Mux Error: ffmpeg copy timed out"
-        except subprocess.CalledProcessError as e:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! ffmpeg muxing (copy) failed for {output_path} after {mux_duration:.1f}s. Return Code: {e.returncode}"); logging.error(f"ffmpeg stderr:\n{e.stderr}"); logging.error(f"ffmpeg stdout:\n{e.stdout}"); self.audio_last_error = f"Mux Error: ffmpeg copy failed (code {e.returncode})"
-        except Exception as e:
-            mux_duration = time.monotonic() - mux_start_time; logging.error(f"!!! Unexpected error during ffmpeg copy execution after {mux_duration:.1f}s: {e}", exc_info=True); self.audio_last_error = f"Mux Error: {e}"
-        if os.path.exists(output_path):
-             try: logging.warning(f"Attempting to remove failed mux output file: {output_path}"); os.remove(output_path)
-             except OSError as rm_err: logging.error(f"Could not remove failed mux output {output_path}: {rm_err}")
-        return None
+    # --- Audio Methods REMOVED ---
 
 
     def shutdown(self):
-        """Stops recording, stops and closes enabled cameras cleanly."""
-        logging.info("--- CameraManager Shutting Down ---")
+        """Stops recording (if active) and closes enabled cameras cleanly."""
+        logging.info("--- CameraManager Shutting Down (Video Only) ---")
 
-        # 1. Stop Recording (handles video thread stop, audio stop, muxing)
+        # 1. Stop Recording (handles video thread stop, writer release, sync)
         if self.is_recording:
-            logging.info("Shutdown: Stopping active recording...")
-            self.stop_recording()
+            logging.info("Shutdown: Stopping active video recording...")
+            self.stop_recording() # Call the simplified stop_recording
         else:
-            # Cleanup potentially orphaned threads/files if stop wasn't called properly
-            if self.recording_thread and self.recording_thread.is_alive():
-                 logging.warning("Shutdown: Stopping orphaned video recording thread...")
-                 self.stop_recording_event.set()
-                 # Try putting sentinel
-                 if self.recording_frame_queue:
-                     try: self.recording_frame_queue.put_nowait((None, None))
-                     except queue.Full: pass
-                 self.recording_thread.join(timeout=2.0)
-                 self.recording_thread = None
-                 # Release any writers that might be held
-                 with self.recording_lock:
+            # Cleanup potentially orphaned thread/writers if stop wasn't called properly
+            with self.recording_lock: # Need lock to safely check/clear lists
+                if self.recording_thread and self.recording_thread.is_alive():
+                     logging.warning("Shutdown: Stopping orphaned video recording thread...")
+                     self.stop_recording_event.set()
+                     # Try putting sentinel
+                     if self.recording_frame_queue:
+                         try: self.recording_frame_queue.put_nowait((None, None))
+                         except queue.Full: pass
+                     self.recording_thread.join(timeout=2.0)
+                     self.recording_thread = None
+                # Release any writers that might still be held
+                if self.video_writers:
+                     logging.warning(f"Shutdown: Releasing {len(self.video_writers)} orphaned video writers.")
                      for writer in self.video_writers:
                         try: writer.release()
-                        except: pass
-                     self.video_writers.clear(); self.recording_paths.clear()
-            if config.AUDIO_ENABLED:
-                 if (self.audio_thread and self.audio_thread.is_alive()) or \
-                    (self.audio_write_thread and self.audio_write_thread.is_alive()):
-                     logging.warning("Shutdown: Stopping orphaned audio recording...")
-                     self._stop_audio_recording()
-                 elif self.temp_audio_file_path and os.path.exists(self.temp_audio_file_path):
-                      try:
-                           logging.warning(f"Shutdown: Removing orphaned temp audio file: {self.temp_audio_file_path}")
-                           os.remove(self.temp_audio_file_path)
-                           self.temp_audio_file_path = None
-                      except OSError as e: logging.error(f"Could not remove orphaned temp audio file: {e}")
+                        except Exception as e: logging.error(f"Error releasing orphaned writer: {e}")
+                     self.video_writers.clear()
+                     self.recording_paths.clear()
+
+            # No audio cleanup needed
 
         # 2. Stop and Close Cameras
-        # (Unchanged)
-        cameras_to_shutdown = [(config.CAM0_ID, 'picam0', 'is_initialized0', "Cam0")]
-        if config.ENABLE_CAM1:
-            cameras_to_shutdown.append((config.CAM1_ID, 'picam1', 'is_initialized1', "Cam1"))
-        for cam_id, picam_instance_attr, init_flag_attr, name in cameras_to_shutdown:
-            picam_instance = getattr(self, picam_instance_attr, None)
-            if picam_instance:
-                logging.info(f"Shutdown: Stopping and closing {name}...")
-                try:
-                    if picam_instance.started: picam_instance.stop(); logging.info(f"{name} stopped.")
-                    picam_instance.close(); logging.info(f"{name} closed.")
-                except Exception as e: logging.error(f"Error stopping/closing {name} during shutdown: {e}")
-                finally: setattr(self, picam_instance_attr, None); setattr(self, init_flag_attr, False)
-            else:
-                 if getattr(self, init_flag_attr, False): logging.warning(f"Shutdown: {name} instance was None, but expected to be initialized.")
-                 else: logging.debug(f"Shutdown: {name} instance already None or was disabled.")
+        cameras_to_shutdown = []
+        if self.picam0: cameras_to_shutdown.append((self.picam0, "Cam0"))
+        if self.picam1 and config.ENABLE_CAM1: cameras_to_shutdown.append((self.picam1, "Cam1"))
+
+        for picam_instance, name in cameras_to_shutdown:
+            logging.info(f"Shutdown: Stopping and closing {name}...")
+            try:
+                if picam_instance.started:
+                    picam_instance.stop()
+                    logging.info(f"{name} stopped.")
+                picam_instance.close()
+                logging.info(f"{name} closed.")
+            except Exception as e:
+                logging.error(f"Error stopping/closing {name} during shutdown: {e}")
+
+        # Reset camera instances and state flags
+        self.picam0 = None; self.is_initialized0 = False
+        self.picam1 = None; self.is_initialized1 = False
 
         # Reset other state variables
         self.actual_cam0_fps = None
         self.last_cam0_capture_time = None
         self.measured_cam0_fps_avg = None
         self.recording_target_fps = None # Reset target FPS
-        self.recording_frame_timestamps = [] # Clear timestamps
-        self.recording_actual_frame_count = 0
-        # self.video_delay_passed = False # Reset delay flag - REMOVED
         with self.frame_lock: self.output_frame = None
+        with self.raw_frame_lock: self.latest_raw_frame0 = None # Clear raw frame
+
         logging.info("--- CameraManager Shutdown Complete ---")
 
-# Example Usage (Main testing block - Needs update for new recording logic if used)
-# if __name__ == "__main__":
-#    # ... (Testing code would need adjustments) ...
+# Example Usage Block Removed (as it involved audio/muxing previously)
