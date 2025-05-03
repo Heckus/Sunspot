@@ -7,6 +7,8 @@ Handles settings for multiple cameras, hardware, and the web UI.
 
 **Modification:** Reverted CAM0_RECORDING_FORMAT back to 'mp4v' as 'avc1'
                   failed to initialize with the available OpenCV/FFmpeg backend.
+**Modification 2:** Added VIDEO_START_DELAY_SECONDS for A/V sync adjustment.
+**Modification 3:** Removed VIDEO_START_DELAY_SECONDS, added AUDIO_START_DELAY_SECONDS.
 """
 import os
 from libcamera import controls
@@ -148,9 +150,17 @@ AUDIO_FORMAT = 'int16'
 AUDIO_BLOCK_SIZE = 1024
 AUDIO_TEMP_EXTENSION = ".wav"
 AUDIO_MUX_TIMEOUT = 60
+# Set multiplier for re-encoding timeout (if used, currently not)
 AUDIO_MUX_RECODE_TIMEOUT_MULTIPLIER = 1 # Keep at 1 for copy
 FFMPEG_PATH = "/usr/bin/ffmpeg"
 FFMPEG_LOG_LEVEL = "error"
+
+# ===========================================================
+# === Recording & Sync Configuration ===
+# ===========================================================
+# Delay (in seconds) before starting the actual audio stream capture.
+# Helps compensate if video starts slightly before audio is ready/stable.
+AUDIO_START_DELAY_SECONDS = 1.0
 
 # ===========================================================
 # === Hardware Configuration ===
