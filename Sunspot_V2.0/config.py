@@ -55,9 +55,9 @@ CAM0_ID = 0
 CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA - Target 30 FPS recording
     (1332, 990, 60.0),     # Custom - Target 60 FPS recording (Adjust if camera struggles)
-    (1920, 1080, 25.0),    # 1080p FHD - Target 25 FPS recording (Matches original default)
-    (2028, 1080, 50.0),    # Specific HQ mode - Target 50 FPS recording
-    (2028, 1520, 40.0),    # Specific HQ mode - Target 40 FPS recording
+    (1920, 1080, 30.0),    # 1080p FHD - Target 25 FPS recording (Matches original default)
+    (2028, 1080, 40.0),    # Specific HQ mode - Target 50 FPS recording actual is 40 right now
+    (2028, 1520, 30.0),    # Specific HQ mode - Target 40 FPS recording actual is 30 right now
     (4056, 3040, 10.0)     # Max Res - Target 10 FPS recording
 ]
 CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ Target 25 FPS
