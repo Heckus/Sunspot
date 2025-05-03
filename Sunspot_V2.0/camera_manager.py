@@ -555,19 +555,14 @@ class CameraManager:
 
     def stop_recording(self):
         """Stops Picamera2 recording, copies file to other USB drives, and syncs."""
-        primary_path = None
-        target_paths = []
-        start_time_rec = None
-
+        primary_path = None; target_paths = []; start_time_rec = None; stop_success = False
         with self.recording_lock:
             if not self.is_recording:
-                # Handle potential stale state (e.g., called during shutdown after failure)
-                if self.picam0 and self.picam0.recording:
-                     logging.warning("stop_recording called when not marked as recording, but Picamera2 IS recording. Attempting stop.")
-                     try: self.picam0.stop_recording()
-                     except Exception as e: logging.error(f"Error stopping orphaned Picamera2 recording: {e}")
-                self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
-                return # Exit if not supposed to be recording
+                 # If the internal flag says not recording, trust it and exit.
+                 # Cleanup of potentially orphaned Picamera2 recordings handled elsewhere (init/shutdown).
+                 logging.debug("stop_recording called when not self.is_recording.")
+                 self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
+                 return
 
             logging.info("Stopping Picamera2 video recording...")
             self.is_recording = False # Set flag early
@@ -576,83 +571,64 @@ class CameraManager:
             primary_path = self.primary_recording_path
             target_paths = list(self.target_recording_paths)
             start_time_rec = self.recording_start_time_monotonic
-
             # Clear state variables within lock
             self.primary_recording_path = None
             self.target_recording_paths = []
             self.recording_target_fps = None
-            self.picam0_encoder = None # Encoder is implicitly stopped by stop_recording
+            self.picam0_encoder = None
+            # Assume we intend to stop successfully if we passed the initial check
+            stop_success = True
 
         # --- Stop Picamera2 Recording (outside lock) ---
-        stop_success = False
-        try:
-            if self.picam0 and self.picam0.recording:
-                 self.picam0.stop_recording()
-                 logging.info(f"Picamera2 recording stopped successfully for {primary_path}.")
-                 stop_success = True
-            elif self.picam0:
-                 logging.warning("Picamera2 instance exists but was not marked as recording during stop.")
-            else:
-                 logging.warning("Picamera2 instance (picam0) was None during stop sequence.")
-        except Exception as stop_err:
-             logging.error(f"!!! Error stopping Picamera2 recording: {stop_err}", exc_info=True)
-             self.last_error = f"Picamera2 Stop Rec Error: {stop_err}"
-             # Continue to attempt copy/sync even if stop fails? Maybe.
+        if stop_success: # Only try to stop if the internal flag indicated recording
+            try:
+                if self.picam0: # Check if picam0 object exists
+                    # REMOVED check for self.picam0.recording
+                    # Directly call stop_recording() - Picamera2 should handle if not recording,
+                    # or raise an error caught by the except block.
+                    logging.debug("Attempting self.picam0.stop_recording()")
+                    self.picam0.stop_recording()
+                    logging.info(f"Picamera2 recording stopped successfully for {primary_path}.")
+                    # stop_success remains True
+                else:
+                    # Should not happen if is_recording was true, but handle defensively
+                    logging.warning("Picamera2 instance (picam0) was None during stop sequence, cannot call stop_recording().")
+                    stop_success = False # Can't be successful if instance is gone
+            except Exception as stop_err:
+                 # Catch any error during stop_recording, including potential library errors
+                 # if called when not actually recording (though it should ideally handle this)
+                 logging.error(f"!!! Error stopping Picamera2 recording: {stop_err}", exc_info=True)
+                 self.last_error = f"Picamera2 Stop Rec Error: {stop_err}"
+                 stop_success = False # Mark as failed
 
         recording_duration = (recording_stop_time_monotonic - start_time_rec) if start_time_rec else None
-        log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""
-        logging.info(f"Recording duration:{log_duration}")
+        log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""; logging.info(f"Recording duration:{log_duration}")
 
         # --- Duplicate File to Other USB Drives ---
-        copied_count = 0
-        copy_errors = 0
+        copied_count = 0; copy_errors = 0
         if stop_success and primary_path and os.path.exists(primary_path) and len(target_paths) > 1:
             logging.info(f"Duplicating recorded file from {primary_path} to other target drives...")
             for target_path in target_paths:
-                if target_path == primary_path: continue # Skip copying to itself
+                if target_path == primary_path: continue
                 try:
-                    dest_dir = os.path.dirname(target_path)
-                    if not os.path.exists(dest_dir): os.makedirs(dest_dir) # Ensure dest dir exists
-                    shutil.copy2(primary_path, target_path) # copy2 preserves metadata
-                    logging.info(f"Successfully copied to: {target_path}")
-                    copied_count += 1
-                except Exception as copy_err:
-                    logging.error(f"!!! Failed to copy recording to {target_path}: {copy_err}", exc_info=True)
-                    copy_errors += 1
-            if copy_errors > 0:
-                self.last_error = f"Rec Copy Error ({copy_errors} failed)"
-
-        elif len(target_paths) <= 1:
-            logging.debug("Only one target path, skipping duplication.")
-        elif not stop_success:
-             logging.warning("Skipping duplication because recording stop failed.")
-        elif not primary_path or not os.path.exists(primary_path):
-             logging.error(f"Skipping duplication: Primary recording file missing! Path: {primary_path}")
-             if not self.last_error: self.last_error = "Rec Error: Primary file missing after stop"
-
+                    dest_dir = os.path.dirname(target_path); os.makedirs(dest_dir, exist_ok=True) # Ensure dest dir exists
+                    shutil.copy2(primary_path, target_path); logging.info(f"Successfully copied to: {target_path}"); copied_count += 1
+                except Exception as copy_err: logging.error(f"!!! Failed copy to {target_path}: {copy_err}"); copy_errors += 1
+            if copy_errors > 0: self.last_error = f"Rec Copy Error ({copy_errors} failed)"
+        elif len(target_paths) <= 1: logging.debug("Only one target path, skipping duplication.")
+        elif not stop_success: logging.warning("Skipping duplication because recording stop failed.")
+        elif not primary_path or not os.path.exists(primary_path): logging.error(f"Skipping duplication: Primary file missing! Path: {primary_path}"); self.last_error = self.last_error or "Rec Error: Primary file missing"
 
         # --- Filesystem Sync ---
         final_files_exist = any(os.path.exists(p) for p in target_paths if p)
         if final_files_exist:
-            logging.info("Syncing filesystem to ensure data is written to USB drives...")
-            try:
-                sync_start_time = time.monotonic()
-                subprocess.run(['sync'], check=True, timeout=15)
-                sync_duration = time.monotonic() - sync_start_time
-                logging.info(f"Sync completed in {sync_duration:.2f}s.")
-            except subprocess.TimeoutExpired:
-                 logging.error("!!! Filesystem sync timed out after 15s!")
-                 self.last_error = "Sync timed out after recording."
-            except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
-                logging.error(f"!!! Failed execute 'sync': {e}", exc_info=True)
-                self.last_error = "Sync failed after recording."
-        else:
-            logging.warning("No final recording files found, skipping sync.")
-
-        final_file_count = sum(1 for p in target_paths if p and os.path.exists(p))
-        logging.info(f"Recording stopped. Final files: {final_file_count}/{len(target_paths)}.")
-        if final_file_count < len(target_paths):
-             logging.warning(f"Failed to save/copy to {len(target_paths) - final_file_count} locations.")
+            logging.info("Syncing filesystem...")
+            try: sync_start_time = time.monotonic(); subprocess.run(['sync'], check=True, timeout=15); sync_duration = time.monotonic() - sync_start_time; logging.info(f"Sync completed in {sync_duration:.2f}s.")
+            except subprocess.TimeoutExpired: logging.error("!!! Filesystem sync timed out!"); self.last_error = "Sync timed out"
+            except Exception as e: logging.error(f"!!! Failed execute 'sync': {e}"); self.last_error = "Sync failed"
+        else: logging.warning("No final recording files found, skipping sync.")
+        final_file_count = sum(1 for p in target_paths if p and os.path.exists(p)); logging.info(f"Recording stopped. Final files: {final_file_count}/{len(target_paths)}.")
+        if final_file_count < len(target_paths): logging.warning(f"Failed save/copy to {len(target_paths) - final_file_count} locations.")
 
 
     def capture_and_combine_frames(self):

@@ -56,7 +56,7 @@ CAM0_ID = 0
 CAM0_RESOLUTIONS = [
     (640, 480, 30.0),      # VGA @ 30 FPS
     (1332, 990, 60.0),     # Custom @ 60 FPS (May stress Pi 5 depending on encoding load)
-    (1920, 1080, 40),    # 1080p FHD @ 25 FPS
+    (1920, 1080, 30),    # 1080p FHD @ 25 FPS
     (2028, 1080, 30.0),    # Specific HQ mode @ 50 FPS
     (2028, 1520, 30.0),    # Specific HQ mode @ 40 FPS
     (4056, 3040, 10.0)     # Max Res @ 10 FPS
