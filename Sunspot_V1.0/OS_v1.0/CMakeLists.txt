@@ -24,14 +24,6 @@ target_link_libraries(OS_v1.0 PRIVATE ${OpenCV_LIBS})
 find_package(Threads REQUIRED)
 target_link_libraries(OS_v1.0 PRIVATE Threads::Threads)
 
-# Link wiringPi library
-find_library(WIRINGPI_LIB wiringPi)
-if(WIRINGPI_LIB)
-    target_link_libraries(OS_v1.0 PRIVATE ${WIRINGPI_LIB})
-else()
-    message(FATAL_ERROR "wiringPi library not found")
-endif()
-
 # Find GTKMM package
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTKMM REQUIRED gtkmm-3.0)
