@@ -11,6 +11,7 @@ Handles settings for multiple cameras, hardware, and the web UI.
 **Modification 3:** Removed VIDEO_START_DELAY_SECONDS, added AUDIO_START_DELAY_SECONDS.
 **Modification 4 (User Request):** Disabled audio, removed audio-specific config.
 **Modification 5 (User Request):** Added placeholder for camera intrinsic calibration data.
+**Modification 6 (User Request):** Removed cv2.VideoWriter specific config for recording format/extension.
 """
 import os
 from libcamera import controls
@@ -51,14 +52,14 @@ CAM0_ID = 0
 
 # Define available resolutions and TARGET frame rates for Cam0
 # Format: (Width, Height, Target_FPS)
-# *** Ensure the FPS value here is the rate you want enforced during recording ***
+# *** Ensure the FPS value here is the rate the camera is configured to capture at ***
 CAM0_RESOLUTIONS = [
-    (640, 480, 30.0),      # VGA - Target 30 FPS recording
-    (1332, 990, 60.0),     # Custom - Target 60 FPS recording (Adjust if camera struggles)
-    (1920, 1080, 30.0),    # 1080p FHD - Target 25 FPS recording (Matches original default)
-    (2028, 1080, 40.0),    # Specific HQ mode - Target 50 FPS recording actual is 40 right now
-    (2028, 1520, 30.0),    # Specific HQ mode - Target 40 FPS recording actual is 30 right now
-    (4056, 3040, 10.0)     # Max Res - Target 10 FPS recording
+    (640, 480, 30.0),      # VGA @ 30 FPS
+    (1332, 990, 60.0),     # Custom @ 60 FPS (May stress Pi 5 depending on encoding load)
+    (1920, 1080, 40),    # 1080p FHD @ 25 FPS
+    (2028, 1080, 30.0),    # Specific HQ mode @ 50 FPS
+    (2028, 1520, 30.0),    # Specific HQ mode @ 40 FPS
+    (4056, 3040, 10.0)     # Max Res @ 10 FPS
 ]
 CAM0_DEFAULT_RESOLUTION_INDEX = 2 # Default to 1920x1080 @ Target 25 FPS
 
@@ -79,10 +80,9 @@ else:
      print("Using default camera tuning for Cam0 (no tuning file specified).")
 
 # --- Cam0 Recording Configuration ---
-# Reverted back to 'mp4v' as 'avc1' was not supported by the backend.
-# 'mp4v' is a widely compatible MPEG-4 codec.
-CAM0_RECORDING_FORMAT = "mp4v"
-CAM0_RECORDING_EXTENSION = ".mp4"
+# REMOVED CAM0_RECORDING_FORMAT = "mp4v"
+# REMOVED CAM0_RECORDING_EXTENSION = ".mp4"
+# These will be handled by Picamera2's encoder/muxer now.
 
 # ===========================================================
 # === Camera 1 (Secondary - e.g., IMX219 NoIR) Configuration ===
@@ -147,13 +147,10 @@ DEFAULT_SHARPNESS = 1.0; MIN_SHARPNESS = 0.0; MAX_SHARPNESS = 2.0; STEP_SHARPNES
 # === Audio Configuration (DISABLED) ===
 # ===========================================================
 AUDIO_ENABLED = False # Requirement 1: Disable audio completely
-# All other audio-related constants removed as they are no longer needed.
 
 # ===========================================================
 # === Computer Vision (CV) Configuration ===
 # ===========================================================
-# Requirement 5: Add spot for intrinsic calibration data
-# Replace with your actual calibrated data
 CAMERA_INTRINSIC_MATRIX = np.array([
     [1000.0,    0.0, 640.0], # [fx, 0, cx]
     [   0.0, 1000.0, 480.0], # [0, fy, cy]
@@ -164,13 +161,14 @@ CAMERA_DISTORTION_COEFFS = np.array([0.0, 0.0, 0.0, 0.0, 0.0]) # Example: [k1, k
 CV_PROCESSING_ENABLED = True # Flag to enable/disable CV processing pipeline
 CV_INPUT_SCALING_FACTOR = 0.5 # Example: Process CV on frames scaled down by 50%
 CV_APPLY_GRAYSCALE = False # Example: Flag for potential grayscale preprocessing
-# Add other CV-related config parameters here as needed
 
 # ===========================================================
 # === Recording Configuration ===
 # ===========================================================
-# Recording configuration is now solely video-based
-# Target FPS/Resolution enforcement handled in camera_manager based on CAM0_RESOLUTIONS
+# Recording uses Picamera2's H264Encoder by default now.
+# Target FPS/Resolution enforcement handled in camera_manager using camera controls
+# based on CAM0_RESOLUTIONS.
+RECORDING_VIDEO_BITRATE = 10000000 # Example: 10 Mbps for H.264 encoding (adjust as needed)
 
 # ===========================================================
 # === Hardware Configuration ===
@@ -196,8 +194,7 @@ SERVO_CENTER_ANGLE = 90
 SERVO_MIN_ANGLE = 0
 SERVO_MAX_ANGLE = 180
 
-# --- Servo Smooth Movement Settings ---
-SERVO_SMOOTH_MOVE = True  # Enable/disable smooth movement
-SERVO_SMOOTH_MOVE_STEPS = 20  # Number of steps for interpolation
-SERVO_SMOOTH_MOVE_DELAY = 0.01 # Delay (seconds) between steps
+SERVO_SMOOTH_MOVE = True
+SERVO_SMOOTH_MOVE_STEPS = 20
+SERVO_SMOOTH_MOVE_DELAY = 0.01
 # -----------------------------------------------------------
