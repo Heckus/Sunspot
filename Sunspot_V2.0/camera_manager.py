@@ -285,10 +285,12 @@ class CameraManager:
                 config.FFMPEG_PATH,
                 '-loglevel', config.FFMPEG_LOG_LEVEL,
                 '-f', 'rawvideo',                       # Input format: raw video
-                '-pix_fmt', config.FFMPEG_INPUT_PIX_FMT,# Input pixel format (rgb24 for RGB888)
+                # *** CHANGE HERE: Expect BGR input instead of RGB ***
+                '-pix_fmt', 'bgr24',                    # Input pixel format (bgr24 matches numpy default byte order)
                 '-s', f'{width}x{height}',              # Input size
-                '-r', str(target_fps),                  # Input framerate *** IMPORTANT ***
+                '-r', str(target_fps),                  # Input framerate
                 '-i', '-',                              # Input source: stdin pipe
+                # Output options (remain the same)
                 '-c:v', 'libx264',                      # Output codec: H.264
                 '-preset', config.FFMPEG_H264_PRESET,   # Encoding speed/compression preset
                 '-b:v', config.FFMPEG_VIDEO_BITRATE,    # Output video bitrate
@@ -319,7 +321,6 @@ class CameraManager:
             except Exception as thread_err:
                 logging.error(f"!!! Failed to start ffmpeg recording thread: {thread_err}", exc_info=True); self.last_error = f"Rec Thread Start Error: {thread_err}"
                 self.is_recording = False; self.recording_thread = None; self.recording_frame_queue = None; self.recording_target_fps = None; self.primary_recording_path = None; self.target_recording_paths = []; return False
-
 
     def _recording_thread_loop(self, ffmpeg_cmd, primary_path):
         """Dedicated thread to run ffmpeg and pipe frames to it."""
