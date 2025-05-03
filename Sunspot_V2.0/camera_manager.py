@@ -321,19 +321,51 @@ class CameraManager:
                 self.is_recording = False; self.picam0_encoder = None; self.recording_target_fps = None; self.primary_recording_path = None; self.target_recording_paths = []; return False
 
     def stop_recording(self):
-        """Stops Picamera2 recording, copies file to other USB drives, and syncs."""
+        """Stops Picamera2 recording, restarts capture stream, copies file, and syncs."""
         primary_path = None; target_paths = []; start_time_rec = None; stop_success = False
         with self.recording_lock:
-            if not self.is_recording: logging.debug("stop_recording called when not self.is_recording."); self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None; return
-            logging.info("Stopping Picamera2 video recording..."); self.is_recording = False
-            recording_stop_time_monotonic = time.monotonic(); primary_path = self.primary_recording_path; target_paths = list(self.target_recording_paths); start_time_rec = self.recording_start_time_monotonic
-            self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None; stop_success = True
+            if not self.is_recording:
+                 logging.debug("stop_recording called when not self.is_recording.")
+                 self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
+                 return
+
+            logging.info("Stopping Picamera2 video recording...")
+            self.is_recording = False # Set flag early
+            recording_stop_time_monotonic = time.monotonic()
+            primary_path = self.primary_recording_path; target_paths = list(self.target_recording_paths); start_time_rec = self.recording_start_time_monotonic
+            self.primary_recording_path = None; self.target_recording_paths = []; self.recording_target_fps = None; self.picam0_encoder = None
+            stop_success = True # Assume we intend to stop successfully if we passed the initial check
+
+        # --- Stop Picamera2 Recording (outside lock) ---
         if stop_success:
             try:
-                if self.picam0: logging.debug("Attempting self.picam0.stop_recording()"); self.picam0.stop_recording(); logging.info(f"Picamera2 recording stopped successfully for {primary_path}.")
-                else: logging.warning("Picamera2 instance (picam0) was None during stop, cannot call stop_recording()."); stop_success = False
-            except Exception as stop_err: logging.error(f"!!! Error stopping Picamera2 recording: {stop_err}", exc_info=True); self.last_error = f"Picamera2 Stop Rec Error: {stop_err}"; stop_success = False
-        recording_duration = (recording_stop_time_monotonic - start_time_rec) if start_time_rec else None; log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""; logging.info(f"Recording duration:{log_duration}")
+                if self.picam0:
+                    logging.debug("Attempting self.picam0.stop_recording()")
+                    self.picam0.stop_recording()
+                    logging.info(f"Picamera2 recording stopped successfully for {primary_path}.")
+
+                    # *** ADDED: Explicitly restart capture stream ***
+                    try:
+                        logging.debug("Restarting main camera stream after stopping recording...")
+                        self.picam0.stop() # Stop the main stream
+                        time.sleep(0.1) # Short pause
+                        self.picam0.start() # Restart the main stream
+                        logging.info("Main camera stream restarted.")
+                    except Exception as restart_err:
+                        logging.error(f"!!! Failed to restart main camera stream after stopping recording: {restart_err}", exc_info=True)
+                        # Continue anyway, but log the error. Capture might still fail.
+                        self.last_error = f"Stream Restart Failed: {restart_err}"
+
+                else:
+                    logging.warning("Picamera2 instance (picam0) was None during stop sequence, cannot call stop_recording().")
+                    stop_success = False
+            except Exception as stop_err:
+                 logging.error(f"!!! Error stopping Picamera2 recording: {stop_err}", exc_info=True)
+                 self.last_error = f"Picamera2 Stop Rec Error: {stop_err}"
+                 stop_success = False
+
+        recording_duration = (recording_stop_time_monotonic - start_time_rec) if start_time_rec else None
+        log_duration = f" ~{recording_duration:.1f}s" if recording_duration else ""; logging.info(f"Recording duration:{log_duration}")
         copied_count = 0; copy_errors = 0
         if stop_success and primary_path and os.path.exists(primary_path) and len(target_paths) > 1:
             logging.info(f"Duplicating recorded file from {primary_path} to other drives...")
@@ -345,6 +377,7 @@ class CameraManager:
         elif len(target_paths) <= 1: logging.debug("Only one target path, skipping duplication.")
         elif not stop_success: logging.warning("Skipping duplication because recording stop failed.")
         elif not primary_path or not os.path.exists(primary_path): logging.error(f"Skipping duplication: Primary file missing! Path: {primary_path}"); self.last_error = self.last_error or "Rec Error: Primary file missing"
+
         final_files_exist = any(os.path.exists(p) for p in target_paths if p)
         if final_files_exist:
             logging.info("Syncing filesystem..."); 
