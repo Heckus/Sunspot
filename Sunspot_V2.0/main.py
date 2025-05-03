@@ -10,6 +10,7 @@ and runs the main control loop.
                   dedicated recording thread. Loop timing can focus on capture rate.
 **Modification 2 (User Request):** Confirmed removal of audio-related error checks.
 **Modification 3 (User Request):** Added comments regarding potential multiprocessing setup for CV.
+**Modification 4 (User Request):** Removed reference to deleted recording_frame_queue in main_loop logging.
 """
 
 import os
@@ -92,11 +93,8 @@ def run_disable_script():
 def main_loop(hw_manager, cam_manager):
     """
     The main operational loop of the application. Handles camera capture,
-    passing frames to recorder, hardware checks, and reconfiguration requests.
-
-    Args:
-        hw_manager (HardwareManager): Instance of the hardware manager.
-        cam_manager (CameraManager): Instance of the camera manager.
+    hardware checks, and reconfiguration requests. Recording submission/timing
+    handled by CameraManager.
     """
     global _app_state, _ui_lock
     logging.info("--- Main loop started ---")
@@ -106,7 +104,6 @@ def main_loop(hw_manager, cam_manager):
     # Get initial primary camera FPS for loop timing
     try:
         cam_state = cam_manager.get_camera_state()
-        # Use actual driver-reported FPS if available, else target, else fallback
         current_cam0_fps = cam_state.get('actual_cam0_fps') or cam_state.get('target_cam0_fps') or 30.0
         if not isinstance(current_cam0_fps, (int, float)) or current_cam0_fps <= 0:
              logging.warning(f"Invalid initial Cam0 FPS ({current_cam0_fps}), defaulting loop timing to 30fps.")
@@ -132,144 +129,79 @@ def main_loop(hw_manager, cam_manager):
         if requested_resolution_index is not None:
             logging.info(f"--- Processing Cam0 resolution change request to index {requested_resolution_index} ---")
             was_recording = cam_manager.is_recording
-
-            if was_recording:
-                logging.info("Stopping recording for reconfiguration...")
-                cam_manager.stop_recording() # Stops video thread, releases writers, syncs
-                time.sleep(0.5) # Give time for thread join and sync
-
+            if was_recording: logging.info("Stopping recording for reconfiguration..."); cam_manager.stop_recording(); time.sleep(0.5)
             logging.info(f"Attempting to re-initialize cameras (Cam0 index {requested_resolution_index})...")
             if cam_manager.initialize_cameras(requested_resolution_index):
                 logging.info("--- Reconfiguration successful ---")
-                # Update loop timing FPS based on the new actual FPS
                 try:
                     cam_state = cam_manager.get_camera_state()
                     new_fps = cam_state.get('actual_cam0_fps') or cam_state.get('target_cam0_fps') or 30.0
                     if not isinstance(new_fps, (int, float)) or new_fps <= 0: new_fps = 30.0
-                    current_cam0_fps = new_fps
-                    logging.info(f"Updated main loop timing target based on FPS: {current_cam0_fps:.2f}")
-                except Exception:
-                    logging.exception("Failed to update loop timing FPS after reconfig.")
-                    # Keep old FPS on error
-
+                    current_cam0_fps = new_fps; logging.info(f"Updated loop timing FPS: {current_cam0_fps:.2f}")
+                except Exception: logging.exception("Failed to update loop timing FPS after reconfig.")
                 if was_recording:
-                    logging.info("Restarting recording after successful reconfiguration...")
-                    time.sleep(1.0) # Give cameras time to settle
-                    if not cam_manager.start_recording():
-                        # Log only the camera manager's general error (no audio error)
-                        logging.error(f"Failed to restart recording after reconfiguration! Error: {cam_manager.last_error}")
-            else:
-                # Reconfiguration failed
-                logging.error(f"!!! Failed to reconfigure cameras (Cam0 index {requested_resolution_index}). Error: {cam_manager.last_error}. Attempting restore... !!!")
-                if cam_manager.initialize_cameras(): # Try to restore previous state
-                     logging.info("Successfully restored previous camera configuration.")
+                    logging.info("Restarting recording after successful reconfiguration..."); time.sleep(1.0)
+                    if not cam_manager.start_recording(): logging.error(f"Failed restart recording! Error: {cam_manager.last_error}")
+            else: # Reconfiguration failed
+                logging.error(f"!!! Failed reconfig (index {requested_resolution_index}). Error: {cam_manager.last_error}. Attempting restore... !!!")
+                if cam_manager.initialize_cameras(): # Try restore
+                     logging.info("Restored previous camera configuration.")
                      try: # Update loop timing FPS back
-                         cam_state = cam_manager.get_camera_state()
-                         old_fps = cam_state.get('actual_cam0_fps') or cam_state.get('target_cam0_fps') or 30.0
+                         cam_state = cam_manager.get_camera_state(); old_fps = cam_state.get('actual_cam0_fps') or cam_state.get('target_cam0_fps') or 30.0
                          if not isinstance(old_fps, (int, float)) or old_fps <= 0: old_fps = 30.0
-                         current_cam0_fps = old_fps
-                         logging.info(f"Restored main loop timing target based on FPS: {current_cam0_fps:.2f}")
-                     except Exception:
-                         logging.exception("Failed to restore loop timing FPS after failed reconfig.")
-
+                         current_cam0_fps = old_fps; logging.info(f"Restored loop timing FPS: {current_cam0_fps:.2f}")
+                     except Exception: logging.exception("Failed to restore loop timing FPS.")
                      if was_recording:
-                         logging.warning("Attempting recording restart with restored configuration...")
-                         time.sleep(1.0)
-                         if not cam_manager.start_recording():
-                             logging.error(f"Failed to restart recording after failed reconfig and restore. Error: {cam_manager.last_error}")
-                else:
-                    # Critical failure if restore also fails
-                    logging.critical(f"!!! Failed to restore previous camera configuration after failed reconfig. Error: {cam_manager.last_error}. Signaling shutdown. !!!")
-                    shutdown_event.set()
-                    break # Exit main loop
-
-            logging.info("--- Finished handling reconfiguration request ---")
-            time.sleep(0.5) # Short pause after handling reconfig
-            continue # Restart loop immediately
-
+                         logging.warning("Attempting recording restart with restored config..."); time.sleep(1.0)
+                         if not cam_manager.start_recording(): logging.error(f"Failed restart recording after restore. Error: {cam_manager.last_error}")
+                else: # Restore failed
+                    logging.critical(f"!!! Failed restore after failed reconfig. Error: {cam_manager.last_error}. Signaling shutdown. !!!"); shutdown_event.set(); break
+            logging.info("--- Finished handling reconfiguration request ---"); time.sleep(0.5); continue
 
         # --- Capture and Process Frames ---
-        # This captures frame(s), updates stream frame, updates raw frame for CV,
-        # and puts frame into the recording queue if active.
         combined_frame_for_stream = cam_manager.capture_and_combine_frames()
-
-        # Check if capture itself failed (main streaming frame is None)
-        if combined_frame_for_stream is None and cam_manager.is_initialized0: # Check if cam0 should be working
-            consecutive_capture_errors += 1
-            logging.warning(f"Frame capture failed ({consecutive_capture_errors}/{config.MAX_CONSECUTIVE_CAPTURE_ERRORS}). Error: {cam_manager.last_error}")
-            if consecutive_capture_errors >= config.MAX_CONSECUTIVE_CAPTURE_ERRORS:
-                logging.error("Too many consecutive frame capture errors. Signaling shutdown.")
-                shutdown_event.set()
-                break # Exit main loop
-            time.sleep(0.5) # Wait longer after capture error before next attempt
-            continue # Skip rest of loop iteration
+        if combined_frame_for_stream is None and cam_manager.is_initialized0:
+            consecutive_capture_errors += 1; logging.warning(f"Frame capture failed ({consecutive_capture_errors}/{config.MAX_CONSECUTIVE_CAPTURE_ERRORS}). Error: {cam_manager.last_error}")
+            if consecutive_capture_errors >= config.MAX_CONSECUTIVE_CAPTURE_ERRORS: logging.error("Too many capture errors. Signaling shutdown."); shutdown_event.set(); break
+            time.sleep(0.5); continue
         else:
-            # Reset error count if capture succeeds OR if cam0 wasn't initialized anyway
-            if consecutive_capture_errors > 0 and combined_frame_for_stream is not None:
-                logging.info(f"Frame capture recovered after {consecutive_capture_errors} errors.")
+            if consecutive_capture_errors > 0 and combined_frame_for_stream is not None: logging.info(f"Frame capture recovered after {consecutive_capture_errors} errors.")
             consecutive_capture_errors = 0
-
 
         # --- Check Recording Triggers ---
         physical_switch_on = hw_manager.is_switch_pressed()
-        with _ui_lock:
-            digital_switch_on = _app_state.get("digital_recording_active", False)
-
+        with _ui_lock: digital_switch_on = _app_state.get("digital_recording_active", False)
         should_be_recording = physical_switch_on or digital_switch_on
         is_currently_recording = cam_manager.is_recording
 
         # --- Start/Stop Recording Logic ---
         if should_be_recording and not is_currently_recording:
-            log_msg = "Physical switch ON" if physical_switch_on else ""
-            if digital_switch_on: log_msg += (" / " if log_msg else "") + "Digital trigger ON"
-            logging.info(f"Recording trigger active ({log_msg}) - initiating start.")
-            if not cam_manager.start_recording(): # Starts video thread
-                # Log only the camera manager's general error
-                logging.error(f"Attempt to start recording failed. Error: {cam_manager.last_error}")
-
+            log_msg = "Physical switch ON" if physical_switch_on else ""; log_msg += (" / " if log_msg else "") + "Digital trigger ON" if digital_switch_on else ""; logging.info(f"Recording trigger active ({log_msg}) - initiating start.")
+            if not cam_manager.start_recording(): logging.error(f"Attempt to start recording failed. Error: {cam_manager.last_error}")
         elif not should_be_recording and is_currently_recording:
-            logging.info("Recording trigger(s) OFF - initiating stop.")
-            cam_manager.stop_recording() # Stops video thread, releases writers, syncs
-
+            logging.info("Recording trigger(s) OFF - initiating stop."); cam_manager.stop_recording()
 
         # --- Periodic Hardware Checks ---
         current_time = time.monotonic()
         if hw_manager.ina219_sensor and (current_time - last_battery_check_time > config.BATTERY_READ_INTERVAL):
-             old_batt = hw_manager.battery_percentage
-             hw_manager.read_battery_level() # Reads voltage and updates percentage
-             new_batt = hw_manager.battery_percentage
-             # Log only if level changed significantly or read failed after success
-             if new_batt is not None and (old_batt is None or abs(new_batt - old_batt) > 1.0):
-                 logging.info(f"Battery Level: {new_batt:.1f}%")
-             elif new_batt is None and old_batt is not None:
-                 logging.warning(f"Battery reading failed. Last Error: {hw_manager.last_error}")
+             old_batt = hw_manager.battery_percentage; hw_manager.read_battery_level(); new_batt = hw_manager.battery_percentage
+             if new_batt is not None and (old_batt is None or abs(new_batt - old_batt) > 1.0): logging.info(f"Battery Level: {new_batt:.1f}%")
+             elif new_batt is None and old_batt is not None: logging.warning(f"Battery reading failed. Last Error: {hw_manager.last_error}")
              last_battery_check_time = current_time
 
-
         # --- Loop Delay ---
-        # Base delay on primary camera's current target/actual FPS for capture responsiveness (Req 2 support)
         loop_duration = time.monotonic() - loop_start_time
-        if current_cam0_fps > 0:
-            target_loop_time = 1.0 / current_cam0_fps
-        else:
-            target_loop_time = 1.0 / 30.0 # Fallback if FPS is invalid
-
-        # Calculate sleep time needed to approximate the target loop time
+        target_loop_time = (1.0 / current_cam0_fps) if current_cam0_fps > 0 else (1.0 / 30.0)
         sleep_time = max(0.001, target_loop_time - loop_duration)
 
         # Log loop timing info periodically for debugging
         if current_time - last_loop_log_time > 10.0:
-             q_info = ""
-             # Show recording queue size if recording
-             if cam_manager.is_recording and cam_manager.recording_frame_queue:
-                  q_info = f", RecQ: {cam_manager.recording_frame_queue.qsize()}"
-             # Get measured FPS for logging
+             # *** Removed check for cam_manager.recording_frame_queue ***
              measured_fps_str = f"{cam_manager.measured_cam0_fps_avg:.1f}" if cam_manager.measured_cam0_fps_avg else "N/A"
-             logging.debug(f"MainLoop dur: {loop_duration:.4f}s, Sleep: {sleep_time:.4f}s (Target Cap FPS: {current_cam0_fps:.1f}, Measured: {measured_fps_str}{q_info})")
+             logging.debug(f"MainLoop dur: {loop_duration:.4f}s, Sleep: {sleep_time:.4f}s (Target Cap FPS: {current_cam0_fps:.1f}, Measured: {measured_fps_str})")
              last_loop_log_time = current_time
 
-        time.sleep(sleep_time) # Sleep to maintain desired loop rate
-
+        time.sleep(sleep_time)
 
     logging.info("--- Main loop finished ---")
 
@@ -283,167 +215,73 @@ def main():
     logging.info("========================================================")
     logging.info("=== Starting Pi Camera Stream & Record Service ===")
     logging.info("========================================================")
-    logging.info(f"Using Python: {sys.version}")
-    logging.info(f"Script Directory: {config.SCRIPT_DIR}")
-    logging.info(f"Toggle Script Path: {config.TOGGLE_SCRIPT_PATH}")
+    logging.info(f"Using Python: {sys.version}"); logging.info(f"Script Directory: {config.SCRIPT_DIR}"); logging.info(f"Toggle Script Path: {config.TOGGLE_SCRIPT_PATH}")
     if os.geteuid() == 0: logging.warning("Script is running with root privileges (sudo).")
     else: logging.warning("Script is NOT running with root privileges. Servo/Toggle script may fail.")
-
-    # Register signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    hw_manager = None
-    cam_manager = None
+    signal.signal(signal.SIGINT, signal_handler); signal.signal(signal.SIGTERM, signal_handler)
+    hw_manager = None; cam_manager = None
 
     while main_loop_error_count < MAX_MAIN_LOOP_ERRORS and not shutdown_event.is_set():
         try:
             logging.info(f"--- Initializing Managers (Attempt {main_loop_error_count + 1}) ---")
-
-            # --- Multiprocessing Setup Placeholder (Requirement 5 Suggestion) ---
-            # If using multiprocessing for CV, initialize queues and process here:
-            # cv_input_queue = multiprocessing.Queue(maxsize=5) # Queue for frames to CV process
-            # cv_output_queue = multiprocessing.Queue(maxsize=5) # Queue for results from CV process
-            # cv_process = multiprocessing.Process(target=run_cv_process_loop, args=(cv_input_queue, cv_output_queue), name="CVProcess")
-            # cv_process.daemon = True # Ensure CV process exits if main process exits
-            # cv_process.start()
-            # logging.info("Started separate CV processing process.")
-            # ----------------------------------------------------------------
-
-            # Initialize Hardware and Camera Managers
-            hw_manager = HardwareManager()
-            cam_manager = CameraManager()
-            # If using multiprocessing, potentially pass cv_input_queue to CameraManager
-            # e.g., cam_manager.set_cv_queue(cv_input_queue)
-
-            # Initialize Cameras
-            if not cam_manager.initialize_cameras():
-                # Use general error from camera manager (no audio error)
-                raise RuntimeError(f"Initial camera setup failed: {cam_manager.last_error}")
-
-            # Setup Web UI (Flask)
-            # If using multiprocessing, potentially pass cv_output_queue to web_ui setup
-            # e.g., setup_web_app(cam_manager, hw_manager, shutdown_event, cv_output_queue)
-            setup_web_app(cam_manager, hw_manager, shutdown_event)
-
-            logging.info("Starting Flask web server thread...")
-            flask_thread = threading.Thread(target=run_web_server, name="FlaskThread", daemon=True)
-            flask_thread.start()
-            time.sleep(2.0) # Give Flask time to start
-            if not flask_thread.is_alive():
-                raise RuntimeError("Flask web server thread failed to start.")
+            # --- Multiprocessing Setup Placeholder ---
+            # cv_input_queue = multiprocessing.Queue(maxsize=5)
+            # cv_output_queue = multiprocessing.Queue(maxsize=5)
+            # cv_process = multiprocessing.Process(...) etc.
+            # -------------------------------------------
+            hw_manager = HardwareManager(); cam_manager = CameraManager()
+            if not cam_manager.initialize_cameras(): raise RuntimeError(f"Initial camera setup failed: {cam_manager.last_error}")
+            setup_web_app(cam_manager, hw_manager, shutdown_event) # Pass cv_output_queue?
+            logging.info("Starting Flask web server thread..."); flask_thread = threading.Thread(target=run_web_server, name="FlaskThread", daemon=True); flask_thread.start(); time.sleep(2.0)
+            if not flask_thread.is_alive(): raise RuntimeError("Flask web server thread failed to start.")
             logging.info("Flask thread started.")
-
-            # Log access URLs
-            try:
-                hostname = socket.gethostname()
-                local_ip = socket.gethostbyname(hostname + ".local") # Try .local first
-                logging.info(f"--- System Running --- Host: {hostname}")
-                logging.info(f"--- Access web interface at: http://{local_ip}:{config.WEB_PORT} or http://{hostname}.local:{config.WEB_PORT}")
+            try: # Log access URLs
+                hostname = socket.gethostname(); local_ip = socket.gethostbyname(hostname + ".local")
+                logging.info(f"--- System Running --- Host: {hostname}"); logging.info(f"--- Access web interface at: http://{local_ip}:{config.WEB_PORT} or http://{hostname}.local:{config.WEB_PORT}")
             except socket.gaierror:
-                 try:
-                     # Fallback to finding IP via UDP connection to external host
-                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(1); s.connect(("8.8.8.8", 80)); local_ip = s.getsockname()[0]; s.close()
-                     logging.info(f"--- System Running --- Host: {hostname}")
-                     logging.info(f"--- Access web interface at: http://{local_ip}:{config.WEB_PORT}")
-                 except Exception as ip_e:
-                     logging.warning(f"Could not determine local IP address: {ip_e}")
-                     logging.info(f"--- System Running --- Access web interface at: http://<YOUR_PI_IP>:{config.WEB_PORT}")
-
-            # Start the main operational loop
+                 try: s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(1); s.connect(("8.8.8.8", 80)); local_ip = s.getsockname()[0]; s.close()
+                 except Exception as ip_e: logging.warning(f"Could not determine local IP: {ip_e}"); local_ip="<YOUR_PI_IP>"
+                 logging.info(f"--- System Running --- Host: {hostname}"); logging.info(f"--- Access web interface at: http://{local_ip}:{config.WEB_PORT}")
             main_loop(hw_manager, cam_manager)
-
-            # If main_loop exits without shutdown_event being set, it's an error
-            if shutdown_event.is_set():
-                 logging.info("Shutdown event received during main loop, exiting initialization loop.")
-                 break
-            else:
-                 # This should ideally not happen if main_loop handles errors properly
-                 raise RuntimeError("Main loop exited unexpectedly without shutdown signal.")
-
-
+            if shutdown_event.is_set(): logging.info("Shutdown event received, exiting init loop."); break
+            else: raise RuntimeError("Main loop exited unexpectedly without shutdown signal.")
         except Exception as e:
-            logging.exception(f"!!! Unhandled exception in main setup or loop: {e}")
-            main_loop_error_count += 1
+            logging.exception(f"!!! Unhandled exception in main setup or loop: {e}"); main_loop_error_count += 1
             logging.error(f"Main loop error count: {main_loop_error_count}/{MAX_MAIN_LOOP_ERRORS}")
-            if main_loop_error_count >= MAX_MAIN_LOOP_ERRORS:
-                logging.critical("Maximum main loop error count reached. Forcing shutdown.")
-                shutdown_event.set() # Force shutdown
+            if main_loop_error_count >= MAX_MAIN_LOOP_ERRORS: logging.critical("Max errors reached. Forcing shutdown."); shutdown_event.set()
             elif not shutdown_event.is_set():
-                # Attempt restart after a delay
                 logging.warning("Attempting restart after 10 seconds...")
-                # Ensure managers are cleaned up before retry
                 if cam_manager: cam_manager.shutdown(); cam_manager = None
                 if hw_manager: hw_manager.cleanup(); hw_manager = None
-                if flask_thread and flask_thread.is_alive(): logging.warning("Flask thread still alive during restart sequence.")
-                # --- Multiprocessing Cleanup Placeholder ---
-                # if cv_process and cv_process.is_alive():
-                #    logging.warning("Terminating CV process during restart sequence...")
-                #    cv_process.terminate()
-                #    cv_process.join(timeout=2.0)
-                #    cv_process = None
-                # -------------------------------------------
+                if flask_thread and flask_thread.is_alive(): logging.warning("Flask thread alive during restart.")
+                # --- MP Cleanup Placeholder ---
+                # if cv_process and cv_process.is_alive(): cv_process.terminate()...
+                # -----------------------------
                 time.sleep(10.0)
 
     # --- Final Cleanup ---
     logging.info("--- Initiating Final Cleanup Sequence ---")
-    if not shutdown_event.is_set():
-        logging.warning("Initiating cleanup without prior shutdown signal.")
-        shutdown_event.set() # Ensure shutdown event is set for cleanup steps
-
-    # --- Multiprocessing Cleanup Placeholder ---
-    # Terminate CV process first if it exists
-    # if cv_process and cv_process.is_alive():
-    #    logging.info("Terminating CV process...")
-    #    cv_process.terminate() # Send SIGTERM
-    #    cv_process.join(timeout=3.0) # Wait for clean exit
-    #    if cv_process.is_alive():
-    #        logging.warning("CV process did not terminate cleanly, forcing kill.")
-    #        cv_process.kill() # Force kill if necessary
-    #        cv_process.join(timeout=1.0)
-    #    cv_process = None
-    #    logging.info("CV process stopped.")
-    # elif cv_process: logging.info("CV process already stopped.")
-    # else: logging.debug("No CV process to stop.")
-    # -------------------------------------------
-
-
-    # Shutdown Camera Manager (stops recording, closes cameras)
-    if cam_manager:
-        logging.info("Shutting down Camera Manager...")
-        cam_manager.shutdown()
-    else: logging.warning("Camera Manager instance not available during final cleanup.")
-
-    # Cleanup Hardware Manager (closes GPIO, unexports PWM)
-    if hw_manager:
-        logging.info("Cleaning up Hardware Manager...")
-        hw_manager.cleanup()
-    else: logging.warning("Hardware Manager instance not available during final cleanup.")
-
-    # Wait for Flask thread to exit
-    if flask_thread and flask_thread.is_alive():
-        logging.info("Waiting up to 3 seconds for Flask thread to exit..."); flask_thread.join(timeout=3.0)
-        if flask_thread.is_alive(): logging.warning("Flask thread did not exit cleanly after join timeout.")
-        else: logging.info("Flask thread exited.")
-    elif flask_thread: logging.info("Flask thread already exited.")
-    else: logging.warning("Flask thread instance not available during final cleanup.")
-
-    # Check if reboot was requested via Web UI
-    reboot_flag = False
-    try:
+    if not shutdown_event.is_set(): logging.warning("Initiating cleanup without prior shutdown signal."); shutdown_event.set()
+    # --- MP Cleanup Placeholder ---
+    # if cv_process and cv_process.is_alive(): cv_process.terminate()...
+    # -----------------------------
+    if cam_manager: logging.info("Shutting down Camera Manager..."); cam_manager.shutdown()
+    else: logging.warning("Camera Manager instance N/A during final cleanup.")
+    if hw_manager: logging.info("Cleaning up Hardware Manager..."); hw_manager.cleanup()
+    else: logging.warning("Hardware Manager instance N/A during final cleanup.")
+    if flask_thread and flask_thread.is_alive(): logging.info("Waiting for Flask thread..."); flask_thread.join(timeout=3.0)
+    if flask_thread and flask_thread.is_alive(): logging.warning("Flask thread did not exit cleanly.")
+    elif flask_thread : logging.info("Flask thread exited.")
+    else: logging.warning("Flask thread instance N/A during final cleanup.")
+    reboot_flag = False; 
+    try: 
         with _ui_lock: reboot_flag = _app_state.get("reboot_requested", False)
-    except NameError: logging.warning("Could not check reboot flag: UI state potentially not initialized.")
-
-    if reboot_flag:
-        logging.info("Reboot flag is set, attempting to execute disable script.")
-        run_disable_script() # Attempt to run toggle script for reboot
-    else:
-        logging.info("Reboot flag not set, performing normal exit.")
-
-    logging.info("========================================================")
-    logging.info("--- Pi Camera Stream & Record Service Stopped ---")
-    logging.info("========================================================")
-    logging.shutdown() # Flush logging handlers
+    except NameError: logging.warning("Could not check reboot flag.")
+    
+    if reboot_flag: logging.info("Reboot flag set, attempting disable script."); run_disable_script()
+    else: logging.info("Reboot flag not set, performing normal exit.")
+    logging.info("========================================================"); logging.info("--- Pi Camera Stream & Record Service Stopped ---"); logging.info("========================================================")
+    logging.shutdown()
 
 
 if __name__ == "__main__":
