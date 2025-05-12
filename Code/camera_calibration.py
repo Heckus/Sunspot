@@ -46,9 +46,9 @@ def capture_calibration_images(output_dir, num_images, filename_prefix, chessboa
     picam2 = Picamera2()
     # Configure preview and still capture resolutions
     # Using a lower resolution for preview can be faster
-    preview_Config = picam2.create_preview_Configuration(main={"size": (1024, 768)})
-    capture_Config = picam2.create_still_Configuration() # Use higher resolution for capture
-    picam2.Configure(preview_Config)
+    preview_config = picam2.create_preview_configuration(main={"size": (1024, 768)})
+    capture_config = picam2.create_still_configuration() # Use higher resolution for capture
+    picam2.configure(preview_config)
 
     picam2.start()
     print("Camera started. Press SPACE to capture, 'q' to quit.")
@@ -83,12 +83,12 @@ def capture_calibration_images(output_dir, num_images, filename_prefix, chessboa
                 break
             elif key == ord(' '):
                 print(f"\nAttempting capture {captured_count + 1}/{num_images}...")
-                # Switch to higher resolution capture Config
-                picam2.switch_mode(capture_Config)
+                # Switch to higher resolution capture config
+                picam2.switch_mode(capture_config)
                 # Capture high-resolution image data
                 capture_data = picam2.capture_array()
-                # Switch back to preview Config
-                picam2.switch_mode(preview_Config)
+                # Switch back to preview config
+                picam2.switch_mode(preview_config)
 
                 # Convert captured image (likely RGBA or RGB) to BGR for OpenCV processing
                 if capture_data.shape[2] == 4: # RGBA

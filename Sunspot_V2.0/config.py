@@ -103,10 +103,6 @@ DEFAULT_CONTRAST = 1.0; MIN_CONTRAST = 0.0; MAX_CONTRAST = 2.0; STEP_CONTRAST = 
 DEFAULT_SATURATION = 1.0; MIN_SATURATION = 0.0; MAX_SATURATION = 2.0; STEP_SATURATION = 0.1
 DEFAULT_SHARPNESS = 1.0; MIN_SHARPNESS = 0.0; MAX_SHARPNESS = 2.0; STEP_SHARPNESS = 0.1
 
-# ===========================================================
-# === Audio Configuration (DISABLED) ===
-# ===========================================================
-AUDIO_ENABLED = False
 
 # ===========================================================
 # === Computer Vision (CV) Configuration ===
