@@ -30,14 +30,6 @@ MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # From sample, might be useful
 CAMERA_INDEX = 0  # OpenCV camera index
 
 # Default resolution and FPS for the camera, can be overridden by loaded calibration
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# !!! CRITICAL: If you are getting "Failed to allocate required memory"    !!!
-# !!! or other GStreamer/V4L2 errors,  TRY LOWERING THESE VALUES.          !!!
-# !!! For example, start with:                                             !!!
-# !!! CAM_REQUESTED_WIDTH = 640                                            !!!
-# !!! CAM_REQUESTED_HEIGHT = 480                                           !!!
-# !!! CAM_REQUESTED_FPS = 30.0 (or 15.0)                                   !!!
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 CAM_REQUESTED_WIDTH = 640 # From PDF, RPi HQ camera supports various resolutions
 CAM_REQUESTED_HEIGHT = 480
 CAM_REQUESTED_FPS = 30.0
@@ -51,13 +43,13 @@ CAMERA_DIST_COEFFS = np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
 # --- Checkerboard Configuration (for camera_calibration.py) ---
 # Number of inner corners per row and column (e.g., a 9x6 board has 8x5 inner corners)
-CHECKERBOARD_DIMS = (8, 5) # (width-1, height-1) as per PDF (e.g. 7,4) -> (8,5 squares), (7,4 inner corners)
+CHECKERBOARD_DIMS = (10, 7) # (width-1, height-1) as per PDF (e.g. 7,4) -> (8,5 squares), (7,4 inner corners)
                             # The PDF mentions (7,4) inner corners.
                             # The sample calibration script uses (10,7) inner corners.
                             # Let's use the PDF's example: (7,4) inner corners means an 8x5 board.
-CHECKERBOARD_INNER_CORNERS_WIDTH = 7 # Number of inner corners along width
-CHECKERBOARD_INNER_CORNERS_HEIGHT = 4 # Number of inner corners along height
-SQUARE_SIZE_MM = 25.0  # Size of a chessboard square in millimeters (as per PDF example)
+CHECKERBOARD_INNER_CORNERS_WIDTH = 10 # Number of inner corners along width
+CHECKERBOARD_INNER_CORNERS_HEIGHT = 7 # Number of inner corners along height
+SQUARE_SIZE_MM = 20.0  # Size of a chessboard square in millimeters (as per PDF example)
 NUM_CALIBRATION_IMAGES = 20 # Number of images to capture for calibration (as per PDF)
 
 # --- World Coordinate System ---
