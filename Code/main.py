@@ -10,7 +10,7 @@ import signal # For graceful shutdown
 
 import Config
 from CameraManager import CameraManager
-import CvFunctions
+import CvFunctions # Ensure this matches the filename and an __init__.py if it's a package
 from WebUi import WebUIManager # Assuming web_ui.py will have a WebUIManager class
 # from hardware_manager import HardwareManager # Placeholder if needed
 
@@ -129,45 +129,81 @@ def perform_extrinsic_calibration(cam_manager_obj):
     logging.info("       4. Corner along Y-axis (e.g., Bottom-Back-Left)")
     logging.info("Press 'c' to calculate pose after 4 points. 'r' to restart points. 's' to skip.")
 
-    cv2.namedWindow("Extrinsic Calibration - Click Box Corners", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Extrinsic Calibration - Click Box Corners", 1280, 720) # Adjust size as needed
+    window_name = "Extrinsic Calibration - Click Box Corners"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720) # Adjust size as needed
 
     frame_for_calibration = None
+    max_frame_wait_attempts = 100 # Approx 10 seconds if sleep is 0.1s
+    frame_wait_attempts = 0
+
     while frame_for_calibration is None and not shutdown_event.is_set():
         raw_frame = cam_manager_obj.capture_frame(undistort=False) # Get raw frame
         if raw_frame is not None:
             # Undistort this specific frame for accurate point selection
-            frame_for_calibration = cv_functions.undistort_frame(raw_frame, cam_manager_obj.mtx,
+            # Corrected module name from cv_functions to CvFunctions
+            frame_for_calibration = CvFunctions.undistort_frame(raw_frame, cam_manager_obj.mtx,
                                                                  cam_manager_obj.dist, cam_manager_obj.new_camera_mtx)
+            if frame_for_calibration is None:
+                 logging.warning("Extrinsic Calib: Raw frame captured, but undistortion failed. Retrying capture.")
+                 # Consider a small delay here if undistortion failure is intermittent and recoverable
+                 # time.sleep(0.05)
         else:
-            logging.warning("Extrinsic Calib: Waiting for a valid camera frame...")
+            logging.warning(f"Extrinsic Calib: Waiting for a valid camera frame... (Attempt {frame_wait_attempts + 1}/{max_frame_wait_attempts})")
             time.sleep(0.1)
-        if cv2.waitKey(1) & 0xFF == ord('s'):
-            logging.info("Extrinsic calibration skipped by user.")
-            cv2.destroyWindow("Extrinsic Calibration - Click Box Corners")
+            frame_wait_attempts += 1
+            if frame_wait_attempts >= max_frame_wait_attempts:
+                logging.error("Extrinsic Calib: Failed to get a camera frame after multiple attempts. Aborting calibration attempt.")
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1 : # Check if window exists and is visible
+                    cv2.destroyWindow(window_name)
+                return None, None # Exit calibration
+
+        # Allow skipping even while waiting for the first frame
+        # Place key check inside the loop to make it responsive
+        key_event = cv2.waitKey(1) & 0xFF
+        if key_event == ord('s'):
+            logging.info("Extrinsic calibration skipped by user while waiting for frame.")
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                 cv2.destroyWindow(window_name)
+            return None, None
+        elif key_event == ord('q'): # Allow quitting application
+            logging.info("Quit requested during extrinsic calibration setup.")
+            shutdown_event.set()
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+                cv2.destroyWindow(window_name)
             return None, None
 
 
+    if frame_for_calibration is None: # Could happen if shutdown_event was set
+        logging.info("Extrinsic calibration aborted due to shutdown or failure to get frame.")
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+            cv2.destroyWindow(window_name)
+        return None, None
+
     frame_display = frame_for_calibration.copy()
     callback_params = {'frame_display': frame_display}
-    cv2.setMouseCallback("Extrinsic Calibration - Click Box Corners", mouse_callback_extrinsic_calib, callback_params)
+    cv2.setMouseCallback(window_name, mouse_callback_extrinsic_calib, callback_params)
 
     clicked_image_points = [] # Reset points
 
     while not shutdown_event.is_set():
-        cv2.imshow("Extrinsic Calibration - Click Box Corners", frame_display)
+        cv2.imshow(window_name, frame_display)
         key = cv2.waitKey(100) & 0xFF
 
+        if key == ord('q'): # Allow quitting application
+            logging.info("Quit requested during extrinsic calibration point selection.")
+            shutdown_event.set()
+            break
         if key == ord('s'): # Skip
             logging.info("Extrinsic calibration skipped by user.")
-            cv2.destroyWindow("Extrinsic Calibration - Click Box Corners")
-            return None, None
+            break
         if key == ord('r'): # Restart points
             clicked_image_points = []
             frame_display = frame_for_calibration.copy() # Reset display frame
             callback_params['frame_display'] = frame_display
             logging.info("Points reset. Re-click the 4 corners.")
-            cv2.setMouseCallback("Extrinsic Calibration - Click Box Corners", mouse_callback_extrinsic_calib, callback_params)
+            # Re-assign the mouse callback in case the window context needs fresh frame_display
+            cv2.setMouseCallback(window_name, mouse_callback_extrinsic_calib, callback_params)
 
 
         if len(clicked_image_points) == MAX_CLICKS and key == ord('c'):
@@ -178,40 +214,31 @@ def perform_extrinsic_calibration(cam_manager_obj):
             logging.info(f"Object Points (3D world meters) for solvePnP:\n{object_points_np}")
 
             try:
-                # Ensure distortion coeffs are not None, use zeros if they are (though they should be loaded)
                 dist_coeffs_for_solvepnp = cam_manager_obj.dist if cam_manager_obj.dist is not None else np.zeros((5,1), dtype=np.float32)
-
-                # retval, rvec, tvec = cv2.solvePnP(object_points_np, image_points_np,
-                #                                  cam_manager_obj.mtx, dist_coeffs_for_solvepnp,
-                #                                  flags=cv2.SOLVEPNP_ITERATIVE)
-                # Use SOLVEPNP_IPPE_SQUARE if corners are ordered correctly relative to center,
-                # or SOLVEPNP_SQPNP for a robust planar solution. Iterative is generally good.
                 retval, rvecs, tvecs, reprojection_errors = cv2.solvePnPGeneric(
                     object_points_np, image_points_np,
                     cam_manager_obj.mtx, dist_coeffs_for_solvepnp,
-                    flags=cv2.SOLVEPNP_SQPNP # A robust PnP for planar targets
+                    flags=cv2.SOLVEPNP_SQPNP
                 )
 
-
                 if retval and rvecs is not None and len(rvecs) > 0:
-                    # solvePnPGeneric can return multiple solutions, take the first one / one with lowest error
-                    rvec = rvecs[0] # Take the first solution
+                    rvec = rvecs[0]
                     tvec = tvecs[0]
                     if reprojection_errors is not None and len(reprojection_errors) > 0:
                         logging.info(f"solvePnP reprojection error: {reprojection_errors[0]}")
-
 
                     logging.info("cv2.solvePnP successful.")
                     logging.info(f"Rotation Vector (rvec):\n{rvec}")
                     logging.info(f"Translation Vector (tvec):\n{tvec}")
 
                     # Draw projected axes for verification
-                    frame_with_axes = cv_functions.draw_axes_on_frame(frame_for_calibration.copy(),
+                    # Corrected module name from cv_functions to CvFunctions
+                    frame_with_axes = CvFunctions.draw_axes_on_frame(frame_for_calibration.copy(),
                                                                       rvec, tvec,
                                                                       cam_manager_obj.mtx, cam_manager_obj.dist)
                     cv2.putText(frame_with_axes, "SolvePnP OK. Press 'y' to accept, 'n' to retry.", (10,30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-                    cv2.imshow("Extrinsic Calibration - Click Box Corners", frame_with_axes)
+                    cv2.imshow(window_name, frame_with_axes)
 
                     while not shutdown_event.is_set():
                         confirm_key = cv2.waitKey(100) & 0xFF
@@ -220,16 +247,20 @@ def perform_extrinsic_calibration(cam_manager_obj):
                             extrinsic_calibrated = True
                             save_extrinsic_calibration(rvec, tvec)
                             logging.info("Extrinsic calibration accepted and saved.")
-                            cv2.destroyWindow("Extrinsic Calibration - Click Box Corners")
+                            cv2.destroyWindow(window_name)
                             return rvec, tvec
                         elif confirm_key == ord('n'):
                             logging.info("Extrinsic calibration rejected. Restarting point selection.")
                             clicked_image_points = [] # Reset points
                             frame_display = frame_for_calibration.copy() # Reset display frame
                             callback_params['frame_display'] = frame_display
-                            cv2.setMouseCallback("Extrinsic Calibration - Click Box Corners", mouse_callback_extrinsic_calib, callback_params)
+                            cv2.setMouseCallback(window_name, mouse_callback_extrinsic_calib, callback_params)
                             break # Break from confirmation loop to point selection loop
-                    if extrinsic_calibrated: break # Break from main calib loop if accepted
+                        elif confirm_key == ord('q'):
+                            logging.info("Quit requested during extrinsic calibration confirmation.")
+                            shutdown_event.set()
+                            break # Break from confirmation loop
+                    if extrinsic_calibrated or shutdown_event.is_set(): break # Break from main calib loop if accepted or shutdown
 
                 else:
                     logging.error("cv2.solvePnP failed or returned no valid solutions.")
@@ -238,10 +269,13 @@ def perform_extrinsic_calibration(cam_manager_obj):
 
             except Exception as e:
                 logging.error(f"Exception during solvePnP: {e}", exc_info=True)
-                cv2.putText(frame_display, f"SolvePnP Error: {e}. Press 'r' to retry.", (10,30),
+                cv2.putText(frame_display, f"SolvePnP Error. Press 'r' to retry.", (10,30), # Simplified error for display
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1)
 
-    cv2.destroyAllWindows()
+    if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) >= 1:
+        cv2.destroyWindow(window_name)
+    if extrinsic_calibrated:
+        return rvec_global, tvec_global
     return None, None
 
 
@@ -252,117 +286,110 @@ def main_loop():
     if not extrinsic_calibrated:
         logging.error("Extrinsic parameters (rvec, tvec) are not available. Cannot proceed with 3D mapping.")
         logging.info("Consider running extrinsic calibration or ensuring the data file is present.")
-        shutdown_event.set() # Stop if no pose
+        # No longer setting shutdown_event here, main() will handle exit if perform_extrinsic_calibration failed critically.
         return
 
+    display_window_name = "2D Volleyball Tracking"
     if Config.DISPLAY_2D_FEED:
-        cv2.namedWindow("2D Volleyball Tracking", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("2D Volleyball Tracking", 960, 540)
+        cv2.namedWindow(display_window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(display_window_name, 960, 540)
 
     frame_count = 0
     loop_start_time_total = time.monotonic()
 
-    # Variables for web UI update
-    last_ball_2d = (None, None, None) # u, v, radius
-    last_ball_3d = None # X, Y, Z_vis
-
     while not shutdown_event.is_set():
         loop_iter_start_time = time.monotonic()
 
-        # 1. Capture Frame
-        raw_frame = camera_manager.capture_frame(undistort=False) # Get raw frame
+        raw_frame = camera_manager.capture_frame(undistort=False)
         if raw_frame is None:
             logging.warning("MainLoop: Failed to get frame from camera manager.")
-            if camera_manager.last_error and "Cannot open camera" in camera_manager.last_error:
-                logging.critical("Camera connection lost. Shutting down.")
-                shutdown_event.set()
-            time.sleep(0.1) # Wait a bit before retrying
+            if camera_manager.last_error and ("Cannot open camera" in camera_manager.last_error or "Failed to read frame" in camera_manager.last_error):
+                logging.critical("Camera connection issue persisting or failed to grab frame. Consider shutting down or attempting re-initialization.")
+                # Potentially add a counter for consecutive errors before shutting down
+                # For now, just sleep and continue hoping it recovers.
+            time.sleep(0.1) 
             continue
-
-        # 2. Undistort Frame
-        # The camera_manager.capture_frame can do this, or we can do it here explicitly.
-        # For clarity, let's assume camera_manager.capture_frame(undistort=True) is preferred
-        # or we call cv_functions.undistort_frame here.
-        # undistorted_frame = camera_manager.capture_frame(undistort=True) # Simpler if CM handles it
-        undistorted_frame = cv_functions.undistort_frame(raw_frame, camera_manager.mtx,
+        
+        # Corrected module name from cv_functions to CvFunctions
+        undistorted_frame = CvFunctions.undistort_frame(raw_frame, camera_manager.mtx,
                                                          camera_manager.dist, camera_manager.new_camera_mtx)
         if undistorted_frame is None:
             logging.warning("MainLoop: Frame became None after undistortion.")
             time.sleep(0.1)
             continue
 
-        # 3. Detect Volleyball 2D
-        # Pass ROI from Config if set
-        u, v, radius_px, dbg_mask = cv_functions.detect_volleyball_2d(undistorted_frame,
+        # Corrected module name from cv_functions to CvFunctions
+        u, v, radius_px, dbg_mask = CvFunctions.detect_volleyball_2d(undistorted_frame,
                                                                       roi=Config.BALL_DETECTION_ROI)
         current_ball_2d = (u,v,radius_px)
 
-        # 4. 2D to 3D Mapping
         world_coords_3d = None
         if u is not None and v is not None:
-            world_coords_3d = cv_functions.map_2d_to_3d_on_ground(u, v,
-                                                                  camera_manager.mtx, camera_manager.dist,
+            # Corrected module name from cv_functions to CvFunctions
+            world_coords_3d = CvFunctions.map_2d_to_3d_on_ground(u, v,
+                                                                  camera_manager.mtx, camera_manager.dist, # mtx and dist should be from camera_manager
                                                                   rvec_global, tvec_global)
         current_ball_3d = world_coords_3d
 
-        # --- Update Web UI Data ---
         if web_ui_manager and Config.WEB_UI_ENABLED:
-            # For the 3D model of the ball, its center should be at (X, Y, BallRadius)
             ball_pos_for_vis = None
             if current_ball_3d is not None:
                 ball_pos_for_vis = [current_ball_3d[0], current_ball_3d[1], Config.VOLLEYBALL_RADIUS_M]
 
-            # Prepare other variables for UI
             cam_props = camera_manager.get_camera_properties()
             measured_fps = cam_props.get('measured_fps', 0)
             resolution_text = f"{cam_props.get('frame_width',0)}x{cam_props.get('frame_height',0)}"
 
-            # Update data in WebUIManager
             web_ui_manager.update_data(
-                raw_frame_for_stream=raw_frame, # Send raw frame for web stream
-                processed_frame_for_stream=None, # Placeholder for CV processed frame if needed for separate stream
+                raw_frame_for_stream=raw_frame,
+                processed_frame_for_stream=None,
                 ball_2d_coords=current_ball_2d[:2] if current_ball_2d[0] is not None else None,
                 ball_pixel_radius=current_ball_2d[2] if current_ball_2d[2] is not None else None,
-                ball_3d_world_coords=ball_pos_for_vis, # This is (X,Y,Radius) for sphere center
-                box_corners_world=Config.WORLD_BOX_CORNERS_M.tolist(), # For drawing the box
+                ball_3d_world_coords=ball_pos_for_vis,
+                box_corners_world=Config.WORLD_BOX_CORNERS_M.tolist(),
                 box_dimensions=[Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M],
                 camera_intrinsics=camera_manager.mtx.tolist() if camera_manager.mtx is not None else None,
                 camera_extrinsics={'rvec': rvec_global.tolist() if rvec_global is not None else None,
                                    'tvec': tvec_global.tolist() if tvec_global is not None else None},
-                fps=measured_fps,
+                fps=measured_fps if measured_fps is not None else 0.0,
                 resolution=resolution_text,
                 status_message="Tracking..." if u is not None else "Searching for ball..."
             )
-            # The Web UI itself will handle the Open3D updates in its own thread/loop based on this data.
 
-
-        # --- Display 2D Feed (Optional) ---
         if Config.DISPLAY_2D_FEED:
             display_frame = undistorted_frame.copy()
-            if dbg_mask is not None and Config.LOG_LEVEL == "DEBUG": # Show mask only in debug
+            if dbg_mask is not None and Config.LOG_LEVEL.upper() == "DEBUG":
                  display_frame = cv2.addWeighted(display_frame, 0.7, dbg_mask, 0.3, 0)
 
             if u is not None:
-                display_frame = cv_functions.draw_ball_on_frame(display_frame, u, v, radius_px)
+                # Corrected module name from cv_functions to CvFunctions
+                display_frame = CvFunctions.draw_ball_on_frame(display_frame, u, v, radius_px)
             if world_coords_3d is not None:
-                display_frame = cv_functions.draw_3d_info_on_frame(display_frame, world_coords_3d, Config.VOLLEYBALL_RADIUS_M)
-
-            # Draw world axes if extrinsics are available
-            display_frame = cv_functions.draw_axes_on_frame(display_frame, rvec_global, tvec_global,
+                # Corrected module name from cv_functions to CvFunctions
+                display_frame = CvFunctions.draw_3d_info_on_frame(display_frame, world_coords_3d, Config.VOLLEYBALL_RADIUS_M)
+            
+            # Corrected module name from cv_functions to CvFunctions
+            display_frame = CvFunctions.draw_axes_on_frame(display_frame, rvec_global, tvec_global,
                                                             camera_manager.mtx, camera_manager.dist)
-            cv2.imshow("2D Volleyball Tracking", display_frame)
+            cv2.imshow(display_window_name, display_frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 shutdown_event.set()
-            elif key == ord('e'): # Add a key to re-run extrinsic calibration
+            elif key == ord('e'):
                 logging.info("User requested extrinsic calibration re-run.")
+                # Store current state in case re-calibration is skipped/failed
+                old_rvec, old_tvec = rvec_global, tvec_global
+                old_extrinsic_calibrated = extrinsic_calibrated
+
                 new_rvec, new_tvec = perform_extrinsic_calibration(camera_manager)
                 if new_rvec is not None and new_tvec is not None:
                     rvec_global, tvec_global = new_rvec, new_tvec
                     extrinsic_calibrated = True
                     logging.info("Extrinsic calibration updated.")
                 else:
-                    logging.info("Extrinsic calibration re-run was skipped or failed.")
+                    logging.info("Extrinsic calibration re-run was skipped or failed. Restoring previous values if any.")
+                    rvec_global, tvec_global = old_rvec, old_tvec # Restore previous
+                    extrinsic_calibrated = old_extrinsic_calibrated # Restore previous status
 
 
         frame_count += 1
@@ -372,30 +399,26 @@ def main_loop():
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-    # --- End of Main Loop ---
     total_duration = time.monotonic() - loop_start_time_total
     avg_loop_fps = frame_count / total_duration if total_duration > 0 else 0
     logging.info(f"Main loop finished. Processed {frame_count} frames in {total_duration:.2f}s. Avg FPS: {avg_loop_fps:.2f}")
-    if Config.DISPLAY_2D_FEED:
-        cv2.destroyAllWindows()
+    if Config.DISPLAY_2D_FEED and cv2.getWindowProperty(display_window_name, cv2.WND_PROP_VISIBLE) >=1:
+        cv2.destroyAllWindows() # More robust than destroyWindow
 
 def main():
     global camera_manager, web_ui_manager, rvec_global, tvec_global, extrinsic_calibrated
-    # hardware_manager placeholder
 
     setup_logging()
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Initialize Camera Manager
     camera_manager = CameraManager(camera_index=Config.CAMERA_INDEX,
                                    width=Config.CAM_REQUESTED_WIDTH,
                                    height=Config.CAM_REQUESTED_HEIGHT,
                                    fps=Config.CAM_REQUESTED_FPS)
 
-    # Load intrinsic calibration
     if not camera_manager.load_calibration_data(Config.CALIBRATION_DATA_FILE):
-        logging.error("Failed to load camera intrinsic calibration data. Cannot proceed.")
+        logging.error("Failed to load camera intrinsic calibration data. Cannot proceed without intrinsics.")
         if not os.path.exists(Config.CALIBRATION_DATA_FILE):
             logging.error(f"Please run the camera_calibration.py script first to generate '{Config.CALIBRATION_DATA_FILE}'.")
         camera_manager.shutdown()
@@ -406,87 +429,75 @@ def main():
         camera_manager.shutdown()
         return
 
-    # Load or Perform Extrinsic Calibration
     if not load_extrinsic_calibration():
         logging.warning("Could not load extrinsic calibration. Attempting to perform it now.")
         rvec_calib, tvec_calib = perform_extrinsic_calibration(camera_manager)
         if rvec_calib is None or tvec_calib is None:
-            logging.error("Extrinsic calibration failed or was skipped. Cannot proceed accurately with 3D mapping.")
-            # Decide if to exit or continue with degraded functionality (no 3D mapping)
-            # For this project, 3D mapping is key, so we might exit.
-            shutdown_event.set() # Signal shutdown
+            logging.error("Extrinsic calibration failed, was skipped, or quit. Cannot proceed accurately with 3D mapping.")
+            # No need to set shutdown_event here, main will exit.
         else:
-            rvec_global, tvec_global = rvec_calib, tvec_calib
+            rvec_global, tvec_calib = rvec_calib, tvec_calib # Typo: tvec_global = tvec_calib
             extrinsic_calibrated = True
-    else: # Loaded successfully
+    else:
+        logging.info("Extrinsic calibration loaded successfully.")
         # Optionally, could ask user if they want to re-calibrate
         # For now, assume loaded is fine.
-        pass
+
+    if not extrinsic_calibrated and not shutdown_event.is_set():
+        logging.critical("Extrinsic calibration is required for 3D mapping but was not successful. Application will exit.")
+        shutdown_event.set()
 
 
-    # Initialize Hardware Manager (if needed for battery, etc.)
-    # hardware_manager = HardwareManager() # Basic init
-
-    # Initialize and Start Web UI Manager in a separate thread
-    if Config.WEB_UI_ENABLED:
+    if Config.WEB_UI_ENABLED and not shutdown_event.is_set():
         web_ui_manager = WebUIManager(
             host='0.0.0.0',
             port=Config.WEB_PORT,
-            shutdown_event_ref=shutdown_event # Pass shutdown event
+            shutdown_event_ref=shutdown_event
         )
         web_thread = threading.Thread(target=web_ui_manager.run, name="WebUIServerThread", daemon=True)
         web_thread.start()
-        time.sleep(1) # Give server a moment to start
+        time.sleep(1) 
         if not web_thread.is_alive():
             logging.error("Web UI server thread failed to start. Check for port conflicts or other errors.")
-            # Optionally shut down if web UI is critical
-            # shutdown_event.set()
+            # shutdown_event.set() # Optionally shut down if web UI is critical
 
 
-    # Start the main processing loop
-    if not shutdown_event.is_set(): # Only start if no critical init errors
+    if not shutdown_event.is_set():
         try:
             main_loop()
         except Exception as e:
             logging.error(f"Unhandled exception in main_loop: {e}", exc_info=True)
-            shutdown_event.set() # Trigger shutdown on unhandled error
-        except KeyboardInterrupt: # Should be caught by signal_handler, but as a fallback
+            shutdown_event.set()
+        except KeyboardInterrupt: 
             logging.info("KeyboardInterrupt in main_loop. Shutting down.")
             shutdown_event.set()
 
-    # --- Cleanup ---
     logging.info("--- Initiating Final Cleanup Sequence ---")
     if not shutdown_event.is_set(): # Ensure it's set if loop exited for other reasons
         shutdown_event.set()
 
-    if web_ui_manager and Config.WEB_UI_ENABLED:
+    if web_ui_manager and Config.WEB_UI_ENABLED and 'web_thread' in locals() and web_thread.is_alive():
         logging.info("Shutting down Web UI Manager...")
-        # Web UI manager should observe shutdown_event, or have its own stop method
-        # If using Flask's development server, it might need a request to stop
-        # or os.kill(os.getpid(), signal.SIGINT) if run in main thread and daemon=False
-        # For a threaded server, just joining the thread after signaling might be enough
-        if 'web_thread' in locals() and web_thread.is_alive():
-            logging.info("Waiting for Web UI server thread to join...")
-            web_thread.join(timeout=5.0)
-            if web_thread.is_alive():
-                logging.warning("Web UI server thread did not exit cleanly.")
-        web_ui_manager.stop() # Add a stop method to WebUIManager if needed
+        # Web UI manager observes shutdown_event. Give it time to react.
+        web_thread.join(timeout=5.0)
+        if web_thread.is_alive():
+            logging.warning("Web UI server thread did not exit cleanly. Attempting direct stop.")
+            if hasattr(web_ui_manager, 'stop'): # Check if stop method exists
+                web_ui_manager.stop()
+        # Check again after stop
+        if web_thread.is_alive():
+             logging.error("Web UI server thread still alive after stop attempt.")
+
 
     if camera_manager:
         camera_manager.shutdown()
 
-    # if hardware_manager: # Placeholder
-    #     hardware_manager.cleanup()
-
     logging.info("========================================================")
-    logging.info(f"--- {Config.VIS_WINDOW_TITLE if hasattr(Config, 'VIS_WINDOW_TITLE') else 'Application'} Stopped ---")
+    logging.info(f"--- {(Config.VIS_WINDOW_TITLE if hasattr(Config, 'VIS_WINDOW_TITLE') else 'Application')} Stopped ---")
     logging.info("========================================================")
-    # Ensure all logs are flushed
+    
     logging.shutdown()
-    # A small delay to ensure all threads might see the shutdown event and attempt to close
-    time.sleep(0.5)
-    # Forcibly exit if anything is stuck, as a last resort for complex thread hangs.
-    # os._exit(0) # Use with caution, skips normal Python exit handlers.
+    # time.sleep(0.5) # Removed os._exit as it's generally not good practice unless absolutely necessary
 
 if __name__ == "__main__":
     main()

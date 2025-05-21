@@ -28,7 +28,16 @@ MAX_CONSECUTIVE_CAPTURE_ERRORS = 15 # From sample, might be useful
 
 # --- Camera Configuration ---
 CAMERA_INDEX = 0  # OpenCV camera index
+
 # Default resolution and FPS for the camera, can be overridden by loaded calibration
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !!! CRITICAL: If you are getting "Failed to allocate required memory"    !!!
+# !!! or other GStreamer/V4L2 errors,  TRY LOWERING THESE VALUES.          !!!
+# !!! For example, start with:                                             !!!
+# !!! CAM_REQUESTED_WIDTH = 640                                            !!!
+# !!! CAM_REQUESTED_HEIGHT = 480                                           !!!
+# !!! CAM_REQUESTED_FPS = 30.0 (or 15.0)                                   !!!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 CAM_REQUESTED_WIDTH = 1920 # From PDF, RPi HQ camera supports various resolutions
 CAM_REQUESTED_HEIGHT = 1080
 CAM_REQUESTED_FPS = 30.0
