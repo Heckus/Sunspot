@@ -38,8 +38,8 @@ CAMERA_INDEX = 0  # OpenCV camera index
 # !!! CAM_REQUESTED_HEIGHT = 480                                           !!!
 # !!! CAM_REQUESTED_FPS = 30.0 (or 15.0)                                   !!!
 # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-CAM_REQUESTED_WIDTH = 1920 # From PDF, RPi HQ camera supports various resolutions
-CAM_REQUESTED_HEIGHT = 1080
+CAM_REQUESTED_WIDTH = 640 # From PDF, RPi HQ camera supports various resolutions
+CAM_REQUESTED_HEIGHT = 480
 CAM_REQUESTED_FPS = 30.0
 
 # Camera intrinsic parameters (to be loaded from CALIBRATION_DATA_FILE)
