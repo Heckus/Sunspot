@@ -205,7 +205,7 @@ class CameraManager:
                 return None
             
             # Convert RGB to BGR as OpenCV functions (and potentially WebUI) expect BGR
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2RGB)
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
             self.last_error = None # Clear error if capture successful
 
         except Exception as e:
