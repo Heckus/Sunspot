@@ -54,8 +54,8 @@ NUM_CALIBRATION_IMAGES = 20 # Number of images to capture for calibration (as pe
 
 # --- World Coordinate System ---
 # Dimensions of the physical box
-BOX_WIDTH_M = 2.0  # meters
-BOX_DEPTH_M = 2.0  # meters (assuming Y-axis is depth into the scene from camera's perspective of the ground)
+BOX_WIDTH_M = 1.0  # meters
+BOX_DEPTH_M = 1.0  # meters (assuming Y-axis is depth into the scene from camera's perspective of the ground)
 BOX_HEIGHT_M = 0.05 # Small height for visualizing the box base/tape thickness, as per PDF
 
 # Defined 3D coordinates of the box corners on the ground (Z=0)
