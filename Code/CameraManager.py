@@ -29,7 +29,7 @@ class CameraManager:
             fps (float): The desired frames per second.
         """
         self.camera_index = camera_index
-        self.picam = None # Changed from self.cap
+        self.picam = None
         self.is_initialized = False
         self.last_error = None
         self.requested_width = width
@@ -68,15 +68,16 @@ class CameraManager:
             logging.info(f"Camera Matrix (mtx):\n{self.mtx}")
             logging.info(f"Distortion Coefficients (dist):\n{self.dist}")
 
-            # Initial calculation based on requested/current frame dimensions.
-            # This will be re-calculated if actual dimensions change after camera init.
             h, w = self.frame_height, self.frame_width
-            self.new_camera_mtx, self.roi = cv2.getOptimalNewCameraMatrix(self.mtx, self.dist, (w, h), 1, (w, h))
-            if self.new_camera_mtx is not None:
-                 logging.info(f"Calculated new optimal camera matrix (initial):\n{self.new_camera_mtx}")
-                 logging.info(f"Calculated ROI for undistortion (initial): {self.roi}")
+            if w > 0 and h > 0: # Ensure width and height are valid before calculating
+                self.new_camera_mtx, self.roi = cv2.getOptimalNewCameraMatrix(self.mtx, self.dist, (w, h), 1, (w, h))
+                if self.new_camera_mtx is not None:
+                     logging.info(f"Calculated new optimal camera matrix (initial):\n{self.new_camera_mtx}")
+                     logging.info(f"Calculated ROI for undistortion (initial): {self.roi}")
+                else:
+                     logging.warning("Failed to calculate new optimal camera matrix (initial) - likely due to w/h being 0.")
             else:
-                 logging.warning("Failed to calculate new optimal camera matrix (initial).")
+                logging.warning("Initial frame width/height is 0, skipping initial calculation of new_camera_mtx and ROI.")
             return True
         except FileNotFoundError:
             self.last_error = f"Calibration file not found: {calibration_file_path}"
@@ -114,47 +115,39 @@ class CameraManager:
         try:
             self.picam = Picamera2(camera_num=self.camera_index)
             # Picamera2 will select a sensor mode close to the request.
-            # Format "RGB888" gives a 3-channel RGB numpy array.
-            # Controls can be added here, e.g. for exposure, gain, if needed.
-            # For now, primarily setting size and framerate.
+            # Request "BGR888" format to get a 3-channel BGR numpy array directly.
             video_config_params = {
-                "main": {"size": (self.requested_width, self.requested_height), "format": "RGB888"},
+                "main": {"size": (self.requested_width, self.requested_height), "format": "BGR888"}, # CHANGED
                 "controls": {"FrameRate": self.requested_fps}
-                # Add other controls like "AnalogueGain", "ExposureTime" if needed from main_project_config
             }
             
-            # Example of adding more controls if they were in your project's Config.py
-            # if hasattr(main_project_config, 'CAMERA_ANALOGUE_GAIN'):
-            #     video_config_params["controls"]["AnalogueGain"] = main_project_config.CAMERA_ANALOGUE_GAIN
-            # if hasattr(main_project_config, 'CAMERA_EXPOSURE_TIME'):
-            #      video_config_params["controls"]["ExposureTime"] = main_project_config.CAMERA_EXPOSURE_TIME
-
-
             cam_config = self.picam.create_video_configuration(**video_config_params)
-            logging.info(f"Picamera2 generated video config: {cam_config}")
+            logging.info(f"Picamera2 generated video config (requesting BGR888): {cam_config}")
             self.picam.configure(cam_config)
             
             # Update actual frame dimensions and FPS from the configured stream
             self.frame_width = self.picam.camera_configuration()['main']['size'][0]
             self.frame_height = self.picam.camera_configuration()['main']['size'][1]
-            # FrameRate might not always be perfectly what was requested or easily readable back for exact FPS.
-            # Picamera2 aims to match it. For simplicity, we'll use the configured main stream's FPS target
-            # or rely on measured FPS. Actual control 'FrameRate' might be available.
+            actual_format = self.picam.camera_configuration()['main']['format']
+            
             try:
                 self.fps = self.picam.camera_configuration()['controls']['FrameRate']
             except KeyError:
                 logging.warning(f"Could not read 'FrameRate' from controls, using requested FPS: {self.requested_fps}")
                 self.fps = self.requested_fps # Fallback
 
-            logging.info(f"Picamera2 configured. Actual stream: {self.frame_width}x{self.frame_height} @ ~{self.fps:.2f}fps, Format: {self.picam.camera_configuration()['main']['format']}")
+            logging.info(f"Picamera2 configured. Actual stream: {self.frame_width}x{self.frame_height} @ ~{self.fps:.2f}fps, Format: {actual_format}")
+            if actual_format != "BGR888":
+                logging.warning(f"Requested BGR888 format, but actual format is {actual_format}. Color conversion might still be needed or unexpected.")
+
 
             self.picam.start()
             logging.info(f"Picamera2 (ID: {self.camera_index}) started successfully.")
             
-            # If resolution changed from requested, and calibration data is loaded, recalculate optimal matrix
-            if (self.frame_width != self.requested_width or self.frame_height != self.requested_height) and \
+            if (self.frame_width != self.requested_width or self.frame_height != self.requested_height or \
+               (self.new_camera_mtx is None and self.mtx is not None)) and \
                (self.mtx is not None and self.dist is not None):
-                logging.info("Actual resolution differs from requested. Re-calculating optimal new camera matrix and ROI.")
+                logging.info("Actual resolution differs from requested or new_camera_mtx not set. Re-calculating optimal new camera matrix and ROI.")
                 h, w = self.frame_height, self.frame_width
                 self.new_camera_mtx, self.roi = cv2.getOptimalNewCameraMatrix(self.mtx, self.dist, (w,h), 1, (w,h))
                 if self.new_camera_mtx is not None:
@@ -163,11 +156,10 @@ class CameraManager:
                 else:
                     logging.warning("Failed to re-calculate new optimal camera matrix after resolution change.")
 
-
             self.is_initialized = True
             self.last_error = None
             self.last_capture_time = None
-            self.measured_fps_avg = None # Reset measured FPS
+            self.measured_fps_avg = None
             return True
 
         except Exception as e:
@@ -193,19 +185,19 @@ class CameraManager:
         """
         if not self.is_initialized or not self.picam or not self.picam.started:
             self.last_error = "Cannot capture frame, Picamera2 not initialized or not started."
-            logging.warning(self.last_error)
+            # logging.warning(self.last_error) # This can be very spammy
             return None
 
         try:
-            # capture_array("main") returns an RGB NumPy array with the main stream
-            frame_rgb = self.picam.capture_array("main")
-            if frame_rgb is None:
+            # capture_array("main") returns a BGR NumPy array if configured with "BGR888"
+            frame_bgr = self.picam.capture_array("main") # RENAMED from frame_rgb
+            if frame_bgr is None:
                 self.last_error = "Picamera2 capture_array returned None."
                 logging.warning(self.last_error)
                 return None
             
-            # Convert RGB to BGR as OpenCV functions (and potentially WebUI) expect BGR
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            # NO LONGER NEEDED IF CAMERA PROVIDES BGR888 AND capture_array RESPECTS IT:
+            # frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
             self.last_error = None # Clear error if capture successful
 
         except Exception as e:
@@ -213,33 +205,34 @@ class CameraManager:
             logging.error(self.last_error, exc_info=True)
             return None
         
-        # --- Calculate measured FPS (optional but useful) ---
         current_time = time.monotonic()
         if self.last_capture_time is not None:
             time_diff = current_time - self.last_capture_time
-            if time_diff > 0.0001: 
+            if time_diff > 1e-4: 
                 instant_fps = 1.0 / time_diff
                 alpha = 0.05 
                 self.measured_fps_avg = (alpha * instant_fps + (1 - alpha) * self.measured_fps_avg) \
                                         if self.measured_fps_avg is not None else instant_fps
         self.last_capture_time = current_time
-        # --- End FPS Calculation ---
 
         if undistort:
             if self.mtx is not None and self.dist is not None:
+                # Ensure new_camera_mtx is used if available, otherwise use original mtx for undistortion map
                 current_undistort_mtx = self.new_camera_mtx if self.new_camera_mtx is not None else self.mtx
                 undistorted_frame = cv2.undistort(frame_bgr, self.mtx, self.dist, None, current_undistort_mtx)
-                # Optionally crop using self.roi if new_camera_mtx was calculated with alpha=0 or a specific ROI
-                # if self.roi is not None and self.new_camera_mtx is not None: # Example: if alpha=0 for getOptimal...
+                # Cropping logic can be refined based on how getOptimalNewCameraMatrix's alpha parameter is used.
+                # If alpha=0, ROI gives the valid pixel region. If alpha=1, all source pixels are retained.
+                # For now, not applying ROI crop unless specifically intended.
+                # if self.roi is not None and self.new_camera_mtx is not None:
                 #     x, y, w, h = self.roi
                 #     if w > 0 and h > 0:
                 #         undistorted_frame = undistorted_frame[y:y+h, x:x+w]
                 return undistorted_frame
             else:
-                logging.debug("Cannot undistort: Camera calibration data (mtx, dist) not loaded.")
-                return frame_bgr # Return BGR frame if no calibration data
+                # logging.debug("Cannot undistort: Camera calibration data (mtx, dist) not loaded.") # Can be spammy
+                return frame_bgr 
         else:
-            return frame_bgr # Return BGR frame
+            return frame_bgr
 
     def get_camera_properties(self):
         """
@@ -251,25 +244,22 @@ class CameraManager:
                 'error': self.last_error or "Picamera2 not initialized"
             }
         
-        # Try to get current control values if picam is active
-        actual_fps_from_controls = self.fps # Use the one set during/after configure
+        actual_format = "N/A"
         try:
-            if self.picam.started: # Some controls are only available when started
-                 # This might be heavy to call frequently; using stored self.fps is preferred for target FPS
-                 # control_values = self.picam.camera_controls 
-                 # actual_fps_from_controls = control_values.get('FrameRate', self.fps)
-                 pass # For now, avoid frequent calls to camera_controls in get_properties
+            actual_format = self.picam.camera_configuration()['main']['format']
         except Exception:
-            pass # Ignore if controls can't be read
+            pass
+
 
         return {
             'is_initialized': True,
             'camera_index': self.camera_index,
             'frame_width': self.frame_width,
             'frame_height': self.frame_height,
-            'fps': actual_fps_from_controls, # Target/configured FPS
+            'target_fps': self.fps, 
             'measured_fps': self.measured_fps_avg,
-            'backend_name': 'Picamera2', # Explicitly state backend
+            'backend_name': 'Picamera2',
+            'stream_format': actual_format,
             'mtx_loaded': self.mtx is not None,
             'dist_loaded': self.dist is not None,
             'last_error': self.last_error
@@ -294,15 +284,26 @@ class CameraManager:
         logging.info("CameraManager (Picamera2) shutdown complete.")
 
 if __name__ == '__main__':
-    # Setup basic logging for the example
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # Example Usage
-    # These would normally come from your project's Config.py
-    # For this standalone test, using defaults or hardcoded values.
-    # Make sure main_project_config.CALIBRATION_DATA_FILE points to your actual calibration file.
     
-    # Use parameters from the project's Config.py
+    # --- Create a dummy Config.py for standalone testing if it doesn't exist ---
+    if not os.path.exists("Config.py"):
+        print("Creating dummy Config.py for testing CameraManager.py standalone.")
+        with open("Config.py", "w") as f:
+            f.write("CAMERA_INDEX = 0\n")
+            f.write("CAM_REQUESTED_WIDTH = 1280\n") # Default to a common resolution
+            f.write("CAM_REQUESTED_HEIGHT = 720\n")
+            f.write("CAM_REQUESTED_FPS = 30\n")
+            f.write("CALIBRATION_DATA_FILE = 'camera_calibration_data.npz'\n") # Ensure this file exists or loading will fail
+            f.write("LOG_LEVEL = 'INFO'\n") # Add other necessary Config vars if your main needs them
+    try:
+        import Config as main_project_config # Re-import in case it was just created
+    except ImportError:
+        print("Failed to import Config.py. Please ensure it exists or CameraManager is used within a project structure.")
+        exit()
+    # --- End dummy Config.py creation ---
+
+
     cam_manager = CameraManager(
         camera_index=main_project_config.CAMERA_INDEX,
         width=main_project_config.CAM_REQUESTED_WIDTH,
@@ -310,43 +311,52 @@ if __name__ == '__main__':
         fps=main_project_config.CAM_REQUESTED_FPS
     )
 
-    if cam_manager.load_calibration_data(main_project_config.CALIBRATION_DATA_FILE):
-        logging.info("Calibration data loaded successfully for example usage.")
+    # Try to load calibration data, but don't make it fatal for the example
+    if os.path.exists(main_project_config.CALIBRATION_DATA_FILE):
+        if cam_manager.load_calibration_data(main_project_config.CALIBRATION_DATA_FILE):
+            logging.info("Calibration data loaded successfully for example usage.")
+        else:
+            logging.warning(f"Failed to load calibration data for example from: {main_project_config.CALIBRATION_DATA_FILE}")
     else:
-        logging.warning(f"Failed to load calibration data for example. Check path: {main_project_config.CALIBRATION_DATA_FILE}")
+        logging.warning(f"Calibration file {main_project_config.CALIBRATION_DATA_FILE} not found. Proceeding without undistortion for example.")
+
 
     if cam_manager.initialize_camera():
-        cv2.namedWindow("Picamera2 Stream", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("Picamera2 Stream (BGR)", cv2.WINDOW_NORMAL)
         frame_count = 0
-        start_time_loop = time.monotonic() # Use monotonic for duration
+        start_time_loop = time.monotonic()
 
         while True:
-            # Capture BGR frame, optionally undistorted
             bgr_frame = cam_manager.capture_frame(undistort=True) 
 
             if bgr_frame is not None:
                 frame_count += 1
-                cv2.imshow("Picamera2 Stream", bgr_frame)
+                cv2.imshow("Picamera2 Stream (BGR)", bgr_frame) # Expects BGR
 
                 props = cam_manager.get_camera_properties()
                 if props.get('measured_fps') is not None:
-                    print(f"Measured FPS: {props['measured_fps']:.2f}", end='\r')
+                    print(f"Format: {props.get('stream_format')} | Measured FPS: {props['measured_fps']:.2f}    ", end='\r')
             else:
                 logging.error(f"Failed to capture frame in example loop. Last error: {cam_manager.last_error}")
-                if not cam_manager.is_initialized: # If camera became uninitialized, break
+                if not cam_manager.is_initialized:
+                    logging.error("Camera became uninitialized. Exiting example loop.")
                     break
-                time.sleep(0.1) # Wait a bit on error
+                time.sleep(0.1) 
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
-            elif key == ord('r'): # Example to re-initialize camera
+            elif key == ord('r'): 
                 logging.info("Re-initializing camera by user request (r key)...")
-                cam_manager.initialize_camera()
+                cam_manager.shutdown() # Full shutdown before re-init
+                time.sleep(0.5) # Give it a moment
+                if cam_manager.initialize_camera():
+                     logging.info("Camera re-initialized successfully.")
+                else:
+                     logging.error("Failed to re-initialize camera.")
+                     break # Exit if re-init fails
 
-
-        # Clear the FPS print from the console line
-        print(" " * 50, end='\r') 
+        print(" " * 70, end='\r') 
 
         end_time_loop = time.monotonic()
         elapsed_time = end_time_loop - start_time_loop
