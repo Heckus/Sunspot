@@ -10,13 +10,13 @@ import os
 # --- Configuration ---
 # Chessboard settings
 # Number of inner corners per row and column (e.g., 9x6 board has 8x5 inner corners)
-CHESSBOARD_DIMS = (10, 7)
+CHESSBOARD_DIMS = (9, 6)
 # Size of a chessboard square in your chosen units (e.g., millimeters)
 # *** MEASURE THIS ACCURATELY ***
 SQUARE_SIZE_MM = 20.0
 
 # Image capture settings
-NUM_IMAGES_TO_CAPTURE = 20  # Minimum number of images for good calibration
+NUM_IMAGES_TO_CAPTURE = 30  # Minimum number of images for good calibration
 IMAGE_SAVE_DIR = Path("calibration_images") # Directory to save images
 IMAGE_FILENAME_PREFIX = "calib_img_"
 
