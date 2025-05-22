@@ -11,7 +11,7 @@ import traceback
 # --- Configuration ---
 # Chessboard settings
 # Number of inner corners per row and column (e.g., 10x7 board has 9x6 inner corners)
-CHESSBOARD_DIMS = (9, 6)  # IMPORTANT: Adjust to your checkerboard (squares_across-1, squares_down-1)
+CHESSBOARD_DIMS = (10, 7)  # IMPORTANT: Adjust to your checkerboard (squares_across-1, squares_down-1)
 # Size of a chessboard square in your chosen units (e.g., millimeters)
 # *** MEASURE THIS ACCURATELY ***
 SQUARE_SIZE_MM = 20.0
