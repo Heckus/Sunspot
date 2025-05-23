@@ -17,7 +17,7 @@ class WebUIManager:
         self.app = Flask(__name__)
         self.shutdown_event = shutdown_event_ref if shutdown_event_ref else threading.Event()
 
-        self.latest_frame_for_stream = None # This will now store the annotated frame
+        self.latest_frame_for_stream = None 
         self.display_variables = {
             "status": "Initializing...",
             "ball_2d_px": "N/A",
@@ -36,7 +36,7 @@ class WebUIManager:
     def _setup_routes(self):
         @self.app.route('/')
         def index():
-            # This HTML template includes Three.js for 3D visualization
+            # HTML template with refactored layout
             html_template = """
             <!DOCTYPE html>
             <html>
@@ -44,48 +44,137 @@ class WebUIManager:
                 <title>3D Volleyball Tracker</title>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
                 <style>
-                    body { margin: 0; font-family: sans-serif; background-color: #f0f0f0; color: #333; display: flex; flex-direction: column; align-items: center;}
-                    h1, h2 { text-align: center; color: #333; }
-                    .main-layout { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; padding:10px; width:100%; max-width:1600px;}
-                    .column { display: flex; flex-direction: column; gap: 10px; }
-                    .panel { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                    #threejs-canvas { display: block; width: 500px; height: 400px; background-color: #222; margin-bottom:10px; border: 1px solid #ccc;}
-                    img#video_stream { display: block; width: 100%; max-width:640px; height:auto; background-color: #222; border: 1px solid #ccc;}
-                    table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
-                    pre { font-size:0.9em; white-space:pre-wrap; background-color: #f8f8f8; padding:8px; border-radius:4px; border:1px solid #ddd;}
+                    body { 
+                        margin: 0; 
+                        font-family: sans-serif; 
+                        background-color: #f0f0f0; 
+                        color: #333; 
+                        display: flex; 
+                        flex-direction: column; 
+                        align-items: center;
+                        padding: 10px; /* Add padding to body */
+                        box-sizing: border-box;
+                    }
+                    h1, h2 { 
+                        text-align: center; 
+                        color: #333; 
+                        margin-top: 10px;
+                        margin-bottom: 15px;
+                    }
+                    .dashboard-container {
+                        width: 100%;
+                        max-width: 1400px; /* Max width for the whole dashboard */
+                        display: flex;
+                        flex-direction: column;
+                        gap: 20px; /* Space between rows */
+                    }
+                    .visualizations-row {
+                        display: flex;
+                        flex-wrap: wrap; /* Allow wrapping on smaller screens */
+                        gap: 20px; /* Space between video and 3D view */
+                        width: 100%;
+                    }
+                    .visualization-panel {
+                        flex: 1; /* Each panel tries to take equal space */
+                        min-width: 400px; /* Minimum width before wrapping/shrinking too much */
+                        background: #fff; 
+                        padding: 15px; 
+                        border-radius: 8px; 
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center; /* Center content like titles */
+                    }
+                    #threejs-canvas { 
+                        display: block; 
+                        width: 100%; /* Canvas takes full width of its panel */
+                        max-width: 600px; /* Max width for the 3D canvas */
+                        height: 450px; /* Fixed height, adjust as needed */
+                        background-color: #222; 
+                        border: 1px solid #ccc;
+                    }
+                    img#video_stream { 
+                        display: block; 
+                        width: 100%; /* Image takes full width of its panel */
+                        max-width: 640px; /* Max width for the video stream */
+                        height: auto; /* Maintain aspect ratio */
+                        background-color: #222; 
+                        border: 1px solid #ccc;
+                    }
+                    .data-section {
+                        width: 100%;
+                        background: #fff; 
+                        padding: 20px; 
+                        border-radius: 8px; 
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                        display: flex;
+                        flex-wrap: wrap; /* Allow data groups to wrap */
+                        gap: 20px; /* Space between data groups */
+                        justify-content: space-around; /* Distribute data groups */
+                        box-sizing: border-box;
+                    }
+                    .data-group {
+                        flex: 1; /* Allow groups to share space */
+                        min-width: 280px; /* Min width for a data group */
+                    }
+                    .data-group h2 {
+                        text-align: left;
+                        margin-top: 0;
+                        margin-bottom: 10px;
+                        font-size: 1.3em;
+                        border-bottom: 1px solid #eee;
+                        padding-bottom: 5px;
+                    }
+                    table { width: 100%; border-collapse: collapse; } 
+                    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
+                    td:first-child { font-weight: bold; color: #555; width: 40%;} /* Style for parameter names */
+                    pre { 
+                        font-size:0.9em; 
+                        white-space:pre-wrap; 
+                        background-color: #f8f8f8; 
+                        padding:8px; 
+                        border-radius:4px; 
+                        border:1px solid #ddd;
+                        margin-top: 5px;
+                    }
                 </style>
             </head>
             <body>
                 <h1>3D Volleyball Tracker Dashboard</h1>
-                <div class="main-layout">
-                    <div class="column panel" style="flex:1; min-width:320px;">
-                        <h2>Annotated Stream (2D)</h2>
-                        <img id="video_stream" src="/video_feed" alt="Loading camera stream...">
-                    </div>
-
-                    <div class="column panel" style="flex:1; min-width:520px;">
-                        <h2>3D Visualization (Browser/WebGL)</h2>
-                        <div id="threejs-canvas-container" style="text-align:center;">
-                             <canvas id="threejs-canvas"></canvas>
+                <div class="dashboard-container">
+                    <div class="visualizations-row">
+                        <div class="visualization-panel">
+                            <h2>Annotated Stream (2D)</h2>
+                            <img id="video_stream" src="/video_feed" alt="Loading camera stream...">
+                        </div>
+                        <div class="visualization-panel">
+                            <h2>3D Visualization (Browser/WebGL)</h2>
+                            <canvas id="threejs-canvas"></canvas>
                         </div>
                     </div>
-                    
-                    <div class="column panel" style="flex:1; min-width:300px;">
-                        <h2>Live Data</h2>
-                        <table>
-                            <tr><td>Status:</td><td><span id="status">N/A</span></td></tr>
-                            <tr><td>FPS:</td><td><span id="fps">N/A</span></td></tr>
-                            <tr><td>Resolution:</td><td><span id="resolution">N/A</span></td></tr>
-                        </table>
-                        <h2>Ball Data</h2>
-                        <table>
-                            <tr><td>2D (px):</td><td><span id="ball_2d_px">N/A</span></td></tr>
-                            <tr><td>Radius (px):</td><td><span id="ball_pixel_radius_px">N/A</span></td></tr>
-                            <tr><td>3D (m):</td><td><span id="ball_3d_m">N/A</span></td></tr>
-                        </table>
-                        <h2>Camera Parameters</h2>
-                        <p><strong>Intrinsics:</strong> <pre id="cam_intrinsics">N/A</pre></p>
-                        <p><strong>Extrinsics:</strong> <pre id="cam_extrinsics">N/A</pre></p>
+
+                    <div class="data-section">
+                        <div class="data-group">
+                            <h2>Live Data</h2>
+                            <table>
+                                <tr><td>Status:</td><td><span id="status">N/A</span></td></tr>
+                                <tr><td>FPS:</td><td><span id="fps">N/A</span></td></tr>
+                                <tr><td>Resolution:</td><td><span id="resolution">N/A</span></td></tr>
+                            </table>
+                        </div>
+                        <div class="data-group">
+                            <h2>Ball Data</h2>
+                            <table>
+                                <tr><td>2D (px):</td><td><span id="ball_2d_px">N/A</span></td></tr>
+                                <tr><td>Radius (px):</td><td><span id="ball_pixel_radius_px">N/A</span></td></tr>
+                                <tr><td>3D (m):</td><td><span id="ball_3d_m">N/A</span></td></tr>
+                            </table>
+                        </div>
+                        <div class="data-group">
+                            <h2>Camera Parameters</h2>
+                            <p><strong>Intrinsics:</strong> <pre id="cam_intrinsics">N/A</pre></p>
+                            <p><strong>Extrinsics:</strong> <pre id="cam_extrinsics">N/A</pre></p>
+                        </div>
                     </div>
                 </div>
 
@@ -140,18 +229,26 @@ class WebUIManager:
                         const canvas = document.getElementById('threejs-canvas');
                         
                         scene = new THREE.Scene();
-                        scene.background = new THREE.Color(0x222222);
+                        scene.background = new THREE.Color(0x2c3e50); // Slightly lighter dark blue/grey
+
+                        // Adjust canvas size based on its container panel
+                        const panel = canvas.parentElement;
+                        let panelWidth = panel.clientWidth - 30; // Account for padding
+                        let canvasHeight = 400; // Desired height
+                        canvas.width = panelWidth > 300 ? panelWidth : 300; // Ensure min width
+                        canvas.height = canvasHeight;
+
 
                         const aspectRatio = canvas.width / canvas.height;
                         camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 1000);
                         
                         let visCamFront = [{{ Config.VIS_CAMERA_FRONT[0] }}, {{ Config.VIS_CAMERA_FRONT[1] }}, {{ Config.VIS_CAMERA_FRONT[2] }}];
                         
-                        let camX = boxDims[0]/2 + (visCamFront[0] * -2.5);
-                        let camY = boxDims[1]/2 + (visCamFront[1] * -2.5);
+                        let camX = boxDims[0]/2 + (visCamFront[0] * -3.0); // Pull camera back a bit more
+                        let camY = boxDims[1]/2 + (visCamFront[1] * -3.0);
                         let camZ = visCamFront[2];
-                        camZ = camZ < 0 ? camZ * -2.5 : 1.5; 
-                        if (camZ < ballRadius * 2 + 0.2) camZ = ballRadius * 2 + 0.5; 
+                        camZ = camZ < 0 ? camZ * -2.0 : 2.0; // Ensure camera is above, adjust multiplier
+                        if (camZ < ballRadius * 3) camZ = ballRadius * 3 + 0.5; 
 
                         camera.position.set(camX, camY, camZ);
                         camera.lookAt(boxDims[0]/2, boxDims[1]/2, 0); 
@@ -159,29 +256,52 @@ class WebUIManager:
                         renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
                         renderer.setSize(canvas.width, canvas.height); 
 
-                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); 
+                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
                         scene.add(ambientLight);
-                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9); 
-                        directionalLight.position.set(3, 5, 4); 
+                        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); 
+                        directionalLight.position.set(boxDims[0], boxDims[1]*2, Math.max(boxDims[0], boxDims[1])*1.5); // Position light relative to box
+                        directionalLight.castShadow = true; // Optional: for shadows
                         scene.add(directionalLight);
 
+                        // Ground plane (optional, if box is just lines)
+                        // const groundGeometry = new THREE.PlaneGeometry(boxDims[0] * 1.5, boxDims[1] * 1.5);
+                        // const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, side: THREE.DoubleSide });
+                        // const groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
+                        // groundPlane.rotation.x = -Math.PI / 2; // Rotate to be flat
+                        // groundPlane.position.set(boxDims[0]/2, boxDims[1]/2, 0); // Center it
+                        // scene.add(groundPlane);
+
+
                         const boxGeometry = new THREE.BoxGeometry(boxDims[0], boxDims[1], boxDims[2]);
-                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x777777 }); 
+                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, transparent: true, opacity:0.7 }); 
                         boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2);
+                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2); // Center of the box volume
                         scene.add(boxMesh);
 
                         const volleyballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
-                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x333300 }); 
+                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0x222200 }); 
                         volleyballMesh = new THREE.Mesh(volleyballGeometry, volleyballMaterial);
-                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + (boxDims[2] / 2) ); 
+                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + boxDims[2] ); // Start on top of box
                         scene.add(volleyballMesh);
                         
-                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.75 ); 
+                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.8 ); 
                         axesHelper.position.set(0,0,0.01); 
                         scene.add(axesHelper);
                         
                         animate();
+
+                        // Resize listener for canvas
+                        window.addEventListener('resize', onWindowResize, false);
+                        function onWindowResize() {
+                            let newPanelWidth = panel.clientWidth - 30;
+                            canvas.width = newPanelWidth > 300 ? newPanelWidth : 300;
+                            // canvas.height remains fixed or could be dynamic too
+                            
+                            camera.aspect = canvas.width / canvas.height;
+                            camera.updateProjectionMatrix();
+                            renderer.setSize(canvas.width, canvas.height);
+                        }
+                        onWindowResize(); // Call once to set initial size based on panel
                     }
 
                     function updateThreeJSScene(ballPosition) {
@@ -345,6 +465,7 @@ if __name__ == '__main__':
     if not hasattr(Config, 'VOLLEYBALL_RADIUS_M'): Config.VOLLEYBALL_RADIUS_M = 0.105
     if not hasattr(Config, 'CAM_REQUESTED_FPS'): Config.CAM_REQUESTED_FPS = 30.0
     if not hasattr(Config, 'WEB_STREAM_MAX_FPS'): Config.WEB_STREAM_MAX_FPS = 15.0
+
 
     ui_manager = WebUIManager(port=Config.WEB_PORT if hasattr(Config, 'WEB_PORT') else 8000,
                               shutdown_event_ref=example_shutdown_event)
