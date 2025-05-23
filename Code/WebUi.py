@@ -250,7 +250,7 @@ class WebUIManager:
                         const camDist = Math.max(boxDims[0], boxDims[1]) * 2.0; // Distance from center
                         camera.position.set(
                             boxDims[0] / 2 + camDist * 0.707, // X offset (positive X)
-                            boxDims[1] / 2 - camDist * 0.707, // Y offset (negative Y for clockwise rotation if Y is depth)
+                            boxDims[1] / 2 - camDist * 1.2, // Y offset (negative Y for clockwise rotation if Y is depth)
                             camDist * 0.8 // Z height (positive Z)
                         );
                         camera.lookAt(boxDims[0]/2, boxDims[1]/2, boxDims[2]/2); // Look at center of box volume
