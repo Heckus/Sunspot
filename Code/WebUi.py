@@ -28,7 +28,9 @@ class WebUIManager:
             "cam_intrinsics": "N/A",
             "cam_extrinsics": "N/A",
             "box_dimensions": [Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M],
-            "volleyball_radius": Config.VOLLEYBALL_RADIUS_M
+            "volleyball_radius": Config.VOLLEYBALL_RADIUS_M,
+            # Add world box corners for JS to use for corner markers
+            "world_box_corners": Config.WORLD_BOX_CORNERS_M.tolist() 
         }
         self.data_lock = threading.Lock()
         self._setup_routes()
@@ -52,7 +54,7 @@ class WebUIManager:
                         display: flex; 
                         flex-direction: column; 
                         align-items: center;
-                        padding: 10px; /* Add padding to body */
+                        padding: 10px; 
                         box-sizing: border-box;
                     }
                     h1, h2 { 
@@ -63,41 +65,41 @@ class WebUIManager:
                     }
                     .dashboard-container {
                         width: 100%;
-                        max-width: 1400px; /* Max width for the whole dashboard */
+                        max-width: 1400px; 
                         display: flex;
                         flex-direction: column;
-                        gap: 20px; /* Space between rows */
+                        gap: 20px; 
                     }
                     .visualizations-row {
                         display: flex;
-                        flex-wrap: wrap; /* Allow wrapping on smaller screens */
-                        gap: 20px; /* Space between video and 3D view */
+                        flex-wrap: wrap; 
+                        gap: 20px; 
                         width: 100%;
                     }
                     .visualization-panel {
-                        flex: 1; /* Each panel tries to take equal space */
-                        min-width: 400px; /* Minimum width before wrapping/shrinking too much */
+                        flex: 1; 
+                        min-width: 400px; 
                         background: #fff; 
                         padding: 15px; 
                         border-radius: 8px; 
                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                         display: flex;
                         flex-direction: column;
-                        align-items: center; /* Center content like titles */
+                        align-items: center; 
                     }
                     #threejs-canvas { 
                         display: block; 
-                        width: 100%; /* Canvas takes full width of its panel */
-                        max-width: 600px; /* Max width for the 3D canvas */
-                        height: 450px; /* Fixed height, adjust as needed */
+                        width: 100%; 
+                        max-width: 600px; 
+                        height: 450px; 
                         background-color: #222; 
                         border: 1px solid #ccc;
                     }
                     img#video_stream { 
                         display: block; 
-                        width: 100%; /* Image takes full width of its panel */
-                        max-width: 640px; /* Max width for the video stream */
-                        height: auto; /* Maintain aspect ratio */
+                        width: 100%; 
+                        max-width: 640px; 
+                        height: auto; 
                         background-color: #222; 
                         border: 1px solid #ccc;
                     }
@@ -108,14 +110,14 @@ class WebUIManager:
                         border-radius: 8px; 
                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                         display: flex;
-                        flex-wrap: wrap; /* Allow data groups to wrap */
-                        gap: 20px; /* Space between data groups */
-                        justify-content: space-around; /* Distribute data groups */
+                        flex-wrap: wrap; 
+                        gap: 20px; 
+                        justify-content: space-around; 
                         box-sizing: border-box;
                     }
                     .data-group {
-                        flex: 1; /* Allow groups to share space */
-                        min-width: 280px; /* Min width for a data group */
+                        flex: 1; 
+                        min-width: 280px; 
                     }
                     .data-group h2 {
                         text-align: left;
@@ -127,7 +129,7 @@ class WebUIManager:
                     }
                     table { width: 100%; border-collapse: collapse; } 
                     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
-                    td:first-child { font-weight: bold; color: #555; width: 40%;} /* Style for parameter names */
+                    td:first-child { font-weight: bold; color: #555; width: 40%;} 
                     pre { 
                         font-size:0.9em; 
                         white-space:pre-wrap; 
@@ -203,8 +205,8 @@ class WebUIManager:
                                         }
                                     } catch (e) { console.error("Error parsing ball_3d_m for Three.js:", e); }
                                 }
-                                if (typeof initialBoxConfig === 'undefined' && data.box_dimensions && data.volleyball_radius) {
-                                     initThreeJS(data.box_dimensions, data.volleyball_radius);
+                                if (typeof initialBoxConfig === 'undefined' && data.box_dimensions && data.volleyball_radius && data.world_box_corners) {
+                                     initThreeJS(data.box_dimensions, data.volleyball_radius, data.world_box_corners);
                                 }
                             })
                             .catch(error => console.error('Error fetching status JSON:', error));
@@ -215,93 +217,120 @@ class WebUIManager:
                          if (typeof initThreeJS === 'function') {
                             const defaultBox = [{{ Config.BOX_WIDTH_M }}, {{ Config.BOX_DEPTH_M }}, {{ Config.BOX_HEIGHT_M }}];
                             const defaultRadius = {{ Config.VOLLEYBALL_RADIUS_M }};
-                            initThreeJS(defaultBox, defaultRadius);
+                            const defaultCorners = JSON.parse(JSON.stringify({{ Config.WORLD_BOX_CORNERS_M.tolist() }})); // Pass as JS array
+                            initThreeJS(defaultBox, defaultRadius, defaultCorners);
                         }
                     });
 
-                    let scene, camera, renderer, boxMesh, volleyballMesh;
+                    let scene, camera, renderer, boxMesh, volleyballMesh, controls; // Added controls
                     let initialBoxConfig; 
 
-                    function initThreeJS(boxDims, ballRadius) {
+                    function initThreeJS(boxDims, ballRadius, worldBoxCorners) {
                         if (initialBoxConfig && scene) return; 
-                        initialBoxConfig = {boxDims, ballRadius};
+                        initialBoxConfig = {boxDims, ballRadius, worldBoxCorners};
 
                         const canvas = document.getElementById('threejs-canvas');
                         
                         scene = new THREE.Scene();
-                        scene.background = new THREE.Color(0x2c3e50); // Slightly lighter dark blue/grey
+                        scene.background = new THREE.Color(0x34495e); // Darker slate blue
 
-                        // Adjust canvas size based on its container panel
                         const panel = canvas.parentElement;
-                        let panelWidth = panel.clientWidth - 30; // Account for padding
-                        let canvasHeight = 400; // Desired height
-                        canvas.width = panelWidth > 300 ? panelWidth : 300; // Ensure min width
+                        let panelWidth = panel.clientWidth - 30; 
+                        let canvasHeight = 400; 
+                        canvas.width = panelWidth > 300 ? panelWidth : 300; 
                         canvas.height = canvasHeight;
-
 
                         const aspectRatio = canvas.width / canvas.height;
                         camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 1000);
                         
-                        let visCamFront = [{{ Config.VIS_CAMERA_FRONT[0] }}, {{ Config.VIS_CAMERA_FRONT[1] }}, {{ Config.VIS_CAMERA_FRONT[2] }}];
-                        
-                        let camX = boxDims[0]/2 + (visCamFront[0] * -3.0); // Pull camera back a bit more
-                        let camY = boxDims[1]/2 + (visCamFront[1] * -3.0);
-                        let camZ = visCamFront[2];
-                        camZ = camZ < 0 ? camZ * -2.0 : 2.0; // Ensure camera is above, adjust multiplier
-                        if (camZ < ballRadius * 3) camZ = ballRadius * 3 + 0.5; 
-
-                        camera.position.set(camX, camY, camZ);
-                        camera.lookAt(boxDims[0]/2, boxDims[1]/2, 0); 
+                        // New Camera Position (rotated clockwise, higher angle)
+                        // Looking at the center of the box base (boxDims[0]/2, boxDims[1]/2, 0)
+                        // Position camera at (X, Y, Z) such that it's rotated clockwise from a top-left view
+                        // Let's try a position that is more to the "right" and "front" of the box.
+                        const camDist = Math.max(boxDims[0], boxDims[1]) * 2.0; // Distance from center
+                        camera.position.set(
+                            boxDims[0] / 2 + camDist * 0.707, // X offset (positive X)
+                            boxDims[1] / 2 - camDist * 0.707, // Y offset (negative Y for clockwise rotation if Y is depth)
+                            camDist * 0.8 // Z height (positive Z)
+                        );
+                        camera.lookAt(boxDims[0]/2, boxDims[1]/2, boxDims[2]/2); // Look at center of box volume
 
                         renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
                         renderer.setSize(canvas.width, canvas.height); 
 
-                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); 
+                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); 
                         scene.add(ambientLight);
-                        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); 
-                        directionalLight.position.set(boxDims[0], boxDims[1]*2, Math.max(boxDims[0], boxDims[1])*1.5); // Position light relative to box
-                        directionalLight.castShadow = true; // Optional: for shadows
+                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); 
+                        directionalLight.position.set(boxDims[0], boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1])*2); 
+                        directionalLight.castShadow = false; 
                         scene.add(directionalLight);
-
-                        // Ground plane (optional, if box is just lines)
-                        // const groundGeometry = new THREE.PlaneGeometry(boxDims[0] * 1.5, boxDims[1] * 1.5);
-                        // const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x555555, side: THREE.DoubleSide });
-                        // const groundPlane = new THREE.Mesh(groundGeometry, groundMaterial);
-                        // groundPlane.rotation.x = -Math.PI / 2; // Rotate to be flat
-                        // groundPlane.position.set(boxDims[0]/2, boxDims[1]/2, 0); // Center it
-                        // scene.add(groundPlane);
+                        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4); 
+                        directionalLight2.position.set(-boxDims[0], -boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1])); 
+                        scene.add(directionalLight2);
 
 
+                        // Box (Ground Plane volume)
                         const boxGeometry = new THREE.BoxGeometry(boxDims[0], boxDims[1], boxDims[2]);
-                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, transparent: true, opacity:0.7 }); 
+                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, transparent: true, opacity:0.5 }); 
                         boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2); // Center of the box volume
+                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2); 
                         scene.add(boxMesh);
 
+                        // Ground Grid Helper
+                        const gridDivisions = Math.max(Math.round(boxDims[0]), Math.round(boxDims[1])); // e.g., 1 division per meter
+                        const gridHelper = new THREE.GridHelper(Math.max(boxDims[0], boxDims[1]), gridDivisions, 0x888888, 0x555555);
+                        gridHelper.position.set(boxDims[0] / 2, boxDims[1] / 2, 0); // Position at center of box base
+                        gridHelper.rotation.x = Math.PI / 2; // Rotate to be on XY plane
+                        scene.add(gridHelper);
+
+                        // Corner Markers (at Z=0 for ground corners)
+                        const cornerMarkerRadius = 0.03;
+                        const cornerMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red markers
+                        if (worldBoxCorners && worldBoxCorners.length >= 4) {
+                            worldBoxCorners.forEach(corner => {
+                                const cornerSphere = new THREE.SphereGeometry(cornerMarkerRadius, 16, 16);
+                                const cornerMesh = new THREE.Mesh(cornerSphere, cornerMarkerMaterial);
+                                cornerMesh.position.set(corner[0], corner[1], corner[2] + cornerMarkerRadius); // Place slightly above ground for visibility
+                                scene.add(cornerMesh);
+                            });
+                        }
+
+
                         const volleyballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
-                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffcc00, emissive: 0x222200 }); 
+                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0x111100 }); 
                         volleyballMesh = new THREE.Mesh(volleyballGeometry, volleyballMaterial);
-                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + boxDims[2] ); // Start on top of box
+                        // Initial position will be updated by fetched data, place it at center of box volume, raised by its radius
+                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + boxDims[2] / 2 ); 
                         scene.add(volleyballMesh);
                         
-                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.8 ); 
-                        axesHelper.position.set(0,0,0.01); 
+                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.5 ); 
+                        axesHelper.position.set(0,0,0.005); 
                         scene.add(axesHelper);
                         
                         animate();
 
-                        // Resize listener for canvas
                         window.addEventListener('resize', onWindowResize, false);
                         function onWindowResize() {
                             let newPanelWidth = panel.clientWidth - 30;
-                            canvas.width = newPanelWidth > 300 ? newPanelWidth : 300;
-                            // canvas.height remains fixed or could be dynamic too
+                            let newCanvasWidth = newPanelWidth > 300 ? newPanelWidth : 300;
+                            // Maintain aspect ratio based on original canvas.height or set a new one
+                            let newCanvasHeight = (newCanvasWidth / aspectRatio_original) || canvasHeight; 
                             
+                            // If you want fixed height and variable width:
+                            // canvas.width = newCanvasWidth;
+                            // canvas.height = canvasHeight; // Keep original height
+                            
+                            // Or if you want to scale proportionally to new width (might change height):
+                            canvas.width = newCanvasWidth;
+                            canvas.height = newCanvasWidth / aspectRatio;
+
+
                             camera.aspect = canvas.width / canvas.height;
                             camera.updateProjectionMatrix();
                             renderer.setSize(canvas.width, canvas.height);
                         }
-                        onWindowResize(); // Call once to set initial size based on panel
+                        const aspectRatio_original = canvas.width / canvas.height; // Store original for resize
+                        // onWindowResize(); // Call once to set initial size (already sized by panel width)
                     }
 
                     function updateThreeJSScene(ballPosition) {
@@ -312,6 +341,7 @@ class WebUIManager:
 
                     function animate() {
                         requestAnimationFrame(animate);
+                        // if (controls) controls.update(); 
                         if (renderer && scene && camera) {
                            renderer.render(scene, camera);
                         }
@@ -340,7 +370,11 @@ class WebUIManager:
         @self.app.route('/status_json')
         def status_json():
             with self.data_lock:
-                return jsonify(self.display_variables.copy())
+                # Ensure world_box_corners is part of the JSON response for initThreeJS
+                response_data = self.display_variables.copy()
+                if "world_box_corners" not in response_data: # Should be set in __init__
+                    response_data["world_box_corners"] = Config.WORLD_BOX_CORNERS_M.tolist()
+                return jsonify(response_data)
 
     def _generate_mjpeg_stream(self):
         logging.info("MJPEG stream: Client connected.")
@@ -430,6 +464,7 @@ class WebUIManager:
             
             self.display_variables["box_dimensions"] = Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M
             self.display_variables["volleyball_radius"] = Config.VOLLEYBALL_RADIUS_M
+            self.display_variables["world_box_corners"] = Config.WORLD_BOX_CORNERS_M.tolist()
 
 
     def run(self):
@@ -465,6 +500,8 @@ if __name__ == '__main__':
     if not hasattr(Config, 'VOLLEYBALL_RADIUS_M'): Config.VOLLEYBALL_RADIUS_M = 0.105
     if not hasattr(Config, 'CAM_REQUESTED_FPS'): Config.CAM_REQUESTED_FPS = 30.0
     if not hasattr(Config, 'WEB_STREAM_MAX_FPS'): Config.WEB_STREAM_MAX_FPS = 15.0
+    if not hasattr(Config, 'WORLD_BOX_CORNERS_M'): # Add dummy if missing for standalone test
+        Config.WORLD_BOX_CORNERS_M = np.array([[0,0,0],[1,0,0],[1,1,0],[0,1,0]], dtype=float)
 
 
     ui_manager = WebUIManager(port=Config.WEB_PORT if hasattr(Config, 'WEB_PORT') else 8000,
