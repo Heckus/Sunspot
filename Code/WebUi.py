@@ -15,26 +15,14 @@ OPEN3D_INITIALIZATION_FAILED = False # New flag
 
 try:
     import open3d as o3d
-    # Attempt to set environment for headless rendering if issues persist with VNC/GLX
-    # This should ideally be set BEFORE open3d is imported, e.g., via os.environ
-    # For now, we'll rely on catching the window creation error.
-    # import os
-    # if os.environ.get("DISPLAY") is None or "socket" in os.environ.get("DISPLAY", ""): # Basic check for headless env
-    #     logging.info("Open3D: Attempting to enable CPU rendering for headless/VNC environment.")
-    #     o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-        # The following are ways to attempt headless but might need to be set earlier
-        # or might not work depending on Open3D version and build.
-        # try:
-        #    o3d.visualization.webrtc_server.enable_webrtc() # If WebRTC based view is an option
-        # except AttributeError:
-        #    pass # Older Open3D
-
     OPEN3D_AVAILABLE = True
 except ImportError:
     logging.error("Open3D library not found. 3D visualization will be disabled.")
     logging.error("Please install it: pip install open3d")
+    OPEN3D_INITIALIZATION_FAILED = True # Mark as failed if import fails
 except Exception as e:
     logging.error(f"Open3D import failed with an unexpected error: {e}. 3D visualization will be disabled.")
+    OPEN3D_INITIALIZATION_FAILED = True # Mark as failed
 
 
 class WebUIManager:
@@ -44,17 +32,15 @@ class WebUIManager:
     """
 
     def __init__(self, host='0.0.0.0', port=Config.WEB_PORT, shutdown_event_ref=None):
-        global OPEN3D_INITIALIZATION_FAILED
+        global OPEN3D_INITIALIZATION_FAILED # Ensure we're referencing the global flag
         self.host = host
         self.port = port
         self.app = Flask(__name__)
         self.shutdown_event = shutdown_event_ref if shutdown_event_ref else threading.Event()
 
-        # Data attributes to be updated by main.py
-        self.latest_raw_frame = None # For MJPEG stream
-        self.latest_processed_frame = None # Optional, for a second stream
-        self.ball_3d_coords_vis = None # Expected [X, Y, Z_center_of_sphere] for Open3D
-        self.box_corners_world = Config.WORLD_BOX_CORNERS_M.tolist() # Use from Config
+        self.latest_raw_frame = None
+        self.ball_3d_coords_vis = None
+        self.box_corners_world = Config.WORLD_BOX_CORNERS_M.tolist()
         self.box_dimensions = [Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M]
         self.display_variables = {
             "status": "Initializing...",
@@ -65,26 +51,25 @@ class WebUIManager:
             "resolution": "N/A",
             "cam_intrinsics": "N/A",
             "cam_extrinsics": "N/A",
-            "o3d_status": "Open3D Not Initialized" if OPEN3D_AVAILABLE else "Open3D Not Available"
+            "o3d_status": "Open3D Not Initialized"
         }
-        self.data_lock = threading.Lock() # To protect access to shared data
+        self.data_lock = threading.Lock()
 
-        # Open3D specific attributes
         self.o3d_vis = None
         self.o3d_box_mesh = None
         self.o3d_volleyball_mesh = None
         self.o3d_world_axes = None
-        self.o3d_initialized_successfully = False # More specific flag
-        self.o3d_update_queue = queue.Queue(maxsize=5) # Queue for 3D position updates
+        self.o3d_initialized_successfully = False
+        self.o3d_update_queue = queue.Queue(maxsize=5)
 
-        if not OPEN3D_AVAILABLE:
-            logging.warning("WebUI: Open3D library not found or failed to import, 3D visualization will not run.")
-            self.display_variables["o3d_status"] = "Open3D Not Available"
-        elif OPEN3D_INITIALIZATION_FAILED: # Check global flag set during import
-            logging.warning("WebUI: Open3D import previously failed, 3D visualization will not run.")
-            self.display_variables["o3d_status"] = "Open3D Import Error"
+        if not OPEN3D_AVAILABLE: # This global flag would be True if import failed
+            logging.warning("WebUI: Open3D library not available, 3D visualization will not run.")
+            self.display_variables["o3d_status"] = "Open3D Not Available (Import Failed)"
+            OPEN3D_INITIALIZATION_FAILED = True # Explicitly ensure it's set
         else:
-            # Start Open3D in a separate thread
+            # Open3D is available, attempt to start its thread.
+            # The thread itself will handle further initialization checks.
+            self.display_variables["o3d_status"] = "Open3D Initializing..."
             self.o3d_thread = threading.Thread(target=self._run_o3d_visualizer, name="Open3DThread", daemon=True)
             self.o3d_thread.start()
 
@@ -94,7 +79,6 @@ class WebUIManager:
         """Defines Flask routes."""
         @self.app.route('/')
         def index():
-            # Removed: <meta http-equiv="refresh" content="1">
             html = """
             <!DOCTYPE html>
             <html>
@@ -165,11 +149,8 @@ class WebUIManager:
                     if (streamImg) {
                         streamImg.onerror = function() {
                             this.alt = 'Camera stream failed to load or is unavailable.';
-                            this.src = ''; // Clear broken icon
+                            this.src = ''; 
                             console.error('Error loading video stream.');
-                            // Optionally, display a more user-friendly message on the image placeholder
-                            // const ctx = this.getContext('2d'); // This won't work directly on <img>
-                            // Need to replace img with a canvas or use a placeholder div
                         };
                     }
 
@@ -192,16 +173,13 @@ class WebUIManager:
                             .catch(error => console.error('Error fetching status JSON:', error));
                     }
 
-                    // Update data every second
                     setInterval(updateDataFields, 1000);
-                    // Initial call to populate fields
                     document.addEventListener('DOMContentLoaded', updateDataFields);
                 </script>
             </body>
             </html>
             """
             with self.data_lock:
-                # o3d_status is now part of display_variables, so it's included
                 return render_template_string(html, variables=self.display_variables.copy())
 
         @self.app.route('/video_feed')
@@ -215,7 +193,6 @@ class WebUIManager:
                 return jsonify(self.display_variables.copy())
 
     def _generate_mjpeg_stream(self):
-        """Generates MJPEG stream from the latest raw frame."""
         logging.info("MJPEG stream client connected.")
         frame_num = 0
         while not self.shutdown_event.is_set():
@@ -225,21 +202,17 @@ class WebUIManager:
                     frame_to_encode = self.latest_raw_frame.copy()
 
             if frame_to_encode is None:
-                # Create a placeholder if no frame is available
-                # Use CAM_REQUESTED_WIDTH/HEIGHT from Config for placeholder size
                 ph_height = Config.CAM_REQUESTED_HEIGHT // 2 if Config.CAM_REQUESTED_HEIGHT else 240
                 ph_width = Config.CAM_REQUESTED_WIDTH // 2 if Config.CAM_REQUESTED_WIDTH else 320
                 frame_to_encode = np.zeros((ph_height, ph_width, 3), dtype=np.uint8)
                 cv2.putText(frame_to_encode, "No Stream", (30, ph_height // 2), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-                time.sleep(0.1) # Wait a bit if no frame
+                time.sleep(0.1)
             else:
-                # Optionally draw frame number or timestamp for debugging stream
-                # cv2.putText(frame_to_encode, f"F: {frame_num}", (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0),2)
                 frame_num+=1
 
-
             try:
-                flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, Config.WEB_STREAM_JPEG_QUALITY if hasattr(Config, 'WEB_STREAM_JPEG_QUALITY') else 75])
+                jpeg_quality = Config.WEB_STREAM_JPEG_QUALITY if hasattr(Config, 'WEB_STREAM_JPEG_QUALITY') else 75
+                flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
                 if not flag:
                     logging.warning("MJPEG: Could not encode frame.")
                     time.sleep(0.1)
@@ -248,83 +221,89 @@ class WebUIManager:
                        b'Content-Type: image/jpeg\r\n\r\n' + bytearray(encoded_image) + b'\r\n')
             except GeneratorExit:
                 logging.info("MJPEG stream client disconnected (GeneratorExit).")
-                break # Exit loop if client disconnects
-            except ConnectionResetError:
-                logging.info("MJPEG stream client connection reset.")
                 break
-            except BrokenPipeError:
-                logging.info("MJPEG stream client connection broken pipe.")
+            except (ConnectionResetError, BrokenPipeError) as e:
+                logging.info(f"MJPEG stream client connection issue ({type(e).__name__}).")
                 break
             except Exception as e:
                 logging.error(f"Error in MJPEG stream: {e}", exc_info=True)
                 break
             
-            # Crude FPS limit for stream - use a config value if precise control needed
-            sleep_duration = 1.0 / (Config.WEB_STREAM_MAX_FPS if hasattr(Config, 'WEB_STREAM_MAX_FPS') else Config.CAM_REQUESTED_FPS)
-            time.sleep(max(0.01, sleep_duration)) 
+            max_fps = Config.WEB_STREAM_MAX_FPS if hasattr(Config, 'WEB_STREAM_MAX_FPS') else (Config.CAM_REQUESTED_FPS if hasattr(Config, 'CAM_REQUESTED_FPS') else 15)
+            sleep_duration = 1.0 / max_fps
+            time.sleep(max(0.01, sleep_duration))
         logging.info("MJPEG stream generator stopped.")
 
 
     def _init_o3d_scene(self):
-        """Initializes the Open3D scene with the box and volleyball."""
-        global OPEN3D_INITIALIZATION_FAILED
-        if not OPEN3D_AVAILABLE or OPEN3D_INITIALIZATION_FAILED:
-            self.display_variables["o3d_status"] = "Open3D Not Available or Failed Previous Init"
+        global OPEN3D_INITIALIZATION_FAILED # Refer to the global flag
+
+        if not OPEN3D_AVAILABLE: # Already checked at __init__, but good for safety
+            OPEN3D_INITIALIZATION_FAILED = True
+            with self.data_lock:
+                self.display_variables["o3d_status"] = "Open3D Not Available (Import Failed)"
             return
 
+        # self.o3d_vis is initialized here
         self.o3d_vis = o3d.visualization.Visualizer()
-        # Attempt to create window. This is the critical part that might fail.
+        created_successfully = False
         try:
             created_successfully = self.o3d_vis.create_window(
                                    window_name=Config.VIS_WINDOW_TITLE,
                                    width=Config.VIS_WINDOW_WIDTH,
                                    height=Config.VIS_WINDOW_HEIGHT,
-                                   visible=True # Explicitly true, though default
+                                   visible=True
                                    )
             if not created_successfully:
                 logging.error("Open3D: o3d_vis.create_window() returned False. Window creation failed.")
+                # Don't call destroy_window here if create_window itself returned False.
+                # The vis object might be in an invalid state.
+                self.o3d_vis = None # Nullify the object
                 OPEN3D_INITIALIZATION_FAILED = True
-                self.display_variables["o3d_status"] = "Open3D Window Creation Failed (ret False)"
-                if self.o3d_vis: self.o3d_vis.destroy_window() # Clean up if partially created
-                self.o3d_vis = None
+                with self.data_lock:
+                    self.display_variables["o3d_status"] = "Open3D Window Creation Failed (API ret False)"
                 return
         except RuntimeError as e:
-            # This often catches GLFW/GLX errors like 'GLFW Error: GLX: Failed to create context'
-            logging.error(f"Open3D: Runtime_Error during o3d_vis.create_window(): {e}")
-            logging.error("This often occurs in VNC/headless environments without proper GL context.")
-            logging.error("Try running with a direct display or configure VNC for OpenGL (e.g., VirtualGL).")
+            logging.error(f"Open3D: RuntimeError during o3d_vis.create_window(): {e}")
+            self.o3d_vis = None # Nullify
             OPEN3D_INITIALIZATION_FAILED = True
-            self.display_variables["o3d_status"] = f"Open3D Window Creation Error (Runtime: {e})"
-            if self.o3d_vis: self.o3d_vis.destroy_window() # Clean up
-            self.o3d_vis = None
-            return # Do not proceed with scene setup
-
-        # Check if render option is available AFTER successful window creation
-        opt = self.o3d_vis.get_render_option()
-        if opt is None:
-            logging.error("Open3D: get_render_option() returned None even after window creation attempt. Disabling Open3D.")
-            OPEN3D_INITIALIZATION_FAILED = True
-            self.display_variables["o3d_status"] = "Open3D Render Options Failed"
-            if self.o3d_vis: self.o3d_vis.destroy_window()
-            self.o3d_vis = None
+            with self.data_lock:
+                self.display_variables["o3d_status"] = f"Open3D Window Error (Runtime: {e})"
             return
 
-        opt.background_color = np.asarray([0.1, 0.1, 0.1]) # Dark background
+        # Proceed only if window creation was successful AND self.o3d_vis is not None
+        if self.o3d_vis is None: # Should have been caught by above, but defensive check
+            OPEN3D_INITIALIZATION_FAILED = True
+            with self.data_lock:
+                self.display_variables["o3d_status"] = "Open3D Visualizer became None after create_window call"
+            return
+
+        opt = self.o3d_vis.get_render_option()
+        if opt is None:
+            logging.error("Open3D: get_render_option() returned None. Disabling Open3D.")
+            # If opt is None, the window might still exist but is unusable for rendering options.
+            # It's safer to destroy it if it was created.
+            if created_successfully and self.o3d_vis: # Check if vis object is still valid
+                self.o3d_vis.destroy_window()
+            self.o3d_vis = None # Nullify
+            OPEN3D_INITIALIZATION_FAILED = True
+            with self.data_lock:
+                self.display_variables["o3d_status"] = "Open3D Render Options Failed"
+            return
+
+        opt.background_color = np.asarray([0.1, 0.1, 0.1])
         opt.light_on = True
         opt.point_size = 2.0
 
-
         box_w, box_d, box_h_vis = self.box_dimensions[0], self.box_dimensions[1], self.box_dimensions[2]
-        # Create box centered at (0,0,0), then translate it to (W/2, D/2, H_vis/2) in world.
         self.o3d_box_mesh = o3d.geometry.TriangleMesh.create_box(width=box_w, height=box_d, depth=box_h_vis, create_uv_map=True, map_texture_to_each_face=True)
         self.o3d_box_mesh.translate([box_w / 2, box_d / 2, box_h_vis / 2], relative=False)
         self.o3d_box_mesh.paint_uniform_color(Config.VIS_BOX_COLOR)
         self.o3d_vis.add_geometry(self.o3d_box_mesh, reset_bounding_box=True)
 
-
         self.o3d_volleyball_mesh = o3d.geometry.TriangleMesh.create_sphere(radius=Config.VOLLEYBALL_RADIUS_M)
         self.o3d_volleyball_mesh.paint_uniform_color(Config.VIS_VOLLEYBALL_COLOR)
-        initial_ball_pos = [box_w / 2, box_d / 2, Config.VOLLEYBALL_RADIUS_M + box_h_vis] # slightly above box
+        initial_ball_pos = [box_w / 2, box_d / 2, Config.VOLLEYBALL_RADIUS_M + box_h_vis]
         self.o3d_volleyball_mesh.translate(initial_ball_pos, relative=False)
         self.o3d_vis.add_geometry(self.o3d_volleyball_mesh, reset_bounding_box=False)
 
@@ -332,103 +311,93 @@ class WebUIManager:
             self.o3d_world_axes = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.5, origin=[0,0,0])
             self.o3d_vis.add_geometry(self.o3d_world_axes, reset_bounding_box=False)
 
-
         view_control = self.o3d_vis.get_view_control()
         if view_control:
-            # Look at the center of the box base
-            look_at_target = np.array([box_w / 2, box_d / 2, 0.0]) # center of box base
-            # Camera position relative to the front of the box
-            # Example: move back along Y, slightly to the side (X), and up (Z)
-            camera_pos = look_at_target + np.array(Config.VIS_CAMERA_FRONT) * (-2) # Config.VIS_CAMERA_FRONT is direction vector, invert and scale for pos
-            
+            look_at_target = np.array([box_w / 2, box_d / 2, 0.0])
             view_control.set_lookat(look_at_target)
-            # set_front is the direction vector from eye to lookat point.
-            # If VIS_CAMERA_FRONT is defined as (eye - lookat), then it's correct.
-            # If it's (lookat - eye), then it needs to be negated.
-            # Let's assume Config.VIS_CAMERA_FRONT is (eye_direction_vector_from_lookat)
-            view_control.set_front(np.array(Config.VIS_CAMERA_FRONT)) # Direction camera is pointing
+            view_control.set_front(np.array(Config.VIS_CAMERA_FRONT))
             view_control.set_up(np.array(Config.VIS_CAMERA_UP))
             view_control.set_zoom(Config.VIS_CAMERA_ZOOM)
         
-        self.o3d_initialized_successfully = True
-        self.display_variables["o3d_status"] = "Open3D Scene Initialized"
+        self.o3d_initialized_successfully = True # Mark success here
+        with self.data_lock:
+            self.display_variables["o3d_status"] = "Open3D Scene Initialized and Running"
         logging.info("Open3D scene initialized successfully.")
 
 
     def _run_o3d_visualizer(self):
-        """Runs the Open3D visualization loop. Should be run in a separate thread."""
-        global OPEN3D_INITIALIZATION_FAILED
-        if not OPEN3D_AVAILABLE or OPEN3D_INITIALIZATION_FAILED: # Check global flag too
-            logging.warning("O3D Visualizer: Aborting run as Open3D is not available or failed init.")
-            self.display_variables["o3d_status"] = "Open3D Not Run (Unavailable or Failed Init)"
+        global OPEN3D_INITIALIZATION_FAILED # Refer to the global flag
+
+        if not OPEN3D_AVAILABLE: # If import failed, this thread shouldn't have started, but check again.
+            logging.warning("O3D Visualizer: Aborting run as Open3D is not available.")
+            OPEN3D_INITIALIZATION_FAILED = True # Ensure it is set
+            with self.data_lock:
+                 self.display_variables["o3d_status"] = "Open3D Not Available (Thread Check)"
             return
 
-        self._init_o3d_scene() # Initialize scene elements
+        self._init_o3d_scene()
         
-        # Check if initialization was successful within _init_o3d_scene
-        if not self.o3d_initialized_successfully or not self.o3d_vis:
-            logging.error("Open3D visualizer could not be initialized or window creation failed. Thread exiting.")
-            # display_variables updated within _init_o3d_scene
-            OPEN3D_INITIALIZATION_FAILED = True # Ensure this is set
+        if OPEN3D_INITIALIZATION_FAILED or not self.o3d_initialized_successfully or self.o3d_vis is None:
+            logging.error("Open3D visualizer: Initialization failed or self.o3d_vis is None. Thread exiting.")
+            # display_variables should have been updated in _init_o3d_scene
+            OPEN3D_INITIALIZATION_FAILED = True # Redundant but safe
             return
 
         logging.info("Open3D visualizer thread started, polling for events.")
-        # last_ball_pos_o3d = None # Not currently used
+        
+        try:
+            while not self.shutdown_event.is_set():
+                if OPEN3D_INITIALIZATION_FAILED or self.o3d_vis is None: # Check again in loop
+                    logging.info("O3D Visualizer: Loop check found o3d_vis is None or init failed. Stopping poll loop.")
+                    break
+                
+                new_ball_pos_update = None
+                try:
+                    new_ball_pos_update = self.o3d_update_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                except Exception as e:
+                    logging.warning(f"O3D: Error getting from o3d_update_queue: {e}")
 
-        while not self.shutdown_event.is_set():
-            if not self.o3d_vis or OPEN3D_INITIALIZATION_FAILED: # Double check, e.g. if window closed by user
-                logging.info("O3D Visualizer: o3d_vis is None or init failed, stopping poll loop.")
-                break
-            
-            new_ball_pos_update = None
-            try:
-                # Check queue for new ball position data from main thread
-                new_ball_pos_update = self.o3d_update_queue.get_nowait()
-            except queue.Empty:
-                pass # No new update
-            except Exception as e: # Catch other potential queue errors
-                logging.warning(f"O3D: Error getting from o3d_update_queue: {e}")
-
-
-            if new_ball_pos_update is not None:
-                if self.o3d_volleyball_mesh is not None:
+                if new_ball_pos_update is not None and self.o3d_volleyball_mesh is not None:
                     current_center = self.o3d_volleyball_mesh.get_center()
                     target_center = np.array(new_ball_pos_update)
                     translation_needed = target_center - current_center
                     self.o3d_volleyball_mesh.translate(translation_needed, relative=True)
                     self.o3d_vis.update_geometry(self.o3d_volleyball_mesh)
-                    # logging.debug(f"O3D: Ball moved to {target_center}")
 
-            # Poll events and update renderer
-            try:
-                if not self.o3d_vis.poll_events(): # Returns false if window closed
+                if not self.o3d_vis.poll_events():
                     logging.info("O3D: Poll_events indicated window closed by user.")
-                    OPEN3D_INITIALIZATION_FAILED = True # Treat as failure to continue
-                    self.display_variables["o3d_status"] = "Open3D Window Closed by User"
+                    OPEN3D_INITIALIZATION_FAILED = True # Treat as failure
+                    with self.data_lock:
+                         self.display_variables["o3d_status"] = "Open3D Window Closed by User"
                     break 
                 self.o3d_vis.update_renderer()
-            except RuntimeError as e: # Catch errors if window is unexpectedly closed/destroyed
-                logging.error(f"O3D: Runtime error during poll_events/update_renderer (window likely closed): {e}")
-                OPEN3D_INITIALIZATION_FAILED = True
-                self.display_variables["o3d_status"] = "Open3D Window Error (Runtime)"
-                break
-            except Exception as e:
-                logging.error(f"O3D: Unexpected error during poll_events/update_renderer: {e}")
-                OPEN3D_INITIALIZATION_FAILED = True
-                self.display_variables["o3d_status"] = "Open3D Window Error (Other)"
-                break
-
-
-            time.sleep(0.01) # Small sleep to yield CPU, ~100Hz polling
-
-        # Cleanup Open3D window
-        if self.o3d_vis:
-            logging.info("O3D: Closing Open3D window.")
-            self.o3d_vis.destroy_window()
-            self.o3d_vis = None
-        if not OPEN3D_INITIALIZATION_FAILED and self.o3d_initialized_successfully: # Only if it was running fine
-             self.display_variables["o3d_status"] = "Open3D Visualizer Stopped"
-        logging.info("Open3D visualizer thread stopped and window closed.")
+                time.sleep(0.01)
+        except RuntimeError as e:
+            logging.error(f"O3D: Runtime error during poll/render loop (window likely closed): {e}")
+            OPEN3D_INITIALIZATION_FAILED = True
+            with self.data_lock:
+                self.display_variables["o3d_status"] = "Open3D Window Error (Runtime Loop)"
+        except Exception as e:
+            logging.error(f"O3D: Unexpected error during poll/render loop: {e}", exc_info=True)
+            OPEN3D_INITIALIZATION_FAILED = True
+            with self.data_lock:
+                self.display_variables["o3d_status"] = "Open3D Window Error (Loop Other)"
+        finally:
+            logging.info("O3D visualizer: Poll loop ended.")
+            if self.o3d_vis is not None and self.o3d_initialized_successfully:
+                logging.info("O3D: Attempting to destroy Open3D window.")
+                try:
+                    self.o3d_vis.destroy_window()
+                except Exception as e_destroy:
+                    logging.error(f"O3D: Error destroying window: {e_destroy}")
+            self.o3d_vis = None # Ensure it's None after trying to destroy
+            self.o3d_initialized_successfully = False # Mark as no longer successfully running
+            if not OPEN3D_INITIALIZATION_FAILED: # If it ended normally (e.g. shutdown_event)
+                with self.data_lock:
+                    self.display_variables["o3d_status"] = "Open3D Visualizer Stopped"
+            logging.info("Open3D visualizer thread resources released.")
 
 
     def update_data(self, raw_frame_for_stream=None, processed_frame_for_stream=None,
@@ -436,29 +405,25 @@ class WebUIManager:
                     box_corners_world=None, box_dimensions=None,
                     camera_intrinsics=None, camera_extrinsics=None,
                     fps=None, resolution=None, status_message=None):
-        """
-        Thread-safe method for the main application to update data for the WebUI and Open3D.
-        Args:
-            ball_3d_world_coords (list or np.ndarray): [X, Y, Z_sphere_center] for Open3D ball.
-        """
         with self.data_lock:
             if raw_frame_for_stream is not None:
                 self.latest_raw_frame = raw_frame_for_stream
-            if processed_frame_for_stream is not None:
-                self.latest_processed_frame = processed_frame_for_stream 
+            # if processed_frame_for_stream is not None: # Not used currently
+            #     self.latest_processed_frame = processed_frame_for_stream 
 
             if status_message is not None: self.display_variables["status"] = status_message
             if fps is not None: self.display_variables["fps"] = fps
             if resolution is not None: self.display_variables["resolution"] = resolution
 
-            # Update o3d_status if it's not one of the error/terminal states
-            current_o3d_status = self.display_variables.get("o3d_status", "")
-            if OPEN3D_INITIALIZATION_FAILED or not OPEN3D_AVAILABLE:
-                pass # Keep the error status
-            elif self.o3d_initialized_successfully and (self.o3d_vis and self.o3d_vis.get_window_name() != "") : # Check if window seems alive
-                 self.display_variables["o3d_status"] = "Open3D Running"
-            elif not self.o3d_initialized_successfully and "Initialized" not in current_o3d_status and "Error" not in current_o3d_status:
-                 self.display_variables["o3d_status"] = "Open3D Initializing..."
+            # o3d_status is mostly managed by the O3D thread itself or __init__
+            # Only update here if it's in a generic "running" state and no error flags are set
+            if OPEN3D_AVAILABLE and not OPEN3D_INITIALIZATION_FAILED and self.o3d_initialized_successfully:
+                if self.display_variables["o3d_status"] != "Open3D Window Closed by User" and \
+                   "Error" not in self.display_variables["o3d_status"]:
+                   self.display_variables["o3d_status"] = "Open3D Running"
+            elif OPEN3D_INITIALIZATION_FAILED and "Error" not in self.display_variables["o3d_status"] and "Failed" not in self.display_variables["o3d_status"]:
+                # Update if an error occurred but status wasn't reflecting it yet from this side
+                 self.display_variables["o3d_status"] = "Open3D Error Detected"
 
 
             if ball_2d_coords and len(ball_2d_coords) >=2 and ball_2d_coords[0] is not None:
@@ -470,7 +435,6 @@ class WebUIManager:
                 self.display_variables["ball_pixel_radius_px"] = f"{ball_pixel_radius:.0f}px"
             else:
                 self.display_variables["ball_pixel_radius_px"] = "N/A"
-
 
             if ball_3d_world_coords and len(ball_3d_world_coords) == 3:
                 self.display_variables["ball_3d_m"] = f"X:{ball_3d_world_coords[0]:.2f}, Y:{ball_3d_world_coords[1]:.2f}, Z_vis:{ball_3d_world_coords[2]:.2f}"
@@ -484,102 +448,72 @@ class WebUIManager:
             else:
                 self.display_variables["ball_3d_m"] = "N/A"
 
-
             if camera_intrinsics:
-                # Check if it's already a string (e.g. from a previous N/A or manual set)
-                if isinstance(camera_intrinsics, str):
-                    self.display_variables["cam_intrinsics"] = camera_intrinsics
-                else: # Assume numpy array or list of lists
-                    try:
-                        self.display_variables["cam_intrinsics"] = np.array2string(np.array(camera_intrinsics), precision=2, separator=', ', suppress_small=True)
-                    except Exception:
-                        self.display_variables["cam_intrinsics"] = "Error formatting intrinsics"
-
-            if camera_extrinsics:
-                if isinstance(camera_extrinsics, str):
-                     self.display_variables["cam_extrinsics"] = camera_extrinsics
+                if isinstance(camera_intrinsics, str): self.display_variables["cam_intrinsics"] = camera_intrinsics
                 else:
-                    rvec_str = "N/A"
-                    tvec_str = "N/A"
+                    try: self.display_variables["cam_intrinsics"] = np.array2string(np.array(camera_intrinsics), precision=2, separator=', ', suppress_small=True)
+                    except Exception: self.display_variables["cam_intrinsics"] = "Error formatting intrinsics"
+            if camera_extrinsics:
+                if isinstance(camera_extrinsics, str): self.display_variables["cam_extrinsics"] = camera_extrinsics
+                else:
+                    rvec_str, tvec_str = "N/A", "N/A"
                     try:
-                        if camera_extrinsics.get('rvec') is not None:
-                            rvec_str = np.array2string(np.array(camera_extrinsics['rvec']), precision=3, suppress_small=True)
-                        if camera_extrinsics.get('tvec') is not None:
-                            tvec_str = np.array2string(np.array(camera_extrinsics['tvec']), precision=3, suppress_small=True)
+                        if camera_extrinsics.get('rvec') is not None: rvec_str = np.array2string(np.array(camera_extrinsics['rvec']), precision=3, suppress_small=True)
+                        if camera_extrinsics.get('tvec') is not None: tvec_str = np.array2string(np.array(camera_extrinsics['tvec']), precision=3, suppress_small=True)
                         self.display_variables["cam_extrinsics"] = f"rvec: {rvec_str}\ntvec: {tvec_str}"
-                    except Exception:
-                        self.display_variables["cam_extrinsics"] = "Error formatting extrinsics"
-
-
-            if box_corners_world: self.box_corners_world = box_corners_world
-            if box_dimensions: self.box_dimensions = box_dimensions
-
+                    except Exception: self.display_variables["cam_extrinsics"] = "Error formatting extrinsics"
 
     def run(self):
-        """Starts the Flask web server."""
         if not self.app:
             logging.error("Flask app not initialized in WebUIManager.")
             return
         logging.info(f"Starting Flask web server on http://{self.host}:{self.port}")
         try:
-            # Using Flask's dev server with threaded=True. For production, use Waitress or Gunicorn.
             self.app.run(host=self.host, port=self.port, debug=False, use_reloader=False, threaded=True)
-        except SystemExit:
-            logging.info("Flask server SystemExit (likely due to shutdown signal).")
+        except SystemExit: # Can be raised by Flask on shutdown signals
+            logging.info("Flask server SystemExit (likely controlled shutdown).")
         except Exception as e:
             logging.error(f"Failed to start Flask web server: {e}", exc_info=True)
         finally:
             logging.info("Flask web server has stopped.")
-            self.stop() 
+            # self.shutdown_event.set() # Ensure main knows server stopped, if not already set.
+            self.stop() # Call own stop to ensure O3D thread is handled.
 
     def stop(self):
-        """Signals all components to shut down."""
         logging.info("WebUIManager stop sequence initiated.")
-        if not self.shutdown_event.is_set():
-            self.shutdown_event.set()
+        if not self.shutdown_event.is_set(): # Signal other parts if this stop is called first
+            self.shutdown_event.set() 
         
-        # Wait for O3D thread to finish if it was started and is alive
         if OPEN3D_AVAILABLE and hasattr(self, 'o3d_thread') and self.o3d_thread.is_alive():
             logging.info("Waiting for Open3D thread to join...")
-            self.o3d_thread.join(timeout=3.0) # Reduced timeout
+            self.o3d_thread.join(timeout=2.0) # Shorter timeout
             if self.o3d_thread.is_alive():
                 logging.warning("Open3D thread did not exit cleanly after join().")
-                # The thread itself should handle o3d_vis.destroy_window() on shutdown_event
         
-        # Additional cleanup for Flask server if needed, though self.app.run usually handles its own shutdown.
-        # For dev server, sending a request to a shutdown route is one way, but daemon threads + event is often enough.
         logging.info("WebUIManager stop sequence completed.")
 
 
 if __name__ == '__main__':
-    # BasicConfig for logging if run standalone
-    # Ensure Config.py is in the same directory or python path for these Config vars
     log_format = Config.LOG_FORMAT if hasattr(Config, 'LOG_FORMAT') else '%(asctime)s - %(levelname)s - %(message)s'
     log_date_format = Config.LOG_DATE_FORMAT if hasattr(Config, 'LOG_DATE_FORMAT') else '%Y-%m-%d %H:%M:%S'
-    logging.basicConfig(level=logging.INFO, format=log_format, datefmt=log_date_format)
+    logging.basicConfig(level=logging.DEBUG, format=log_format, datefmt=log_date_format) # DEBUG for example
 
-    # Check OPEN3D_AVAILABLE more robustly
-    if not OPEN3D_AVAILABLE or OPEN3D_INITIALIZATION_FAILED: # Check global flag
-        print("Open3D is not available or failed to initialize. This example will run the web server part without 3D visualization.")
-        if not OPEN3D_AVAILABLE:
-            print("Please install Open3D: pip install open3d")
+    if not OPEN3D_AVAILABLE or OPEN3D_INITIALIZATION_FAILED:
+        print("Open3D is not available or failed initial import. Web UI will run without 3D visualization.")
 
-    # Create a dummy shutdown event for standalone testing
     example_shutdown_event = threading.Event()
-
     ui_manager = WebUIManager(port=Config.WEB_PORT if hasattr(Config, 'WEB_PORT') else 8000,
                               shutdown_event_ref=example_shutdown_event)
     
-    # Start Flask in a separate thread for standalone testing
     flask_thread = threading.Thread(target=ui_manager.run, name="TestFlaskThread", daemon=True)
     flask_thread.start()
     
-    time.sleep(1) # Give server a moment to start
+    time.sleep(1.5) # Give server a moment to start
     if not flask_thread.is_alive():
         logging.error("Failed to start Flask thread in example. Exiting.")
         exit()
 
-    logging.info(f"Web UI example started. Open3D window should appear if library is installed and initialized correctly.")
+    logging.info(f"Web UI example started. Open3D status: {ui_manager.display_variables['o3d_status']}")
     logging.info(f"Access web page at http://localhost:{ui_manager.port}")
 
     try:
@@ -590,9 +524,9 @@ if __name__ == '__main__':
         vball_rad_m = Config.VOLLEYBALL_RADIUS_M if hasattr(Config, 'VOLLEYBALL_RADIUS_M') else 0.105
         cam_mtx_list = Config.CAMERA_INTRINSIC_MTX.tolist() if hasattr(Config, 'CAMERA_INTRINSIC_MTX') else "N/A"
 
-
-        while not example_shutdown_event.is_set():
-            time.sleep(1) # Update data every second
+        for _ in range(60): # Run for about 60 seconds
+            if example_shutdown_event.is_set(): break
+            time.sleep(1)
             count +=1
 
             sim_ball_x = 1.0 + 0.5 * np.sin(count * 0.2) 
@@ -613,24 +547,28 @@ if __name__ == '__main__':
                 camera_intrinsics=cam_mtx_list,
                 camera_extrinsics={'rvec': [0.1,0.2,0.3], 'tvec': [1.0,0.5,2.0]}
             )
-            if count % 10 == 0:
-                 logging.info(f"Example: Sent update {count} to UI. Ball at ({sim_ball_x:.2f}, {sim_ball_y:.2f}, {sim_ball_z_vis:.2f})")
-            if count > 60: # Run for a minute then shutdown for test
-                logging.info("Example: Reached simulated end. Shutting down.")
-                # example_shutdown_event.set() # This would be for external shutdown
+            if count % 5 == 0: # Log less frequently
+                 logging.debug(f"Example: Sent update {count}. O3D Status: {ui_manager.display_variables['o3d_status']}")
+        logging.info("Example: Simulated run finished.")
 
     except KeyboardInterrupt:
         logging.info("Keyboard interrupt received in example. Shutting down.")
     finally:
-        if not example_shutdown_event.is_set(): # Ensure it's set
+        if not example_shutdown_event.is_set():
             example_shutdown_event.set()
         
-        ui_manager.stop() # Call the manager's stop method
+        # ui_manager.stop() # Flask server is daemon, main thread exit will trigger its shutdown via event
+        # Flask thread stop is better handled by main thread ending or specific shutdown route in real app.
+        # For this example, signaling the event and letting daemon threads exit is okay.
         
         if flask_thread.is_alive():
-            logging.info("Example: Waiting for Flask thread to join...")
-            flask_thread.join(timeout=3.0) # Give it some time
-            if flask_thread.is_alive():
-                logging.warning("Example: Flask thread still alive after join.")
+            logging.info("Example: Flask thread should stop as it is a daemon and main is ending.")
         
-        logging.info("Web UI example finished.")
+        # If O3D thread was started and might be alive (e.g. if shutdown event wasn't passed or it's stuck)
+        if OPEN3D_AVAILABLE and hasattr(ui_manager, 'o3d_thread') and ui_manager.o3d_thread.is_alive():
+            logging.info("Example: Waiting for O3D thread to join explicitly if it's still up...")
+            ui_manager.o3d_thread.join(timeout=2.0)
+            if ui_manager.o3d_thread.is_alive():
+                 logging.warning("Example: O3D thread still alive after explicit join.")
+
+        logging.info("Web UI example completed.")
