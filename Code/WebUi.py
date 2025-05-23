@@ -36,7 +36,7 @@ class WebUIManager:
     def _setup_routes(self):
         @self.app.route('/')
         def index():
-            # HTML template remains the same as the Three.js version
+            # This HTML template includes Three.js for 3D visualization
             html_template = """
             <!DOCTYPE html>
             <html>
@@ -59,7 +59,8 @@ class WebUIManager:
                 <h1>3D Volleyball Tracker Dashboard</h1>
                 <div class="main-layout">
                     <div class="column panel" style="flex:1; min-width:320px;">
-                        <h2>Annotated Stream (2D)</h2> <img id="video_stream" src="/video_feed" alt="Loading camera stream...">
+                        <h2>Annotated Stream (2D)</h2>
+                        <img id="video_stream" src="/video_feed" alt="Loading camera stream...">
                     </div>
 
                     <div class="column panel" style="flex:1; min-width:520px;">
@@ -144,11 +145,13 @@ class WebUIManager:
                         const aspectRatio = canvas.width / canvas.height;
                         camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 1000);
                         
-                        let camX = boxDims[0]/2 + ({{ Config.VIS_CAMERA_FRONT[0] if hasattr(Config, 'VIS_CAMERA_FRONT') else -0.7 }} * -2.5);
-                        let camY = boxDims[1]/2 + ({{ Config.VIS_CAMERA_FRONT[1] if hasattr(Config, 'VIS_CAMERA_FRONT') else -0.7 }} * -2.5);
-                        let camZ = ({{ Config.VIS_CAMERA_FRONT[2] if hasattr(Config, 'VIS_CAMERA_FRONT') else -0.5 }});
+                        let visCamFront = [{{ Config.VIS_CAMERA_FRONT[0] }}, {{ Config.VIS_CAMERA_FRONT[1] }}, {{ Config.VIS_CAMERA_FRONT[2] }}];
+                        
+                        let camX = boxDims[0]/2 + (visCamFront[0] * -2.5);
+                        let camY = boxDims[1]/2 + (visCamFront[1] * -2.5);
+                        let camZ = visCamFront[2];
                         camZ = camZ < 0 ? camZ * -2.5 : 1.5; 
-                        if (camZ < ballRadius * 2) camZ = ballRadius * 2 + 0.5; 
+                        if (camZ < ballRadius * 2 + 0.2) camZ = ballRadius * 2 + 0.5; 
 
                         camera.position.set(camX, camY, camZ);
                         camera.lookAt(boxDims[0]/2, boxDims[1]/2, 0); 
@@ -224,7 +227,7 @@ class WebUIManager:
         while not self.shutdown_event.is_set():
             frame_to_encode = None
             with self.data_lock:
-                if self.latest_frame_for_stream is not None: # Use the new variable
+                if self.latest_frame_for_stream is not None: 
                     frame_to_encode = self.latest_frame_for_stream.copy()
 
             if frame_to_encode is None:
@@ -233,9 +236,9 @@ class WebUIManager:
                 frame_to_encode = np.zeros((ph_height, ph_width, 3), dtype=np.uint8)
                 cv2.putText(frame_to_encode, "Waiting for annotated frame...", (10, ph_height // 2 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
                 cv2.putText(frame_to_encode, "(Display from main.py)", (10, ph_height // 2 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                time.sleep(0.2) # Wait a bit longer if no frame
+                time.sleep(0.2)
             
-            if frame_to_encode is not None: # Ensure it's not None after the placeholder logic
+            if frame_to_encode is not None: 
                 try:
                     jpeg_quality = Config.WEB_STREAM_JPEG_QUALITY if hasattr(Config, 'WEB_STREAM_JPEG_QUALITY') else 75
                     flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
@@ -262,13 +265,13 @@ class WebUIManager:
         logging.info("MJPEG stream: Generator stopped.")
 
 
-    def update_data(self, frame_for_stream=None, # Renamed from raw_frame_for_stream
+    def update_data(self, frame_for_stream=None, 
                     ball_2d_coords=None, ball_pixel_radius=None, ball_3d_world_coords=None, 
                     box_corners_world=None, box_dimensions=None, 
                     camera_intrinsics=None, camera_extrinsics=None,
                     fps=None, resolution=None, status_message=None):
         with self.data_lock:
-            if frame_for_stream is not None: # This will now be the annotated frame from main.py
+            if frame_for_stream is not None: 
                 self.latest_frame_for_stream = frame_for_stream 
             
             if status_message is not None: self.display_variables["status"] = status_message
@@ -305,7 +308,7 @@ class WebUIManager:
                         self.display_variables["cam_extrinsics"] = f"rvec: {rvec_str}\ntvec: {tvec_str}"
                     except Exception: self.display_variables["cam_extrinsics"] = "Error formatting extrinsics"
             
-            if box_dimensions: self.display_variables["box_dimensions"] = box_dimensions
+            self.display_variables["box_dimensions"] = Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M
             self.display_variables["volleyball_radius"] = Config.VOLLEYBALL_RADIUS_M
 
 
@@ -343,7 +346,6 @@ if __name__ == '__main__':
     if not hasattr(Config, 'CAM_REQUESTED_FPS'): Config.CAM_REQUESTED_FPS = 30.0
     if not hasattr(Config, 'WEB_STREAM_MAX_FPS'): Config.WEB_STREAM_MAX_FPS = 15.0
 
-
     ui_manager = WebUIManager(port=Config.WEB_PORT if hasattr(Config, 'WEB_PORT') else 8000,
                               shutdown_event_ref=example_shutdown_event)
     
@@ -367,15 +369,13 @@ if __name__ == '__main__':
             sim_ball_y = Config.BOX_DEPTH_M / 2 + (Config.BOX_DEPTH_M/3) * np.cos(count * 0.15) 
             sim_ball_z_vis = Config.VOLLEYBALL_RADIUS_M + Config.BOX_HEIGHT_M 
 
-            # Simulate an annotated frame
             annotated_frame_sim = np.zeros((240, 320, 3), dtype=np.uint8)
             cv2.putText(annotated_frame_sim, f"Annotated Frame {count}", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            cv2.circle(annotated_frame_sim, (int(160 + sim_ball_x*20), int(120 + sim_ball_y*20)), 10, (0,255,0), -1) # Simulate ball
+            cv2.circle(annotated_frame_sim, (int(160 + sim_ball_x*20), int(120 + sim_ball_y*20)), 10, (0,255,0), -1) 
             cv2.putText(annotated_frame_sim, f"X:{sim_ball_x:.1f} Y:{sim_ball_y:.1f}", (10, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,0),1)
 
-
             ui_manager.update_data(
-                frame_for_stream=annotated_frame_sim, # Pass the simulated annotated frame
+                frame_for_stream=annotated_frame_sim, 
                 ball_3d_world_coords=[sim_ball_x, sim_ball_y, sim_ball_z_vis],
                 status_message=f"Simulating frame {count}",
                 fps= Config.CAM_REQUESTED_FPS - (count % 5), 
