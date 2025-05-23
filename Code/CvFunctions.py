@@ -6,7 +6,7 @@ import logging
 import Config # Import the new config file
 
 # --- Add a flag for debugging masks ---
-DEBUG_MASKS = True # Set to True to display masks during detect_volleyball_2d
+DEBUG_MASKS = False # Set to True to display masks during detect_volleyball_2d
 
 def undistort_frame(frame, mtx, dist, new_camera_mtx):
     if mtx is None or dist is None:
