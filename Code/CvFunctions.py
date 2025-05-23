@@ -124,11 +124,17 @@ def detect_volleyball_2d(undistorted_frame, roi=None):
     else:
         logging.debug("CV: No contours found in mask.")
 
+    # Prepare the mask for display, ensuring it's BGR if it's to be overlaid or displayed directly
+    # If an ROI was used, create a full-size mask for display.
     if offset_x > 0 or offset_y > 0:
-        full_mask_morphed = np.zeros_like(undistorted_frame[:,:,0], dtype=np.uint8)
-        full_mask_morphed[offset_y:offset_y+frame_to_process.shape[0], offset_x:offset_x+frame_to_process.shape[1]] = mask_morphed
-        mask_for_display = cv2.cvtColor(full_mask_morphed, cv2.COLOR_GRAY2BGR)
+        # Create a full-size black image
+        full_mask_morphed_gray = np.zeros(undistorted_frame.shape[:2], dtype=np.uint8)
+        # Place the ROI-processed mask onto it
+        full_mask_morphed_gray[offset_y:offset_y+frame_to_process.shape[0], offset_x:offset_x+frame_to_process.shape[1]] = mask_morphed
+        # Convert the full-size grayscale mask to BGR
+        mask_for_display = cv2.cvtColor(full_mask_morphed_gray, cv2.COLOR_GRAY2BGR)
     else:
+        # Convert the already full-size grayscale mask to BGR
         mask_for_display = cv2.cvtColor(mask_morphed, cv2.COLOR_GRAY2BGR)
 
 
@@ -161,26 +167,53 @@ def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
 
     try:
         image_point_2d = np.array([[[float(u), float(v)]]], dtype=np.float32)
-        normalized_points = cv2.undistortPoints(image_point_2d, mtx, dist, P=None)
+        
+        # Undistort the 2D image point.
+        # The P argument to undistortPoints can be the new camera matrix if refinement was done,
+        # or the original camera matrix (mtx) if no refinement/cropping is strictly applied here.
+        # For ray casting, we generally want points in the normalized camera coordinate system,
+        # so P=None or P=cv2.getOptimalNewCameraMatrix with alpha=0 might be relevant,
+        # but usually P=mtx (or new_camera_mtx if used for undistortion map) is for remapping to pixels.
+        # The most straightforward way is to undistort to normalized coordinates, then form the ray.
+        # Using P=None for cv2.undistortPoints gives normalized coordinates if no P is given (or P=identity).
+        # Let's assume mtx is the correct intrinsic matrix for the (u,v) coordinates.
+        
+        # Use cv2.undistortPoints to get normalized image coordinates (xn, yn)
+        # The points are passed as a 1xNx2 array.
+        normalized_points = cv2.undistortPoints(image_point_2d, mtx, dist, P=None) # P=None gives normalized coords
         xn = normalized_points[0,0,0]
         yn = normalized_points[0,0,1]
         logging.debug(f"CV: Pixel ({u},{v}) -> Normalized ({xn:.4f},{yn:.4f})")
 
+        # The ray direction in camera coordinates is (xn, yn, 1.0)
         ray_direction_camera = np.array([xn, yn, 1.0], dtype=np.float32)
-        ray_direction_camera = ray_direction_camera / np.linalg.norm(ray_direction_camera)
+        # No need to normalize here as k will scale it.
 
-        R_wc, _ = cv2.Rodrigues(rvec)
-        R_cw = R_wc.T
-        O_world = -np.dot(R_cw, tvec).reshape(3)
-        ray_direction_world = np.dot(R_cw, ray_direction_camera).reshape(3)
-        logging.debug(f"CV: Ray Origin (Camera Pos in World): {O_world}")
+        # Convert rotation vector to rotation matrix (camera to world)
+        R_cw, _ = cv2.Rodrigues(rvec) # This is World to Camera rotation
+        R_wc = R_cw.T # Camera to World rotation
+
+        # Transform ray direction from camera to world coordinates
+        ray_direction_world = R_wc @ ray_direction_camera # Matrix multiplication
+
+        # Camera origin in world coordinates (Optical center O_w)
+        # O_c = R_cw * O_w + t_cw  => O_w = R_cw_T * (O_c - t_cw) where O_c is (0,0,0)
+        # O_w = -R_cw_T * t_cw
+        camera_origin_world = -R_wc @ tvec.reshape(3) # tvec is from world to camera
+
+        logging.debug(f"CV: Ray Origin (Camera Pos in World): {camera_origin_world}")
         logging.debug(f"CV: Ray Direction in World: {ray_direction_world}")
 
-        if abs(ray_direction_world[2]) < 1e-6:
+        # Intersection with ground plane Z=0
+        # Parametric ray: P(k) = camera_origin_world + k * ray_direction_world
+        # We want Z-component of P(k) to be 0.
+        # camera_origin_world[2] + k * ray_direction_world[2] = 0
+        
+        if abs(ray_direction_world[2]) < 1e-6: # Ray is parallel to the ground plane
             logging.warning("CV: Ray is parallel or near parallel to the ground plane (Z_d is close to 0). Cannot intersect.")
             return None
 
-        k = -O_world[2] / ray_direction_world[2]
+        k = -camera_origin_world[2] / ray_direction_world[2]
         logging.debug(f"CV: Solved k for ray-plane intersection: {k:.4f}")
 
         if k < 0:
@@ -190,9 +223,10 @@ def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
             # For ball on ground, this is likely an error condition or out of bounds.
             # return None 
 
-        X_ball = O_world[0] + k * ray_direction_world[0]
-        Y_ball = O_world[1] + k * ray_direction_world[1]
-        Z_ball = 0.0
+        # Calculate intersection point
+        X_ball = camera_origin_world[0] + k * ray_direction_world[0]
+        Y_ball = camera_origin_world[1] + k * ray_direction_world[1]
+        Z_ball = 0.0 # By definition of intersection with Z=0 plane
 
         world_coords = np.array([X_ball, Y_ball, Z_ball], dtype=np.float32)
         logging.info(f"CV: Mapped 2D ({u},{v}) to 3D World ({X_ball:.3f}, {Y_ball:.3f}, {Z_ball:.3f})m")
@@ -207,8 +241,11 @@ def draw_ball_on_frame(frame, u, v, radius_px):
     """Draws a circle and center for the detected ball on the frame."""
     if frame is None: return frame # Return frame if it's None
     if u is not None and v is not None and radius_px is not None:
-        cv2.circle(frame, (int(u), int(v)), int(radius_px), (0, 255, 0), 2)
-        cv2.circle(frame, (int(u), int(v)), 3, (0, 0, 255), -1)
+        try:
+            cv2.circle(frame, (int(u), int(v)), int(radius_px), (0, 255, 0), 2) # Green circle
+            cv2.circle(frame, (int(u), int(v)), 3, (0, 0, 255), -1) # Red center
+        except Exception as e:
+            logging.error(f"CV: Error drawing ball on frame: {e}")
     return frame
 
 def draw_3d_info_on_frame(frame, world_coords_3d, ball_radius_m):
@@ -217,11 +254,18 @@ def draw_3d_info_on_frame(frame, world_coords_3d, ball_radius_m):
     if world_coords_3d is not None:
         text_x = f"X: {world_coords_3d[0]:.2f}m"
         text_y = f"Y: {world_coords_3d[1]:.2f}m"
-        text_z_vis = f"Z_vis: {ball_radius_m:.2f}m (center)"
+        # The Z coordinate from map_2d_to_3d_on_ground is Z=0 (contact point)
+        # The visualization Z for the ball center is its radius.
+        text_z_contact = f"Z_contact: {world_coords_3d[2]:.2f}m" # This should be 0.00m
+        text_z_vis = f"Z_ball_center: {ball_radius_m:.2f}m (est.)"
 
-        cv2.putText(frame, text_x, (10, frame.shape[0] - 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(frame, text_y, (10, frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(frame, text_z_vis, (10, frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        try:
+            cv2.putText(frame, text_x, (10, frame.shape[0] - 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2) # Cyan
+            cv2.putText(frame, text_y, (10, frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+            cv2.putText(frame, text_z_contact, (10, frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+            # cv2.putText(frame, text_z_vis, (10, frame.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2) # If space
+        except Exception as e:
+             logging.error(f"CV: Error drawing 3D info on frame: {e}")
     return frame
 
 def draw_axes_on_frame(frame, rvec, tvec, mtx, dist, axis_length_m=0.5):
@@ -243,14 +287,17 @@ def draw_axes_on_frame(frame, rvec, tvec, mtx, dist, axis_length_m=0.5):
         # logging.debug("CV: Cannot draw axes due to missing rvec, tvec, mtx, or dist.")
         return frame
 
+    # Define the 3D points for the axes (origin, X, Y, Z ends)
+    # Origin is at (0,0,0) in world coordinates.
     axis_points_3d = np.float32([
-        [0, 0, 0],
-        [axis_length_m, 0, 0],
-        [0, axis_length_m, 0],
-        [0, 0, axis_length_m]
+        [0, 0, 0],                  # Origin
+        [axis_length_m, 0, 0],      # X-axis end
+        [0, axis_length_m, 0],      # Y-axis end
+        [0, 0, axis_length_m]       # Z-axis end (pointing up from the ground)
     ]).reshape(-1, 3)
 
     try:
+        # Project the 3D points to 2D image plane
         image_points, _ = cv2.projectPoints(axis_points_3d, rvec, tvec, mtx, dist)
         image_points = np.int32(image_points.reshape(-1, 2))
 
@@ -259,10 +306,13 @@ def draw_axes_on_frame(frame, rvec, tvec, mtx, dist, axis_length_m=0.5):
         y_axis_end_2d = tuple(image_points[2])
         z_axis_end_2d = tuple(image_points[3])
 
-        cv2.line(frame, origin_2d, x_axis_end_2d, (255, 0, 0), 3)
-        cv2.line(frame, origin_2d, y_axis_end_2d, (0, 255, 0), 3)
-        cv2.line(frame, origin_2d, z_axis_end_2d, (0, 0, 255), 3)
+        # Draw lines for the axes
+        # BGR colors: Blue for X, Green for Y, Red for Z (common convention)
+        cv2.line(frame, origin_2d, x_axis_end_2d, (255, 0, 0), 3)  # Blue X
+        cv2.line(frame, origin_2d, y_axis_end_2d, (0, 255, 0), 3)  # Green Y
+        cv2.line(frame, origin_2d, z_axis_end_2d, (0, 0, 255), 3)  # Red Z
 
+        # Optionally, put labels
         cv2.putText(frame, "X", (x_axis_end_2d[0] + 5, x_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
         cv2.putText(frame, "Y", (y_axis_end_2d[0] + 5, y_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
         cv2.putText(frame, "Z", (z_axis_end_2d[0] + 5, z_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)

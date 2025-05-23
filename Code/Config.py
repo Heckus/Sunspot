@@ -2,7 +2,8 @@
 
 import os
 import numpy as np
-from libcamera import controls # For potential future use if directly interfacing with libcamera controls
+# Removed: from libcamera import controls # For potential future use if directly interfacing with libcamera controls
+# This import is not used and can cause issues if libcamera is not fully available or needed for this Config.
 
 # --- General ---
 LOG_LEVEL = "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -71,10 +72,14 @@ WORLD_BOX_CORNERS_M = np.array([
 # HSV Color Ranges for Mikasa Volleyball (Yellow and Blue)
 # These need to be tuned empirically. Values are (Hue, Saturation, Value)
 # Hue: 0-179 (in OpenCV), Saturation: 0-255, Value: 0-255
+
+# Typical HSV for Yellow: Hue around 20-30
 LOWER_YELLOW_HSV = np.array([20, 100, 100]) # Example
-UPPER_YELLOW_HSV = np.array([30, 255, 255]) # Example
-LOWER_BLUE_HSV = np.array([100, 150, 50])   # Example
-UPPER_BLUE_HSV = np.array([140, 255, 255])  # Example
+UPPER_YELLOW_HSV = np.array([35, 255, 255]) # Example (Widened Hue slightly)
+
+# Typical HSV for Blue: Hue around 100-130
+LOWER_BLUE_HSV = np.array([90, 100, 100])   # Example (Adjusted Sat/Val for typical conditions)
+UPPER_BLUE_HSV = np.array([130, 255, 255])  # Example
 
 # Morphological operation kernel size
 MORPH_KERNEL_SIZE = (5, 5)
@@ -101,7 +106,7 @@ VIS_WINDOW_HEIGHT = 768
 
 # Colors for 3D objects (R, G, B, values 0.0 to 1.0)
 VIS_BOX_COLOR = [0.5, 0.5, 0.5]  # Grey for the box
-VIS_VOLLEYBALL_COLOR = [1.0, 0.84, 0.0] # Yellow for the ball (as per PDF)
+VIS_VOLLEYBALL_COLOR = [1.0, 0.84, 0.0] # Yellow for the ball (as per PDF standard)
 VIS_AXES_ENABLED = True # Draw world coordinate axes
 
 # Initial camera viewpoint for Open3D visualizer
