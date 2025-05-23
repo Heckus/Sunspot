@@ -1,3 +1,4 @@
+# Code/WebUi.py
 # web_ui.py
 
 import threading
@@ -5,7 +6,7 @@ import time
 import logging
 # import queue # No longer directly used by WebUIManager for Open3D
 import numpy as np
-import cv2 
+import cv2
 from flask import Flask, Response, render_template_string, jsonify
 
 import Config
@@ -17,11 +18,11 @@ class WebUIManager:
         self.app = Flask(__name__)
         self.shutdown_event = shutdown_event_ref if shutdown_event_ref else threading.Event()
 
-        self.latest_frame_for_stream = None 
+        self.latest_frame_for_stream = None
         self.display_variables = {
             "status": "Initializing...",
             "ball_2d_px": "N/A",
-            "ball_3d_m": "N/A", 
+            "ball_3d_m": "N/A",
             "ball_pixel_radius_px": "N/A",
             "fps": 0.0,
             "resolution": "N/A",
@@ -30,7 +31,9 @@ class WebUIManager:
             "box_dimensions": [Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M],
             "volleyball_radius": Config.VOLLEYBALL_RADIUS_M,
             # Add world box corners for JS to use for corner markers
-            "world_box_corners": Config.WORLD_BOX_CORNERS_M.tolist() 
+            "world_box_corners": Config.WORLD_BOX_CORNERS_M.tolist()
+            # VIS_CAMERA_POSITION_THREEJS and VIS_CAMERA_LOOKAT_THREEJS are directly injected
+            # into the template from the Config object, not needed in display_variables for status_json
         }
         self.data_lock = threading.Lock()
         self._setup_routes()
@@ -46,78 +49,78 @@ class WebUIManager:
                 <title>3D Volleyball Tracker</title>
                 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
                 <style>
-                    body { 
-                        margin: 0; 
-                        font-family: sans-serif; 
-                        background-color: #f0f0f0; 
-                        color: #333; 
-                        display: flex; 
-                        flex-direction: column; 
+                    body {
+                        margin: 0;
+                        font-family: sans-serif;
+                        background-color: #f0f0f0;
+                        color: #333;
+                        display: flex;
+                        flex-direction: column;
                         align-items: center;
-                        padding: 10px; 
+                        padding: 10px;
                         box-sizing: border-box;
                     }
-                    h1, h2 { 
-                        text-align: center; 
-                        color: #333; 
+                    h1, h2 {
+                        text-align: center;
+                        color: #333;
                         margin-top: 10px;
                         margin-bottom: 15px;
                     }
                     .dashboard-container {
                         width: 100%;
-                        max-width: 1400px; 
+                        max-width: 1400px;
                         display: flex;
                         flex-direction: column;
-                        gap: 20px; 
+                        gap: 20px;
                     }
                     .visualizations-row {
                         display: flex;
-                        flex-wrap: wrap; 
-                        gap: 20px; 
+                        flex-wrap: wrap;
+                        gap: 20px;
                         width: 100%;
                     }
                     .visualization-panel {
-                        flex: 1; 
-                        min-width: 400px; 
-                        background: #fff; 
-                        padding: 15px; 
-                        border-radius: 8px; 
+                        flex: 1;
+                        min-width: 400px;
+                        background: #fff;
+                        padding: 15px;
+                        border-radius: 8px;
                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                         display: flex;
                         flex-direction: column;
-                        align-items: center; 
+                        align-items: center;
                     }
-                    #threejs-canvas { 
-                        display: block; 
-                        width: 100%; 
-                        max-width: 600px; 
-                        height: 450px; 
-                        background-color: #222; 
+                    #threejs-canvas {
+                        display: block;
+                        width: 100%;
+                        max-width: 600px;
+                        height: 450px;
+                        background-color: #222;
                         border: 1px solid #ccc;
                     }
-                    img#video_stream { 
-                        display: block; 
-                        width: 100%; 
-                        max-width: 640px; 
-                        height: auto; 
-                        background-color: #222; 
+                    img#video_stream {
+                        display: block;
+                        width: 100%;
+                        max-width: 640px;
+                        height: auto;
+                        background-color: #222;
                         border: 1px solid #ccc;
                     }
                     .data-section {
                         width: 100%;
-                        background: #fff; 
-                        padding: 20px; 
-                        border-radius: 8px; 
+                        background: #fff;
+                        padding: 20px;
+                        border-radius: 8px;
                         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
                         display: flex;
-                        flex-wrap: wrap; 
-                        gap: 20px; 
-                        justify-content: space-around; 
+                        flex-wrap: wrap;
+                        gap: 20px;
+                        justify-content: space-around;
                         box-sizing: border-box;
                     }
                     .data-group {
-                        flex: 1; 
-                        min-width: 280px; 
+                        flex: 1;
+                        min-width: 280px;
                     }
                     .data-group h2 {
                         text-align: left;
@@ -127,15 +130,15 @@ class WebUIManager:
                         border-bottom: 1px solid #eee;
                         padding-bottom: 5px;
                     }
-                    table { width: 100%; border-collapse: collapse; } 
+                    table { width: 100%; border-collapse: collapse; }
                     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
-                    td:first-child { font-weight: bold; color: #555; width: 40%;} 
-                    pre { 
-                        font-size:0.9em; 
-                        white-space:pre-wrap; 
-                        background-color: #f8f8f8; 
-                        padding:8px; 
-                        border-radius:4px; 
+                    td:first-child { font-weight: bold; color: #555; width: 40%;}
+                    pre {
+                        font-size:0.9em;
+                        white-space:pre-wrap;
+                        background-color: #f8f8f8;
+                        padding:8px;
+                        border-radius:4px;
                         border:1px solid #ddd;
                         margin-top: 5px;
                     }
@@ -205,132 +208,134 @@ class WebUIManager:
                                         }
                                     } catch (e) { console.error("Error parsing ball_3d_m for Three.js:", e); }
                                 }
+                                // initThreeJS is primarily called on DOMContentLoaded.
+                                // This fallback is if data arrives before DOMContentLoaded init or if that somehow fails.
                                 if (typeof initialBoxConfig === 'undefined' && data.box_dimensions && data.volleyball_radius && data.world_box_corners) {
+                                     console.warn("Attempting to init ThreeJS from updateDataFields due to missing initialBoxConfig");
+                                     // For this fallback, we'd ideally also have camPos and camLookAt in 'data'
+                                     // For now, it would use defaults in initThreeJS if camPos/camLookAt are undefined
                                      initThreeJS(data.box_dimensions, data.volleyball_radius, data.world_box_corners);
                                 }
                             })
                             .catch(error => console.error('Error fetching status JSON:', error));
                     }
-                    setInterval(updateDataFields, 750); 
+                    setInterval(updateDataFields, 750);
+                    
                     document.addEventListener('DOMContentLoaded', () => {
-                        updateDataFields(); 
+                        updateDataFields(); // Initial fetch for data fields
                          if (typeof initThreeJS === 'function') {
                             const defaultBox = [{{ Config.BOX_WIDTH_M }}, {{ Config.BOX_DEPTH_M }}, {{ Config.BOX_HEIGHT_M }}];
                             const defaultRadius = {{ Config.VOLLEYBALL_RADIUS_M }};
-                            const defaultCorners = JSON.parse(JSON.stringify({{ Config.WORLD_BOX_CORNERS_M.tolist() }})); // Pass as JS array
-                            initThreeJS(defaultBox, defaultRadius, defaultCorners);
+                            const defaultCorners = JSON.parse(JSON.stringify({{ Config.WORLD_BOX_CORNERS_M.tolist() }}));
+                            const defaultCamPos = {{ Config.VIS_CAMERA_POSITION_THREEJS | tojson }};
+                            const defaultCamLookAt = {{ Config.VIS_CAMERA_LOOKAT_THREEJS | tojson }};
+                            initThreeJS(defaultBox, defaultRadius, defaultCorners, defaultCamPos, defaultCamLookAt);
                         }
                     });
 
-                    let scene, camera, renderer, boxMesh, volleyballMesh, controls; // Added controls
-                    let initialBoxConfig; 
+                    let scene, camera, renderer, boxMesh, volleyballMesh, controls;
+                    let initialBoxConfig;
 
-                    function initThreeJS(boxDims, ballRadius, worldBoxCorners) {
-                        if (initialBoxConfig && scene) return; 
-                        initialBoxConfig = {boxDims, ballRadius, worldBoxCorners};
+                    function initThreeJS(boxDims, ballRadius, worldBoxCorners, cameraPosition, cameraLookAt) {
+                        if (initialBoxConfig && scene) return;
+                        initialBoxConfig = {boxDims, ballRadius, worldBoxCorners, cameraPosition, cameraLookAt};
 
                         const canvas = document.getElementById('threejs-canvas');
                         
                         scene = new THREE.Scene();
-                        scene.background = new THREE.Color(0x34495e); // Darker slate blue
+                        scene.background = new THREE.Color(0x34495e); 
 
                         const panel = canvas.parentElement;
-                        let panelWidth = panel.clientWidth - 30; 
-                        let canvasHeight = 400; 
-                        canvas.width = panelWidth > 300 ? panelWidth : 300; 
+                        let panelWidth = panel.clientWidth - 30;
+                        let canvasHeight = 400;
+                        canvas.width = panelWidth > 300 ? panelWidth : 300;
                         canvas.height = canvasHeight;
 
                         const aspectRatio = canvas.width / canvas.height;
                         camera = new THREE.PerspectiveCamera(50, aspectRatio, 0.1, 1000);
                         
-                        // New Camera Position (rotated clockwise, higher angle)
-                        // Looking at the center of the box base (boxDims[0]/2, boxDims[1]/2, 0)
-                        // Position camera at (X, Y, Z) such that it's rotated clockwise from a top-left view
-                        // Let's try a position that is more to the "right" and "front" of the box.
-                        const camDist = Math.max(boxDims[0], boxDims[1]) * 2.0; // Distance from center
-                        camera.position.set(
-                            boxDims[0] / 2 + camDist * 1.707, // X offset (positive X)
-                            boxDims[1] / 2 - camDist * 1.7, // Y offset (negative Y for clockwise rotation if Y is depth)
-                            camDist * 0.8 // Z height (positive Z)
-                        );
-                        camera.lookAt(boxDims[0]/2, boxDims[1]/2, boxDims[2]/2); // Look at center of box volume
+                        // Set camera position and lookAt using provided or fallback values
+                        if (cameraPosition && cameraPosition.length === 3) {
+                            camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
+                        } else {
+                            console.warn("Three.js: cameraPosition not provided or invalid, using fallback.");
+                            // Fallback to an old default if new params are not provided
+                            const camDist = Math.max(boxDims[0], boxDims[1]) * 2.0; // Example fallback distance
+                            camera.position.set(
+                                boxDims[0] / 2 + camDist * 0.8, // X offset
+                                boxDims[1] / 2 - camDist * 0.8, // Y offset
+                                camDist * 0.8  // Z height
+                            );
+                        }
+
+                        if (cameraLookAt && cameraLookAt.length === 3) {
+                            camera.lookAt(new THREE.Vector3(cameraLookAt[0], cameraLookAt[1], cameraLookAt[2]));
+                        } else {
+                            // Fallback lookAt
+                            console.warn("Three.js: cameraLookAt not provided or invalid, using fallback.");
+                            camera.lookAt(new THREE.Vector3(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2)); // Look at center of box volume
+                        }
 
                         renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-                        renderer.setSize(canvas.width, canvas.height); 
+                        renderer.setSize(canvas.width, canvas.height);
 
-                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); 
+                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
                         scene.add(ambientLight);
-                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); 
-                        directionalLight.position.set(boxDims[0], boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1])*2); 
-                        directionalLight.castShadow = false; 
+                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                        directionalLight.position.set(boxDims[0], boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1])*2);
                         scene.add(directionalLight);
-                        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4); 
-                        directionalLight2.position.set(-boxDims[0], -boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1])); 
+                        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
+                        directionalLight2.position.set(-boxDims[0], -boxDims[1]*1.5, Math.max(boxDims[0],boxDims[1]));
                         scene.add(directionalLight2);
 
-
-                        // Box (Ground Plane volume)
                         const boxGeometry = new THREE.BoxGeometry(boxDims[0], boxDims[1], boxDims[2]);
-                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, transparent: true, opacity:0.5 }); 
+                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, transparent: true, opacity:0.5 });
                         boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
-                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2); 
+                        boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2);
                         scene.add(boxMesh);
 
-                        // Ground Grid Helper
-                        const gridDivisions = Math.max(Math.round(boxDims[0]), Math.round(boxDims[1])); // e.g., 1 division per meter
+                        const gridDivisions = Math.max(Math.round(boxDims[0]), Math.round(boxDims[1]));
                         const gridHelper = new THREE.GridHelper(Math.max(boxDims[0], boxDims[1]), gridDivisions, 0x888888, 0x555555);
-                        gridHelper.position.set(boxDims[0] / 2, boxDims[1] / 2, 0); // Position at center of box base
-                        gridHelper.rotation.x = Math.PI / 2; // Rotate to be on XY plane
+                        gridHelper.position.set(boxDims[0] / 2, boxDims[1] / 2, 0); 
+                        gridHelper.rotation.x = Math.PI / 2;
                         scene.add(gridHelper);
 
-                        // Corner Markers (at Z=0 for ground corners)
                         const cornerMarkerRadius = 0.03;
-                        const cornerMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 }); // Red markers
+                        const cornerMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
                         if (worldBoxCorners && worldBoxCorners.length >= 4) {
                             worldBoxCorners.forEach(corner => {
                                 const cornerSphere = new THREE.SphereGeometry(cornerMarkerRadius, 16, 16);
                                 const cornerMesh = new THREE.Mesh(cornerSphere, cornerMarkerMaterial);
-                                cornerMesh.position.set(corner[0], corner[1], corner[2] + cornerMarkerRadius); // Place slightly above ground for visibility
+                                cornerMesh.position.set(corner[0], corner[1], corner[2] + cornerMarkerRadius);
                                 scene.add(cornerMesh);
                             });
                         }
 
-
                         const volleyballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
-                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0x111100 }); 
+                        const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd44, emissive: 0x111100 });
                         volleyballMesh = new THREE.Mesh(volleyballGeometry, volleyballMaterial);
-                        // Initial position will be updated by fetched data, place it at center of box volume, raised by its radius
-                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + boxDims[2] / 2 ); 
+                        volleyballMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, ballRadius + boxDims[2] / 2 );
                         scene.add(volleyballMesh);
                         
-                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.5 ); 
-                        axesHelper.position.set(0,0,0.005); 
+                        const axesHelper = new THREE.AxesHelper(Math.max(boxDims[0], boxDims[1]) * 0.5 );
+                        axesHelper.position.set(0,0,0.005);
                         scene.add(axesHelper);
                         
                         animate();
 
                         window.addEventListener('resize', onWindowResize, false);
+                        const aspectRatio_original = canvas.width / canvas.height; 
                         function onWindowResize() {
                             let newPanelWidth = panel.clientWidth - 30;
                             let newCanvasWidth = newPanelWidth > 300 ? newPanelWidth : 300;
-                            // Maintain aspect ratio based on original canvas.height or set a new one
-                            let newCanvasHeight = (newCanvasWidth / aspectRatio_original) || canvasHeight; 
                             
-                            // If you want fixed height and variable width:
-                            // canvas.width = newCanvasWidth;
-                            // canvas.height = canvasHeight; // Keep original height
-                            
-                            // Or if you want to scale proportionally to new width (might change height):
                             canvas.width = newCanvasWidth;
-                            canvas.height = newCanvasWidth / aspectRatio;
-
+                            canvas.height = newCanvasWidth / aspectRatio_original; // Maintain original aspect ratio
 
                             camera.aspect = canvas.width / canvas.height;
                             camera.updateProjectionMatrix();
                             renderer.setSize(canvas.width, canvas.height);
                         }
-                        const aspectRatio_original = canvas.width / canvas.height; // Store original for resize
-                        // onWindowResize(); // Call once to set initial size (already sized by panel width)
                     }
 
                     function updateThreeJSScene(ballPosition) {
@@ -341,7 +346,6 @@ class WebUIManager:
 
                     function animate() {
                         requestAnimationFrame(animate);
-                        // if (controls) controls.update(); 
                         if (renderer && scene && camera) {
                            renderer.render(scene, camera);
                         }
@@ -351,7 +355,7 @@ class WebUIManager:
                     if (streamImg) {
                         streamImg.onerror = function() {
                             this.alt = 'Camera stream failed to load or is unavailable.';
-                            this.src = ''; 
+                            this.src = '';
                             console.error('Error loading video stream.');
                         };
                     }
@@ -360,7 +364,9 @@ class WebUIManager:
             </html>
             """
             with self.data_lock:
+                # Pass the whole Config module to the template for easy access
                 return render_template_string(html_template, Config=Config)
+
 
         @self.app.route('/video_feed')
         def video_feed():
@@ -370,9 +376,8 @@ class WebUIManager:
         @self.app.route('/status_json')
         def status_json():
             with self.data_lock:
-                # Ensure world_box_corners is part of the JSON response for initThreeJS
                 response_data = self.display_variables.copy()
-                if "world_box_corners" not in response_data: # Should be set in __init__
+                if "world_box_corners" not in response_data:
                     response_data["world_box_corners"] = Config.WORLD_BOX_CORNERS_M.tolist()
                 return jsonify(response_data)
 
@@ -381,7 +386,7 @@ class WebUIManager:
         while not self.shutdown_event.is_set():
             frame_to_encode = None
             with self.data_lock:
-                if self.latest_frame_for_stream is not None: 
+                if self.latest_frame_for_stream is not None:
                     frame_to_encode = self.latest_frame_for_stream.copy()
 
             if frame_to_encode is None:
@@ -392,7 +397,7 @@ class WebUIManager:
                 cv2.putText(frame_to_encode, "(Display from main.py)", (10, ph_height // 2 + 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
                 time.sleep(0.2)
             
-            if frame_to_encode is not None: 
+            if frame_to_encode is not None:
                 try:
                     jpeg_quality = Config.WEB_STREAM_JPEG_QUALITY if hasattr(Config, 'WEB_STREAM_JPEG_QUALITY') else 75
                     flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
@@ -419,14 +424,14 @@ class WebUIManager:
         logging.info("MJPEG stream: Generator stopped.")
 
 
-    def update_data(self, frame_for_stream=None, 
-                    ball_2d_coords=None, ball_pixel_radius=None, ball_3d_world_coords=None, 
-                    box_corners_world=None, box_dimensions=None, 
+    def update_data(self, frame_for_stream=None,
+                    ball_2d_coords=None, ball_pixel_radius=None, ball_3d_world_coords=None,
+                    box_corners_world=None, box_dimensions=None,
                     camera_intrinsics=None, camera_extrinsics=None,
                     fps=None, resolution=None, status_message=None):
         with self.data_lock:
-            if frame_for_stream is not None: 
-                self.latest_frame_for_stream = frame_for_stream 
+            if frame_for_stream is not None:
+                self.latest_frame_for_stream = frame_for_stream
             
             if status_message is not None: self.display_variables["status"] = status_message
             if fps is not None: self.display_variables["fps"] = fps
@@ -459,7 +464,7 @@ class WebUIManager:
                     try:
                         if camera_extrinsics.get('rvec') is not None: rvec_str = np.array2string(np.array(camera_extrinsics['rvec']), precision=3, suppress_small=True)
                         if camera_extrinsics.get('tvec') is not None: tvec_str = np.array2string(np.array(camera_extrinsics['tvec']), precision=3, suppress_small=True)
-                        self.display_variables["cam_extrinsics"] = f"rvec: {rvec_str}\ntvec: {tvec_str}"
+                        self.display_variables["cam_extrinsics"] = f"rvec: {rvec_str}\\ntvec: {tvec_str}"
                     except Exception: self.display_variables["cam_extrinsics"] = "Error formatting extrinsics"
             
             self.display_variables["box_dimensions"] = Config.BOX_WIDTH_M, Config.BOX_DEPTH_M, Config.BOX_HEIGHT_M
@@ -485,7 +490,7 @@ class WebUIManager:
     def stop(self):
         logging.info("WebUIManager stop sequence initiated.")
         if not self.shutdown_event.is_set():
-            self.shutdown_event.set() 
+            self.shutdown_event.set()
         logging.info("WebUIManager stop sequence completed.")
 
 
@@ -493,15 +498,21 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format=Config.LOG_FORMAT, datefmt=Config.LOG_DATE_FORMAT)
     example_shutdown_event = threading.Event()
     
-    if not hasattr(Config, 'VIS_CAMERA_FRONT'): Config.VIS_CAMERA_FRONT = [-0.7, -0.7, 1.5] 
+    # Dummy Config values for standalone testing if not present in actual Config
     if not hasattr(Config, 'BOX_WIDTH_M'): Config.BOX_WIDTH_M = 1.0
     if not hasattr(Config, 'BOX_DEPTH_M'): Config.BOX_DEPTH_M = 1.0
     if not hasattr(Config, 'BOX_HEIGHT_M'): Config.BOX_HEIGHT_M = 0.05
     if not hasattr(Config, 'VOLLEYBALL_RADIUS_M'): Config.VOLLEYBALL_RADIUS_M = 0.105
     if not hasattr(Config, 'CAM_REQUESTED_FPS'): Config.CAM_REQUESTED_FPS = 30.0
     if not hasattr(Config, 'WEB_STREAM_MAX_FPS'): Config.WEB_STREAM_MAX_FPS = 15.0
-    if not hasattr(Config, 'WORLD_BOX_CORNERS_M'): # Add dummy if missing for standalone test
+    if not hasattr(Config, 'WORLD_BOX_CORNERS_M'): 
         Config.WORLD_BOX_CORNERS_M = np.array([[0,0,0],[1,0,0],[1,1,0],[0,1,0]], dtype=float)
+    
+    # Ensure new camera config variables exist for standalone test
+    if not hasattr(Config, 'VIS_CAMERA_POSITION_THREEJS'):
+        Config.VIS_CAMERA_POSITION_THREEJS = [Config.BOX_WIDTH_M / 2, Config.BOX_DEPTH_M / 2 - Config.BOX_DEPTH_M * 1.8, Config.BOX_HEIGHT_M + max(Config.BOX_WIDTH_M, Config.BOX_DEPTH_M) * 1.5]
+    if not hasattr(Config, 'VIS_CAMERA_LOOKAT_THREEJS'):
+        Config.VIS_CAMERA_LOOKAT_THREEJS = [Config.BOX_WIDTH_M / 2, Config.BOX_DEPTH_M / 2, Config.BOX_HEIGHT_M / 2]
 
 
     ui_manager = WebUIManager(port=Config.WEB_PORT if hasattr(Config, 'WEB_PORT') else 8000,
@@ -518,27 +529,27 @@ if __name__ == '__main__':
 
     try:
         count = 0
-        for _ in range(120): 
+        for _ in range(120):
             if example_shutdown_event.is_set(): break
             time.sleep(1)
             count +=1
 
-            sim_ball_x = Config.BOX_WIDTH_M / 2 + (Config.BOX_WIDTH_M/3) * np.sin(count * 0.1) 
-            sim_ball_y = Config.BOX_DEPTH_M / 2 + (Config.BOX_DEPTH_M/3) * np.cos(count * 0.15) 
-            sim_ball_z_vis = Config.VOLLEYBALL_RADIUS_M + Config.BOX_HEIGHT_M 
+            sim_ball_x = Config.BOX_WIDTH_M / 2 + (Config.BOX_WIDTH_M/3) * np.sin(count * 0.1)
+            sim_ball_y = Config.BOX_DEPTH_M / 2 + (Config.BOX_DEPTH_M/3) * np.cos(count * 0.15)
+            sim_ball_z_vis = Config.VOLLEYBALL_RADIUS_M + Config.BOX_HEIGHT_M
 
             annotated_frame_sim = np.zeros((240, 320, 3), dtype=np.uint8)
             cv2.putText(annotated_frame_sim, f"Annotated Frame {count}", (10,20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
-            cv2.circle(annotated_frame_sim, (int(160 + sim_ball_x*20), int(120 + sim_ball_y*20)), 10, (0,255,0), -1) 
+            cv2.circle(annotated_frame_sim, (int(160 + sim_ball_x*20), int(120 + sim_ball_y*20)), 10, (0,255,0), -1)
             cv2.putText(annotated_frame_sim, f"X:{sim_ball_x:.1f} Y:{sim_ball_y:.1f}", (10, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255,255,0),1)
 
             ui_manager.update_data(
-                frame_for_stream=annotated_frame_sim, 
+                frame_for_stream=annotated_frame_sim,
                 ball_3d_world_coords=[sim_ball_x, sim_ball_y, sim_ball_z_vis],
                 status_message=f"Simulating frame {count}",
-                fps= Config.CAM_REQUESTED_FPS - (count % 5), 
+                fps= Config.CAM_REQUESTED_FPS - (count % 5),
                 resolution="320x240 (sim)",
-                ball_2d_coords=(int(160+sim_ball_x*20), int(120+sim_ball_y*20)), 
+                ball_2d_coords=(int(160+sim_ball_x*20), int(120+sim_ball_y*20)),
                 ball_pixel_radius= 10,
                 camera_intrinsics=np.eye(3).tolist(),
                 camera_extrinsics={'rvec': [0.0,0.0,0.0], 'tvec': [0.0,0.0,1.0]}
@@ -549,7 +560,7 @@ if __name__ == '__main__':
         logging.info("Keyboard interrupt. Shutting down.")
     finally:
         if not example_shutdown_event.is_set(): example_shutdown_event.set()
-        if flask_thread.is_alive(): 
+        if flask_thread.is_alive():
             logging.info("Waiting for Flask thread to complete...")
             flask_thread.join(timeout=2.0)
         logging.info("Web UI example completed.")

@@ -1,3 +1,4 @@
+# Code/Config.py
 # config.py
 
 import os
@@ -19,7 +20,7 @@ CALIBRATION_DATA_FILE = os.path.join(SCRIPT_DIR, "camera_calibration_data.npz")
 CALIBRATION_IMAGE_DIR = os.path.join(SCRIPT_DIR, "calibration_images")
 
 # --- Web Server Configuration ---
-WEB_UI_ENABLED = True 
+WEB_UI_ENABLED = True
 WEB_PORT = 8000
 MAX_CONSECUTIVE_CAPTURE_ERRORS = 15
 # For WebUi.py MJPEG stream
@@ -30,7 +31,7 @@ WEB_STREAM_MAX_FPS = 20      # Cap FPS for web stream to reduce load
 CAMERA_INDEX = 0
 CAM_REQUESTED_WIDTH = 1920
 CAM_REQUESTED_HEIGHT = 1080
-CAM_REQUESTED_FPS = 30.0
+CAM_REQUESTED_FPS = 10.0
 
 CAMERA_INTRINSIC_MTX = np.array([[1000.0, 0.0, CAM_REQUESTED_WIDTH/2],
                                  [0.0, 1000.0, CAM_REQUESTED_HEIGHT/2],
@@ -38,16 +39,16 @@ CAMERA_INTRINSIC_MTX = np.array([[1000.0, 0.0, CAM_REQUESTED_WIDTH/2],
 CAMERA_DIST_COEFFS = np.array([0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float32)
 
 # --- Checkerboard Configuration (for camera_calibration.py) ---
-CHECKERBOARD_DIMS = (10, 7) 
+CHECKERBOARD_DIMS = (10, 7)
 CHECKERBOARD_INNER_CORNERS_WIDTH = 10
 CHECKERBOARD_INNER_CORNERS_HEIGHT = 7
 SQUARE_SIZE_MM = 20.0
-NUM_CALIBRATION_IMAGES = 20
+NUM_CALIBRATION_IMAGES = 30
 
 # --- World Coordinate System ---
 BOX_WIDTH_M = 1.0
 BOX_DEPTH_M = 1.0
-BOX_HEIGHT_M = 0.05 
+BOX_HEIGHT_M = 0.05
 
 WORLD_BOX_CORNERS_M = np.array([
     [0.0, 0.0, 0.0],
@@ -86,17 +87,35 @@ MAX_BALL_CONTOUR_AREA = np.pi * (MAX_BALL_RADIUS_PX**2) * 1.4
 
 VOLLEYBALL_RADIUS_M = 0.105 # Approx. 10.5 cm
 
-# --- 3D Visualization (WEB_UI using Open3D) ---
-VIS_WINDOW_TITLE = "Real-Time 3D Volleyball Tracker"
-VIS_WINDOW_WIDTH = 1024
-VIS_WINDOW_HEIGHT = 768
-VIS_BOX_COLOR = [0.5, 0.5, 0.5]
-VIS_VOLLEYBALL_COLOR = [1.0, 0.84, 0.0] 
-VIS_AXES_ENABLED = True
-VIS_CAMERA_LOOKAT = [BOX_WIDTH_M / 2, BOX_DEPTH_M / 2, 0.0]
-VIS_CAMERA_FRONT = [-0.7, -0.7, -0.5]
-VIS_CAMERA_UP = [0.0, 0.0, 1.0]
-VIS_CAMERA_ZOOM = 0.5
+# --- 3D Visualization (WEB_UI - Open3D - not used by Three.js in WebUi.py) ---
+VIS_WINDOW_TITLE = "Real-Time 3D Volleyball Tracker" # General title
+VIS_WINDOW_WIDTH = 1024 # For Open3D or other desktop UI
+VIS_WINDOW_HEIGHT = 768 # For Open3D or other desktop UI
+VIS_BOX_COLOR = [0.5, 0.5, 0.5] # For Open3D or other desktop UI
+VIS_VOLLEYBALL_COLOR = [1.0, 0.84, 0.0] # For Open3D or other desktop UI
+VIS_AXES_ENABLED = True # For Open3D or other desktop UI
+VIS_CAMERA_LOOKAT = [BOX_WIDTH_M / 2, BOX_DEPTH_M / 2, 0.0] # For Open3D
+VIS_CAMERA_FRONT = [-0.7, -0.7, -0.5] # For Open3D
+VIS_CAMERA_UP = [0.0, 0.0, 1.0] # For Open3D
+VIS_CAMERA_ZOOM = 0.5 # For Open3D
+
+
+# --- 3D Visualization (Three.js in WebUI) ---
+# Camera position: X (center), Y (in front), Z (elevated)
+# Look at the center of the box volume.
+# These values are in meters.
+VIS_CAMERA_POSITION_THREEJS_X_M = BOX_WIDTH_M / 2
+VIS_CAMERA_POSITION_THREEJS_Y_M = BOX_DEPTH_M / 2 - BOX_DEPTH_M * 1.8 # Further 'in front' of the center of the box depth
+VIS_CAMERA_POSITION_THREEJS_Z_M = BOX_HEIGHT_M + max(BOX_WIDTH_M, BOX_DEPTH_M) * 1.5 # Higher up, relative to max(width,depth)
+
+VIS_CAMERA_LOOKAT_THREEJS_X_M = BOX_WIDTH_M / 2
+VIS_CAMERA_LOOKAT_THREEJS_Y_M = BOX_DEPTH_M / 2
+VIS_CAMERA_LOOKAT_THREEJS_Z_M = BOX_HEIGHT_M / 2 # Center of the box volume
+
+# These will be passed as lists/arrays to JavaScript
+VIS_CAMERA_POSITION_THREEJS = [VIS_CAMERA_POSITION_THREEJS_X_M, VIS_CAMERA_POSITION_THREEJS_Y_M, VIS_CAMERA_POSITION_THREEJS_Z_M]
+VIS_CAMERA_LOOKAT_THREEJS = [VIS_CAMERA_LOOKAT_THREEJS_X_M, VIS_CAMERA_LOOKAT_THREEJS_Y_M, VIS_CAMERA_LOOKAT_THREEJS_Z_M]
+
 
 # --- Hardware Manager ---
 BATTERY_MONITOR_ENABLED = False
@@ -112,8 +131,8 @@ SERVO_ENABLED = False
 # ... (other servo configs if ever used)
 
 # --- Main Loop Configuration ---
-MAIN_LOOP_MAX_FPS = 30 
-DISPLAY_2D_FEED = True 
+MAIN_LOOP_MAX_FPS = 30
+DISPLAY_2D_FEED = True
 
 # --- Sanity Checks & Derived Configs ---
 if CHECKERBOARD_INNER_CORNERS_WIDTH <= 0 or CHECKERBOARD_INNER_CORNERS_HEIGHT <= 0:
