@@ -17,7 +17,7 @@ CHESSBOARD_DIMS = (10, 7)  # IMPORTANT: Adjust to your checkerboard (squares_acr
 SQUARE_SIZE_MM = 20.0
 
 # Image capture settings
-NUM_IMAGES_TO_CAPTURE = 20  # Minimum number of images for good calibration
+NUM_IMAGES_TO_CAPTURE = 40  # Minimum number of images for good calibration
 IMAGE_SAVE_DIR = Path("calibration_images") # Directory to save images
 IMAGE_FILENAME_PREFIX = "calib_img_"
 FAILED_IMAGE_FILENAME_PREFIX = "failed_detect_"
