@@ -153,7 +153,7 @@ def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
         
         R_cw, _ = cv2.Rodrigues(rvec) 
         R_wc = R_cw.T 
-        camera_origin_world = -R_wc @ tvec.reshape(3)
+        camera_origin_world = -R_wc @ tvec.reshape(3) # Camera position in world coordinates
         ray_direction_world = R_wc @ ray_direction_camera
 
         logging.debug(f"CV: Ray Origin (Camera Pos in World): {camera_origin_world}")
@@ -163,28 +163,55 @@ def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
             logging.warning("CV: Ray is parallel or near parallel to the ground plane. Cannot intersect.")
             return None
 
-        k = -camera_origin_world[2] / ray_direction_world[2]
-        logging.debug(f"CV: Solved k for ray-plane intersection: {k:.4f}")
+        # k is the scalar distance along the ray to intersect the Z=0 plane
+        k_ground_intersect = -camera_origin_world[2] / ray_direction_world[2]
+        logging.debug(f"CV: Solved k for ray-plane (Z=0) intersection: {k_ground_intersect:.4f}")
 
-        # Note: k < 0 means intersection is "behind" camera plane along ray.
-        # For ball on ground in front, k should generally be positive.
-        # However, the definition of "behind" depends on camera orientation (rvec, tvec).
-        # If a point is visible, k should usually be positive.
-        # If you get negative k for visible points, review extrinsic calibration (rvec/tvec)
-        # or how the camera is oriented relative to the world origin.
+        # Point on ground (Z=0) directly under the ball's 3D center
+        Xc_under_center = camera_origin_world[0] + k_ground_intersect * ray_direction_world[0]
+        Yc_under_center = camera_origin_world[1] + k_ground_intersect * ray_direction_world[1]
+        # Zc_under_center is 0.0 by definition
 
-        X_ball = camera_origin_world[0] + k * ray_direction_world[0]
-        Y_ball = camera_origin_world[1] + k * ray_direction_world[1]
-        Z_ball = 0.0 
+        # Now, calculate the visually tangent ground contact point
+        R_ball = Config.VOLLEYBALL_RADIUS_M # The VOLLEYBALL_RADIUS_M is defined in Config.py and used by CvFunctions.py
+        
+        # Camera position in world coordinates
+        Cx_cam = camera_origin_world[0]
+        Cy_cam = camera_origin_world[1]
+        Cz_cam = camera_origin_world[2]
 
-        world_coords = np.array([X_ball, Y_ball, Z_ball], dtype=np.float32)
-        logging.info(f"CV: Mapped 2D ({u},{v}) to 3D World ({X_ball:.3f}, {Y_ball:.3f}, {Z_ball:.3f})m")
-        return world_coords
+        # The 3D center of the ball is (Xc_under_center, Yc_under_center, R_ball)
+        # Height difference between camera and the ball's 3D center
+        height_diff_cam_to_ball_center = Cz_cam - R_ball
+        
+        world_coords_final_contact = None
+
+        if height_diff_cam_to_ball_center <= 1e-3: # Camera is at or below ball center's height, or too close
+            logging.warning(f"CV: Camera height ({Cz_cam:.2f}m) is too close to or below ball center height ({R_ball:.2f}m). "
+                            "Perspective visual contact point calculation might be unstable or invalid. "
+                            "Returning contact point directly under ball center.")
+            world_coords_final_contact = np.array([Xc_under_center, Yc_under_center, 0.0], dtype=np.float32)
+        else:
+            # Calculate the coordinates of the point on the ground (Z=0) that is
+            # visually tangent to the bottom of the ball from the camera's perspective.
+            # X_visual_contact = Xc_under_center - R_ball * (DeltaX_cam_to_ball_center_projection) / height_diff_cam_to_ball_center
+            # DeltaX_cam_to_ball_center_projection is (Xc_under_center - Cx_cam)
+            
+            X_visual_contact = Xc_under_center - R_ball * (Xc_under_center - Cx_cam) / height_diff_cam_to_ball_center
+            Y_visual_contact = Yc_under_center - R_ball * (Yc_under_center - Cy_cam) / height_diff_cam_to_ball_center
+            Z_visual_contact = 0.0 # This point is on the ground plane
+
+            logging.info(f"CV: Original contact (under center): ({Xc_under_center:.3f}, {Yc_under_center:.3f}). "
+                         f"Calculated visual ground contact: ({X_visual_contact:.3f}, {Y_visual_contact:.3f}). "
+                         f"Cam Pos: ({Cx_cam:.2f}, {Cy_cam:.2f}, {Cz_cam:.2f}), Ball Radius: {R_ball:.2f}m.")
+            world_coords_final_contact = np.array([X_visual_contact, Y_visual_contact, Z_visual_contact], dtype=np.float32)
+        
+        return world_coords_final_contact
 
     except Exception as e:
         logging.error(f"CV: Error during 2D to 3D mapping: {e}", exc_info=True)
         return None
-
+    
 
 def draw_ball_on_frame(frame, u, v, radius_px):
     if frame is None: return frame
