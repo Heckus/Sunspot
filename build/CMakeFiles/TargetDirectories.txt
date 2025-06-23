@@ -1,3 +1,0 @@
-/home/hecke/GitHubRepos/Sunspot/build/CMakeFiles/OS_v1.0.dir
-/home/hecke/GitHubRepos/Sunspot/build/CMakeFiles/edit_cache.dir
-/home/hecke/GitHubRepos/Sunspot/build/CMakeFiles/rebuild_cache.dir
