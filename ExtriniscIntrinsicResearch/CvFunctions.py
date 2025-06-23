@@ -5,18 +5,10 @@ import numpy as np
 import logging
 import Config # Import the new config file
 
+# --- Add a flag for debugging masks ---
+DEBUG_MASKS = False # Set to True to display masks during detect_volleyball_2d
+
 def undistort_frame(frame, mtx, dist, new_camera_mtx):
-    """
-    Undistorts an image frame using camera calibration parameters.
-    Args:
-        frame (np.ndarray): The raw BGR frame.
-        mtx (np.ndarray): The camera intrinsic matrix.
-        dist (np.ndarray): The camera distortion coefficients.
-        new_camera_mtx (np.ndarray): The new camera matrix, possibly optimized, from cv2.getOptimalNewCameraMatrix.
-                                     If None, mtx is used.
-    Returns:
-        np.ndarray: The undistorted frame. Returns original frame if mtx or dist is None.
-    """
     if mtx is None or dist is None:
         logging.warning("CV: Camera matrix or distortion coefficients not available. Skipping undistortion.")
         return frame
@@ -27,23 +19,12 @@ def undistort_frame(frame, mtx, dist, new_camera_mtx):
         undistorted_img = cv2.undistort(frame, mtx, dist, None, current_new_mtx)
         return undistorted_img
     except Exception as e:
-        logging.error(f"CV: Error during undistortion: {e}")
-        return frame # Return original frame on error
+        logging.error(f"CV: Error during undistortion: {e}", exc_info=True)
+        return frame
 
 
 def detect_volleyball_2d(undistorted_frame, roi=None):
-    """
-    Detects the Mikasa volleyball in an undistorted frame using color segmentation.
-    Args:
-        undistorted_frame (np.ndarray): The undistorted BGR frame.
-        roi (tuple, optional): A tuple (x, y, w, h) defining a Region of Interest.
-                               If None, the whole frame is processed.
-    Returns:
-        tuple: (u, v, radius_px, masked_image)
-               u, v: Pixel coordinates of the ball's center (or None if not found).
-               radius_px: Approximate radius of the ball in pixels (or None).
-               masked_image: The combined mask for visualization (or None).
-    """
+    global DEBUG_MASKS
     if undistorted_frame is None:
         logging.warning("CV: detect_volleyball_2d received None frame.")
         return None, None, None, None
@@ -59,50 +40,62 @@ def detect_volleyball_2d(undistorted_frame, roi=None):
                y + h <= undistorted_frame.shape[0]:
                 frame_to_process = undistorted_frame[y:y+h, x:x+w]
                 offset_x, offset_y = x, y
-                logging.debug(f"CV: Processing ROI: {roi}")
             else:
                 logging.warning(f"CV: Invalid ROI {roi} for frame shape {undistorted_frame.shape[:2]}. Processing full frame.")
         except Exception as e:
             logging.warning(f"CV: Error applying ROI {roi}: {e}. Processing full frame.")
 
-
     try:
         hsv_frame = cv2.cvtColor(frame_to_process, cv2.COLOR_BGR2HSV)
     except Exception as e:
-        logging.error(f"CV: Failed to convert frame to HSV: {e}")
+        logging.error(f"CV: Failed to convert frame to HSV: {e}", exc_info=True)
         return None, None, None, None
 
-    # Create masks for yellow and blue - Corrected Config access
     mask_yellow = cv2.inRange(hsv_frame, Config.LOWER_YELLOW_HSV, Config.UPPER_YELLOW_HSV)
     mask_blue = cv2.inRange(hsv_frame, Config.LOWER_BLUE_HSV, Config.UPPER_BLUE_HSV)
-
-    # Combine masks
     combined_mask = cv2.bitwise_or(mask_yellow, mask_blue)
 
-    # Morphological operations (Opening followed by Closing) - Corrected Config access
     kernel = np.ones(Config.MORPH_KERNEL_SIZE, np.uint8)
-    mask_morphed = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
-    mask_morphed = cv2.morphologyEx(mask_morphed, cv2.MORPH_CLOSE, kernel, iterations=2)
+    # Apply MORPH_OPEN (erode then dilate) to remove small noise specks
+    mask_opened = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    # Apply MORPH_CLOSE (dilate then erode) to close small holes in the main object
+    mask_morphed = cv2.morphologyEx(mask_opened, cv2.MORPH_CLOSE, kernel, iterations=2) # Iterations can be tuned
 
-    # Find contours
+    # --- Debugging Section: Display Masks ---
+    if DEBUG_MASKS:
+        cv2.imshow("HSV Frame (ROI)", hsv_frame)
+        cv2.imshow("Yellow Mask", mask_yellow)
+        cv2.imshow("Blue Mask", mask_blue)
+        cv2.imshow("Combined Mask", combined_mask)
+        cv2.imshow("Opened Mask", mask_opened)
+        cv2.imshow("Morphed (Final) Mask", mask_morphed)
+    # --- End Debugging Section ---
+
     contours, _ = cv2.findContours(mask_morphed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     ball_center_u, ball_center_v, ball_radius_px = None, None, None
+    valid_contours_found = False # Flag
 
     if contours:
-        # Filter contours - e.g., find the largest one that fits size criteria
         valid_contours = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            # Corrected Config access
             if Config.MIN_BALL_CONTOUR_AREA < area < Config.MAX_BALL_CONTOUR_AREA:
+                # Additional check: circularity (optional, but can help)
+                # perimeter = cv2.arcLength(cnt, True)
+                # if perimeter > 0:
+                #     circularity = 4 * np.pi * (area / (perimeter * perimeter))
+                #     if 0.6 < circularity < 1.4: # Adjust threshold for "circle-likeness"
+                #         valid_contours.append(cnt)
+                # else:
+                #     valid_contours.append(cnt) # If perimeter is 0, it's a point, skip circularity check
                 valid_contours.append(cnt)
+
 
         if valid_contours:
             ball_contour = max(valid_contours, key=cv2.contourArea)
             ((u_roi, v_roi), radius_px_roi) = cv2.minEnclosingCircle(ball_contour)
 
-            # Corrected Config access
             if Config.MIN_BALL_RADIUS_PX <= radius_px_roi <= Config.MAX_BALL_RADIUS_PX:
                 M = cv2.moments(ball_contour)
                 if M["m00"] != 0:
@@ -112,46 +105,36 @@ def detect_volleyball_2d(undistorted_frame, roi=None):
                     ball_center_u = centroid_u_roi + offset_x
                     ball_center_v = centroid_v_roi + offset_y
                     ball_radius_px = int(radius_px_roi)
-
-                    logging.debug(f"CV: Ball detected at ({ball_center_u}, {ball_center_v}), radius ~{ball_radius_px}px.")
+                    valid_contours_found = True # Mark that we found a candidate
+                    logging.debug(f"CV: Ball candidate detected at ({ball_center_u}, {ball_center_v}), radius ~{ball_radius_px}px.")
                 else:
-                    logging.warning("CV: Valid ball contour found but m00 is zero.")
+                    logging.debug("CV: Valid ball contour found but m00 is zero (cannot compute centroid).")
             else:
-                # Corrected Config access
-                logging.debug(f"CV: Largest contour's radius {radius_px_roi:.1f}px out of range ({Config.MIN_BALL_RADIUS_PX}-{Config.MAX_BALL_RADIUS_PX}px).")
+                logging.debug(f"CV: Largest valid contour's radius {radius_px_roi:.1f}px out of range ({Config.MIN_BALL_RADIUS_PX}-{Config.MAX_BALL_RADIUS_PX}px).")
         else:
-            logging.debug("CV: No contours passed filtering criteria.")
+            logging.debug("CV: No contours passed area filtering criteria.")
     else:
-        logging.debug("CV: No contours found in mask.")
+        logging.debug("CV: No contours found in morphed mask.")
 
-    if offset_x > 0 or offset_y > 0:
-        full_mask_morphed = np.zeros_like(undistorted_frame[:,:,0], dtype=np.uint8)
-        full_mask_morphed[offset_y:offset_y+frame_to_process.shape[0], offset_x:offset_x+frame_to_process.shape[1]] = mask_morphed
-        mask_for_display = cv2.cvtColor(full_mask_morphed, cv2.COLOR_GRAY2BGR)
-    else:
-        mask_for_display = cv2.cvtColor(mask_morphed, cv2.COLOR_GRAY2BGR)
+    # Prepare the mask for display output (dbg_mask in main.py)
+    # This should be the final mask_morphed, converted to BGR, full size if ROI was used.
+    final_mask_for_display_gray = np.zeros(undistorted_frame.shape[:2], dtype=np.uint8)
+    if offset_x > 0 or offset_y > 0 : # If ROI was used
+        final_mask_for_display_gray[offset_y:offset_y+frame_to_process.shape[0], offset_x:offset_x+frame_to_process.shape[1]] = mask_morphed
+    else: # No ROI
+        final_mask_for_display_gray = mask_morphed
+    
+    # Convert the grayscale mask to BGR for consistent display overlay
+    dbg_mask_output = cv2.cvtColor(final_mask_for_display_gray, cv2.COLOR_GRAY2BGR)
 
+    if not valid_contours_found:
+        logging.debug("CV: No valid volleyball detected in the current frame.")
+        return None, None, None, dbg_mask_output # Return current mask for debugging even if no ball
 
-    return ball_center_u, ball_center_v, ball_radius_px, mask_for_display
+    return ball_center_u, ball_center_v, ball_radius_px, dbg_mask_output
 
 
 def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
-    """
-    Maps 2D image coordinates (u,v) to 3D world coordinates (X, Y, Z=0) on the ground plane.
-    This function implements the ray-plane intersection method.
-
-    Args:
-        u (int): The x-coordinate (pixel) of the ball in the image.
-        v (int): The y-coordinate (pixel) of the ball in the image.
-        mtx (np.ndarray): The camera intrinsic matrix.
-        dist (np.ndarray): The camera distortion coefficients.
-        rvec (np.ndarray): The rotation vector (from cv2.solvePnP) describing world to camera.
-        tvec (np.ndarray): The translation vector (from cv2.solvePnP) describing world to camera.
-
-    Returns:
-        np.ndarray: A 3-element NumPy array [X, Y, Z] representing the 3D world coordinates
-                    of the ball on the ground plane (Z will be 0). Returns None if mapping fails.
-    """
     if u is None or v is None:
         logging.debug("CV: map_2d_to_3d received None for u or v.")
         return None
@@ -167,195 +150,180 @@ def map_2d_to_3d_on_ground(u, v, mtx, dist, rvec, tvec):
         logging.debug(f"CV: Pixel ({u},{v}) -> Normalized ({xn:.4f},{yn:.4f})")
 
         ray_direction_camera = np.array([xn, yn, 1.0], dtype=np.float32)
-        ray_direction_camera = ray_direction_camera / np.linalg.norm(ray_direction_camera)
+        
+        R_cw, _ = cv2.Rodrigues(rvec) 
+        R_wc = R_cw.T 
+        camera_origin_world = -R_wc @ tvec.reshape(3) # Camera position in world coordinates
+        ray_direction_world = R_wc @ ray_direction_camera
 
-        R_wc, _ = cv2.Rodrigues(rvec)
-        R_cw = R_wc.T
-        O_world = -np.dot(R_cw, tvec).reshape(3)
-        ray_direction_world = np.dot(R_cw, ray_direction_camera).reshape(3)
-        logging.debug(f"CV: Ray Origin (Camera Pos in World): {O_world}")
+        logging.debug(f"CV: Ray Origin (Camera Pos in World): {camera_origin_world}")
         logging.debug(f"CV: Ray Direction in World: {ray_direction_world}")
-
+        
         if abs(ray_direction_world[2]) < 1e-6:
-            logging.warning("CV: Ray is parallel or near parallel to the ground plane (Z_d is close to 0). Cannot intersect.")
+            logging.warning("CV: Ray is parallel or near parallel to the ground plane. Cannot intersect.")
             return None
 
-        k = -O_world[2] / ray_direction_world[2]
-        logging.debug(f"CV: Solved k for ray-plane intersection: {k:.4f}")
+        # k is the scalar distance along the ray to intersect the Z=0 plane
+        k_ground_intersect = -camera_origin_world[2] / ray_direction_world[2]
+        logging.debug(f"CV: Solved k for ray-plane (Z=0) intersection: {k_ground_intersect:.4f}")
 
-        if k < 0:
-            logging.warning(f"CV: Intersection parameter k ({k:.4f}) is negative. "
-                            "This means the 2D point projects to a 3D point behind the camera's view on the Z=0 plane. ")
-            # Depending on use case, might still return this or None.
-            # For ball on ground, this is likely an error condition or out of bounds.
-            # return None 
+        # Point on ground (Z=0) directly under the ball's 3D center
+        Xc_under_center = camera_origin_world[0] + k_ground_intersect * ray_direction_world[0]
+        Yc_under_center = camera_origin_world[1] + k_ground_intersect * ray_direction_world[1]
+        # Zc_under_center is 0.0 by definition
 
-        X_ball = O_world[0] + k * ray_direction_world[0]
-        Y_ball = O_world[1] + k * ray_direction_world[1]
-        Z_ball = 0.0
+        # Now, calculate the visually tangent ground contact point
+        R_ball = Config.VOLLEYBALL_RADIUS_M # The VOLLEYBALL_RADIUS_M is defined in Config.py and used by CvFunctions.py
+        
+        # Camera position in world coordinates
+        Cx_cam = camera_origin_world[0]
+        Cy_cam = camera_origin_world[1]
+        Cz_cam = camera_origin_world[2]
 
-        world_coords = np.array([X_ball, Y_ball, Z_ball], dtype=np.float32)
-        logging.info(f"CV: Mapped 2D ({u},{v}) to 3D World ({X_ball:.3f}, {Y_ball:.3f}, {Z_ball:.3f})m")
-        return world_coords
+        # The 3D center of the ball is (Xc_under_center, Yc_under_center, R_ball)
+        # Height difference between camera and the ball's 3D center
+        height_diff_cam_to_ball_center = Cz_cam - R_ball
+        
+        world_coords_final_contact = None
+
+        if height_diff_cam_to_ball_center <= 1e-3: # Camera is at or below ball center's height, or too close
+            logging.warning(f"CV: Camera height ({Cz_cam:.2f}m) is too close to or below ball center height ({R_ball:.2f}m). "
+                            "Perspective visual contact point calculation might be unstable or invalid. "
+                            "Returning contact point directly under ball center.")
+            world_coords_final_contact = np.array([Xc_under_center, Yc_under_center, 0.0], dtype=np.float32)
+        else:
+            # Calculate the coordinates of the point on the ground (Z=0) that is
+            # visually tangent to the bottom of the ball from the camera's perspective.
+            # X_visual_contact = Xc_under_center - R_ball * (DeltaX_cam_to_ball_center_projection) / height_diff_cam_to_ball_center
+            # DeltaX_cam_to_ball_center_projection is (Xc_under_center - Cx_cam)
+            
+            X_visual_contact = Xc_under_center - R_ball * (Xc_under_center - Cx_cam) / height_diff_cam_to_ball_center
+            Y_visual_contact = Yc_under_center - R_ball * (Yc_under_center - Cy_cam) / height_diff_cam_to_ball_center
+            Z_visual_contact = 0.0 # This point is on the ground plane
+
+            logging.info(f"CV: Original contact (under center): ({Xc_under_center:.3f}, {Yc_under_center:.3f}). "
+                         f"Calculated visual ground contact: ({X_visual_contact:.3f}, {Y_visual_contact:.3f}). "
+                         f"Cam Pos: ({Cx_cam:.2f}, {Cy_cam:.2f}, {Cz_cam:.2f}), Ball Radius: {R_ball:.2f}m.")
+            world_coords_final_contact = np.array([X_visual_contact, Y_visual_contact, Z_visual_contact], dtype=np.float32)
+        
+        return world_coords_final_contact
 
     except Exception as e:
         logging.error(f"CV: Error during 2D to 3D mapping: {e}", exc_info=True)
         return None
-
+    
 
 def draw_ball_on_frame(frame, u, v, radius_px):
-    """Draws a circle and center for the detected ball on the frame."""
-    if frame is None: return frame # Return frame if it's None
+    if frame is None: return frame
     if u is not None and v is not None and radius_px is not None:
-        cv2.circle(frame, (int(u), int(v)), int(radius_px), (0, 255, 0), 2)
-        cv2.circle(frame, (int(u), int(v)), 3, (0, 0, 255), -1)
+        try:
+            cv2.circle(frame, (int(u), int(v)), int(radius_px), (0, 255, 0), 2) 
+            cv2.circle(frame, (int(u), int(v)), 3, (0, 0, 255), -1) 
+        except Exception as e:
+            logging.error(f"CV: Error drawing ball on frame: {e}", exc_info=True)
     return frame
 
 def draw_3d_info_on_frame(frame, world_coords_3d, ball_radius_m):
-    """Displays the 3D world coordinates on the frame."""
-    if frame is None: return frame # Return frame if it's None
+    if frame is None: return frame
     if world_coords_3d is not None:
         text_x = f"X: {world_coords_3d[0]:.2f}m"
         text_y = f"Y: {world_coords_3d[1]:.2f}m"
-        text_z_vis = f"Z_vis: {ball_radius_m:.2f}m (center)"
+        text_z_contact = f"Z_contact: {world_coords_3d[2]:.2f}m"
 
-        cv2.putText(frame, text_x, (10, frame.shape[0] - 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(frame, text_y, (10, frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-        cv2.putText(frame, text_z_vis, (10, frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        try:
+            cv2.putText(frame, text_x, (10, frame.shape[0] - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            cv2.putText(frame, text_y, (10, frame.shape[0] - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+            cv2.putText(frame, text_z_contact, (10, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+        except Exception as e:
+             logging.error(f"CV: Error drawing 3D info on frame: {e}", exc_info=True)
     return frame
 
 def draw_axes_on_frame(frame, rvec, tvec, mtx, dist, axis_length_m=0.5):
-    """
-    Projects and draws the world coordinate axes onto the image.
-    Args:
-        frame (np.ndarray): The image to draw on.
-        rvec (np.ndarray): Rotation vector of the world w.r.t camera.
-        tvec (np.ndarray): Translation vector of the world w.r.t camera.
-        mtx (np.ndarray): Camera intrinsic matrix.
-        dist (np.ndarray): Camera distortion coefficients.
-        axis_length_m (float): Length of the axes to draw in meters.
-    Returns:
-        np.ndarray: Frame with axes drawn.
-    """
-    if frame is None: return frame # Return frame if it's None
+    if frame is None: return frame
     if rvec is None or tvec is None or mtx is None or dist is None:
-        # Optionally log this state if it's unexpected for axes not to be drawn
-        # logging.debug("CV: Cannot draw axes due to missing rvec, tvec, mtx, or dist.")
         return frame
 
     axis_points_3d = np.float32([
-        [0, 0, 0],
-        [axis_length_m, 0, 0],
-        [0, axis_length_m, 0],
-        [0, 0, axis_length_m]
+        [0, 0, 0], [axis_length_m, 0, 0], [0, axis_length_m, 0], [0, 0, axis_length_m]
     ]).reshape(-1, 3)
 
     try:
         image_points, _ = cv2.projectPoints(axis_points_3d, rvec, tvec, mtx, dist)
         image_points = np.int32(image_points.reshape(-1, 2))
 
-        origin_2d = tuple(image_points[0])
-        x_axis_end_2d = tuple(image_points[1])
-        y_axis_end_2d = tuple(image_points[2])
-        z_axis_end_2d = tuple(image_points[3])
+        origin_2d, x_axis_end_2d, y_axis_end_2d, z_axis_end_2d = \
+            tuple(image_points[0]), tuple(image_points[1]), tuple(image_points[2]), tuple(image_points[3])
 
-        cv2.line(frame, origin_2d, x_axis_end_2d, (255, 0, 0), 3)
-        cv2.line(frame, origin_2d, y_axis_end_2d, (0, 255, 0), 3)
-        cv2.line(frame, origin_2d, z_axis_end_2d, (0, 0, 255), 3)
+        cv2.line(frame, origin_2d, x_axis_end_2d, (255, 0, 0), 2)  # Blue X
+        cv2.line(frame, origin_2d, y_axis_end_2d, (0, 255, 0), 2)  # Green Y
+        cv2.line(frame, origin_2d, z_axis_end_2d, (0, 0, 255), 2)  # Red Z
 
-        cv2.putText(frame, "X", (x_axis_end_2d[0] + 5, x_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,0,0), 2)
-        cv2.putText(frame, "Y", (y_axis_end_2d[0] + 5, y_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
-        cv2.putText(frame, "Z", (z_axis_end_2d[0] + 5, z_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
-
+        cv2.putText(frame, "X", (x_axis_end_2d[0] + 5, x_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0), 2)
+        cv2.putText(frame, "Y", (y_axis_end_2d[0] + 5, y_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+        cv2.putText(frame, "Z", (z_axis_end_2d[0] + 5, z_axis_end_2d[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 2)
     except Exception as e:
-        logging.error(f"CV: Error drawing axes: {e}")
-
+        logging.error(f"CV: Error drawing axes: {e}", exc_info=True)
     return frame
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    # To test CvFunctions with your image:
+    # 1. Make sure Config.py is in the same directory or Python path.
+    # 2. Set DEBUG_MASKS = True at the top of this file.
+    # 3. Put your 'volleyball.jpg' in the same directory.
+    # 4. Uncomment and run the block below.
+
+    logging.basicConfig(level=logging.DEBUG, format=Config.LOG_FORMAT, datefmt=Config.LOG_DATE_FORMAT)
+    DEBUG_MASKS = True # Override for standalone testing
     
-    # Test block requires Config.py to be in the same directory or Python path
-    # and specific config values to be set.
-    
-    # Example: Test undistortion
-    # mock_frame = np.zeros((Config.CAM_REQUESTED_HEIGHT, Config.CAM_REQUESTED_WIDTH, 3), dtype=np.uint8) # Needs Config
-    # cv2.putText(mock_frame, "Original Test Frame (Distorted)", (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255),2)
-    # mock_mtx = Config.CAMERA_INTRINSIC_MTX 
-    # mock_dist = Config.CAMERA_DIST_COEFFS 
-    # if mock_mtx is not None and mock_dist is not None and mock_frame is not None:
-    #     mock_new_mtx, _ = cv2.getOptimalNewCameraMatrix(mock_mtx, mock_dist, 
-    #                                                   (mock_frame.shape[1], mock_frame.shape[0]), 1, 
-    #                                                   (mock_frame.shape[1], mock_frame.shape[0]))
-    #
-    #     undistorted_test_frame = undistort_frame(mock_frame, mock_mtx, mock_dist, mock_new_mtx)
-    #     if undistorted_test_frame is not None:
-    #         cv2.imshow("Original", mock_frame)
-    #         cv2.imshow("Undistorted Test", undistorted_test_frame)
-    #         logging.info("Displaying original and undistorted test frames. Press any key to continue.")
-    #         cv2.waitKey(0)
-    #         cv2.destroyAllWindows()
-    # else:
-    #     logging.warning("CV Test: Could not run undistortion test due to missing mock data or Config values.")
+    # Load the test image
+    test_image_path = 'volleyball.jpg' # Make sure this image is in the same directory
+    test_frame = cv2.imread(test_image_path)
+
+    if test_frame is None:
+        logging.error(f"Could not load test image: {test_image_path}")
+    else:
+        logging.info(f"Test image {test_image_path} loaded successfully.")
+        # Mock camera matrix and distortion for testing detect_volleyball_2d (undistortion won't be real)
+        # These should ideally come from your actual calibration file if you want to test undistortion too
+        h, w = test_frame.shape[:2]
+        mock_mtx = np.array([[w, 0, w/2], [0, h, h/2], [0,0,1]], dtype=float) # Focal length approx image width/height
+        mock_dist = np.zeros((1,5), dtype=float) # Assume no distortion for this isolated test
+        
+        # Since detect_volleyball_2d expects an undistorted frame, we can pass the original if not testing undistortion
+        # Or, pass it through undistort_frame with mock parameters (will effectively do nothing if dist is zero)
+        undistorted_test_frame = undistort_frame(test_frame, mock_mtx, mock_dist, mock_mtx)
+
+        logging.info("Detecting volleyball in test image...")
+        u_ball, v_ball, r_ball, dbg_mask_out = detect_volleyball_2d(undistorted_test_frame, roi=None)
+
+        if u_ball is not None:
+            logging.info(f"Test: Ball detected at ({u_ball}, {v_ball}) with radius {r_ball}px.")
+            draw_ball_on_frame(undistorted_test_frame, u_ball, v_ball, r_ball)
+        else:
+            logging.info("Test: Ball NOT detected.")
+
+        # Display the original image with detection overlay
+        cv2.imshow("Ball Detection Test on Image", undistorted_test_frame)
+        
+        # The dbg_mask_out from detect_volleyball_2d is the final mask used for contour detection
+        if dbg_mask_out is not None:
+             cv2.imshow("Returned Debug Mask (from detect_volleyball_2d)", dbg_mask_out)
+
+        logging.info("Displaying test results. Press 'q' in any OpenCV window to quit.")
+        
+        # Keep windows open until 'q' is pressed
+        while True:
+            key = cv2.waitKey(100) & 0xFF
+            if key == ord('q'):
+                break
+            # Check if any window was closed by user
+            if cv2.getWindowProperty("Ball Detection Test on Image", cv2.WND_PROP_VISIBLE) < 1:
+                break
+            if DEBUG_MASKS: # if debug windows were created
+                if cv2.getWindowProperty("Morphed (Final) Mask", cv2.WND_PROP_VISIBLE) < 1:
+                    break
 
 
-    # Example: Test ball detection (requires a sample image with a ball and Config values)
-    # sample_image_path = "path_to_your_sample_image_with_ball.jpg" 
-    # try:
-    #     test_ball_frame = cv2.imread(sample_image_path)
-    #     if test_ball_frame is None: raise FileNotFoundError(f"File not found: {sample_image_path}")
-    #
-    #     # Ensure Config values used in detect_volleyball_2d are valid
-    #     u_ball, v_ball, r_ball, dbg_mask = detect_volleyball_2d(test_ball_frame, roi=Config.BALL_DETECTION_ROI) # Needs Config
-    #
-    #     if u_ball is not None:
-    #         logging.info(f"Test: Ball detected at ({u_ball}, {v_ball}) with radius {r_ball}px.")
-    #         draw_ball_on_frame(test_ball_frame, u_ball, v_ball, r_ball)
-    #         if dbg_mask is not None: cv2.imshow("Detection Mask", dbg_mask)
-    #     else:
-    #         logging.info("Test: Ball not detected.")
-    #
-    #     cv2.imshow("Ball Detection Test", test_ball_frame)
-    #     logging.info("Displaying ball detection test frame. Press any key to continue.")
-    #     cv2.waitKey(0)
-    #     cv2.destroyAllWindows()
-    # except FileNotFoundError as e:
-    #     logging.warning(f"CV Test: Sample image for ball detection test not found. {e}")
-    # except AttributeError as e:
-    #     logging.error(f"CV Test: Error in ball detection test - likely missing Config attribute: {e}")
-    # except Exception as e:
-    #     logging.error(f"CV Test: Error in ball detection test: {e}")
-
-
-    # Example: Test 2D to 3D mapping (requires Config values and calibrated parameters)
-    # test_u, test_v = Config.CAM_REQUESTED_WIDTH // 2, Config.CAM_REQUESTED_HEIGHT // 2 # Needs Config
-    #
-    # test_mtx = Config.CAMERA_INTRINSIC_MTX # Needs Config
-    # test_dist = Config.CAMERA_DIST_COEFFS # Needs Config
-    # mock_rvec = np.array([0.0, 0.0, 0.0], dtype=np.float32) 
-    # mock_tvec = np.array([0.0, 0.0, 2.0], dtype=np.float32) 
-    #
-    # if test_mtx is not None and test_dist is not None:
-    #     try:
-    #         # Load real calibration if available for a more meaningful test
-    #         calib_data = np.load(Config.CALIBRATION_DATA_FILE) # Needs Config
-    #         test_mtx = calib_data['camera_matrix']
-    #         test_dist = calib_data['dist_coeffs']
-    #         logging.info(f"Loaded real calibration data for 2D-3D test from {Config.CALIBRATION_DATA_FILE}")
-    #     except FileNotFoundError:
-    #         logging.warning(f"Calibration file {Config.CALIBRATION_DATA_FILE} not found. Using placeholder mtx/dist for 2D-3D test.")
-    #     except KeyError:
-    #         logging.warning(f"Calibration file {Config.CALIBRATION_DATA_FILE} has incorrect format. Using placeholder mtx/dist.")
-    #     except Exception as e:
-    #         logging.warning(f"Could not load calibration data for test: {e}")
-    #
-    #     coords_3d = map_2d_to_3d_on_ground(test_u, test_v, test_mtx, test_dist, mock_rvec, mock_tvec)
-    #     if coords_3d is not None:
-    #         logging.info(f"Test: Mapped 2D ({test_u},{test_v}) to 3D World ({coords_3d[0]:.3f}, {coords_3d[1]:.3f}, {coords_3d[2]:.3f})m")
-    #     else:
-    #         logging.warning("Test: 2D to 3D mapping failed.")
-    # else:
-    #     logging.warning("CV Test: Cannot run 2D to 3D mapping test due to missing Config mtx/dist.")
-
-    logging.info("cv_functions.py standalone tests finished (commented out or depend on valid Config).")
+        cv2.destroyAllWindows()
+        logging.info("cv_functions.py standalone test finished.")
