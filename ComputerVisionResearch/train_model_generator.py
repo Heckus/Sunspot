@@ -12,27 +12,28 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from keras.models import Sequential
 from keras.layers import Conv2D, MaxPooling2D, Dropout
+# Import the callbacks
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 
 # =============================================================================
 # Configuration
 # =============================================================================
-# --- IMPORTANT: Set these paths correctly ---
-DATASET_BASE_PATH = '/home/hecke/Code/SJN-210k'
-OUTPUT_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection' # Or a local path
+DATASET_BASE_PATH = '/home/hecke/Documents/SJN-210k'
+OUTPUT_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection'
 
-# --- Model Paths ---
-BBOX_MODEL_PATH = os.path.join(OUTPUT_DIR, 'number_detection.h5')
-CLASSIFICATION_MODEL_PATH = os.path.join(OUTPUT_DIR, 'numbers_classifier_multidigit.h5')
+# Updated model paths to reflect they are the "best" versions
+BBOX_MODEL_PATH = os.path.join(OUTPUT_DIR, 'number_detection_best.h5')
+CLASSIFICATION_MODEL_PATH = os.path.join(OUTPUT_DIR, 'numbers_classifier_multidigit_best.h5')
 
-# --- Training Parameters ---
 IMG_WIDTH = 224
 IMG_HEIGHT = 224
-BATCH_SIZE = 8    # Kept small for hardware with limited RAM/VRAM
+BATCH_SIZE = 16
 NUM_CLASSES = 100
-EPOCHS = 10       # Start with a smaller number to test the full pipeline
+# Set a high number of epochs; EarlyStopping will find the best time to stop.
+EPOCHS = 100 
 
 # =============================================================================
-# Universal Data Loading Function
+# Data Loading and Generator Classes (Unchanged)
 # =============================================================================
 def load_sample_descriptions(label_file_path, image_base_dir):
     """Loads and parses the label file once to create a list of all valid samples."""
@@ -63,15 +64,11 @@ def load_sample_descriptions(label_file_path, image_base_dir):
             endX, endY = coords.max(axis=0)
             
             samples.append({
-                'img_path': img_path, 
-                'class_id': class_id,
+                'img_path': img_path, 'class_id': class_id,
                 'bbox': [startX, startY, endX, endY]
             })
     return samples
 
-# =============================================================================
-# Data Generator for Bounding Box Detection
-# =============================================================================
 class BboxDataGenerator(Sequence):
     """Generates batches of full images and bbox coordinates."""
     def __init__(self, samples, batch_size):
@@ -94,10 +91,7 @@ class BboxDataGenerator(Sequence):
             X[i,] = resized_image / 255.0
             y[i,] = sample['bbox']
         return X, y
-
-# =============================================================================
-# Data Generator for Number Classification
-# =============================================================================
+    
 class JerseyNumberGenerator(Sequence):
     """Generates batches of cropped number images and their class labels."""
     def __init__(self, samples, batch_size, num_classes):
@@ -111,42 +105,38 @@ class JerseyNumberGenerator(Sequence):
     def __getitem__(self, index):
         batch_samples = self.samples[index * self.batch_size:(index + 1) * self.batch_size]
         batch_X, batch_y = [], []
-
         for sample in batch_samples:
             original_image = cv2.imread(sample['img_path'])
             if original_image is None: continue
             original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
             h, w, _ = original_image.shape
-            
-            startX, startY, endX, endY = sample['bbox']
+            coords = np.array(sample['coords']).reshape(4, 2)
+            startX, startY = coords.min(axis=0)
+            endX, endY = coords.max(axis=0)
             xmin, ymin = int(startX * w), int(startY * h)
             xmax, ymax = int(endX * w), int(endY * h)
-            
             number_crop = original_image[ymin:ymax, xmin:xmax]
             if number_crop.shape[0] == 0 or number_crop.shape[1] == 0: continue
-            
             resized_crop = cv2.resize(number_crop, (IMG_HEIGHT, IMG_WIDTH))
             batch_X.append(resized_crop / 255.0)
             batch_y.append(sample['class_id'])
-            
         return np.array(batch_X), to_categorical(np.array(batch_y), num_classes=self.num_classes)
 
+
 # =============================================================================
-# Training Functions
+# Training Functions (Updated with Callbacks)
 # =============================================================================
 
 def train_number_bbox_detector(train_samples, test_samples):
-    """Trains the bounding box detection model using the efficient MobileNetV2 base."""
+    """Trains the bounding box detection model with callbacks."""
     print("\n[INFO] Training the number bounding box detector...")
     
     train_generator = BboxDataGenerator(train_samples, BATCH_SIZE)
     test_generator = BboxDataGenerator(test_samples, BATCH_SIZE)
 
-    # Use MobileNetV2 for better performance on less powerful hardware
-    base_model = MobileNetV2(weights="imagenet", include_top=False,
-                             input_tensor=Input(shape=(224, 224, 3)))
-    base_model.trainable = False # Freeze base layers for faster training
-
+    base_model = MobileNetV2(weights="imagenet", include_top=False, input_tensor=Input(shape=(224, 224, 3)))
+    base_model.trainable = False
+    
     flatten = Flatten()(base_model.output)
     bboxHead = Dense(128, activation="relu")(flatten)
     bboxHead = Dense(64, activation="relu")(bboxHead)
@@ -156,19 +146,20 @@ def train_number_bbox_detector(train_samples, test_samples):
 
     opt = Adam(learning_rate=1e-4)
     model.compile(loss="mse", optimizer=opt)
-    print("--- Bounding Box Detector Model Summary ---")
-    print(model.summary())
+    
+    # --- Define Callbacks for BBox Detector ---
+    # Save the best model based on validation loss
+    checkpoint = ModelCheckpoint(BBOX_MODEL_PATH, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
+    # Stop training if val_loss doesn't improve for 5 consecutive epochs
+    early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='min')
 
     print("[INFO] Starting BBox detector training...")
-    model.fit(train_generator, validation_data=test_generator, epochs=EPOCHS)
-    
-    print(f"[INFO] Saving BBox model to {BBOX_MODEL_PATH}...")
-    model.save(BBOX_MODEL_PATH)
+    model.fit(train_generator, validation_data=test_generator, epochs=EPOCHS, callbacks=[checkpoint, early_stopping])
     print("[INFO] BBox model training complete.")
 
 
 def train_number_classifier(train_samples, test_samples):
-    """Trains the number classification model."""
+    """Trains the number classification model with callbacks."""
     print("\n[INFO] Training the multi-digit number classifier...")
     
     train_generator = JerseyNumberGenerator(train_samples, BATCH_SIZE, NUM_CLASSES)
@@ -193,14 +184,15 @@ def train_number_classifier(train_samples, test_samples):
     ])
 
     classifier.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    print("\n--- Number Classifier Model Summary ---")
-    print(classifier.summary())
-    
+
+    # --- Define Callbacks for Classifier ---
+    # Save the best model based on validation accuracy
+    checkpoint = ModelCheckpoint(CLASSIFICATION_MODEL_PATH, monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+    # Stop training if val_loss doesn't improve for 10 consecutive epochs (patience is higher here)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min')
+
     print("[INFO] Starting classifier training...")
-    classifier.fit(train_generator, validation_data=test_generator, epochs=EPOCHS)
-    
-    print(f"[INFO] Saving classifier model to {CLASSIFICATION_MODEL_PATH}...")
-    classifier.save(CLASSIFICATION_MODEL_PATH)
+    classifier.fit(train_generator, validation_data=test_generator, epochs=EPOCHS, callbacks=[checkpoint, early_stopping])
     print("[INFO] Classifier training complete.")
 
 # =============================================================================
@@ -221,7 +213,7 @@ if __name__ == '__main__':
     if not train_samples_list or not test_samples_list:
         print("[ERROR] No valid samples found. Please check dataset paths and label files.")
     else:
-        # Train both models sequentially
+        # Run both training processes sequentially
         train_number_bbox_detector(train_samples_list, test_samples_list)
         train_number_classifier(train_samples_list, test_samples_list)
         
