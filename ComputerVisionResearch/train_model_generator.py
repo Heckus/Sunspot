@@ -21,7 +21,7 @@ OUTPUT_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection'
 NUMBER_CLASSIFICATION_MODEL_PATH = os.path.join(OUTPUT_DIR, 'numbers_classifier_multidigit.h5')
 IMG_WIDTH = 224
 IMG_HEIGHT = 224
-BATCH_SIZE = 32 # You can adjust this based on your GPU memory
+BATCH_SIZE = 4 # You can adjust this based on your GPU memory
 NUM_CLASSES = 100
 
 # =============================================================================
