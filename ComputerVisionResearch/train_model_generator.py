@@ -1,4 +1,4 @@
-# train_model_generator.py (Corrected for Pi 5)
+# train_model_generator.py (Final Corrected Version)
 
 import os
 import cv2
@@ -11,20 +11,20 @@ from keras.layers import Conv2D, MaxPooling2D, Dropout, Flatten, Dense
 # =============================================================================
 # Configuration
 # =============================================================================
-
-DATASET_BASE_PATH = '/home/hecke/Documents/SJN-210k' #<-- SET THIS TO YOUR PATH
+DATASET_BASE_PATH = '/home/hecke/Code/SJN-210k'
 OUTPUT_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection'
 NUMBER_CLASSIFICATION_MODEL_PATH = os.path.join(OUTPUT_DIR, 'numbers_classifier_multidigit.h5')
 
 IMG_WIDTH = 224
 IMG_HEIGHT = 224
-BATCH_SIZE = 8  # Reduced batch size for Raspberry Pi's limited RAM
+BATCH_SIZE = 8
 NUM_CLASSES = 100
-EPOCHS = 10     # Start with fewer epochs to test, then increase to 80 later
+EPOCHS = 1
 
 # =============================================================================
-# Data Generator (Keras Sequence) - Unchanged
+# Data Generator (Keras Sequence) - Corrected
 # =============================================================================
+
 class JerseyNumberGenerator(Sequence):
     """A memory-efficient Keras Sequence to generate batches of data."""
     def __init__(self, label_file_path, image_base_dir, batch_size, num_classes):
@@ -35,51 +35,73 @@ class JerseyNumberGenerator(Sequence):
         self._load_samples(label_file_path)
 
     def _load_samples(self, label_file_path):
+        """Loads and parses the label file to create a list of valid samples."""
         if not os.path.exists(label_file_path): return
         with open(label_file_path, 'r') as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) != 11: continue
+                
+                img_name = parts[0]
+                img_path = os.path.join(self.image_base_dir, img_name)
+                # Pre-filter to ensure the image file actually exists before adding to list
+                if not os.path.exists(img_path):
+                    continue
+
                 num1, num2 = int(parts[1]), int(parts[2])
                 if num1 == 10: continue
                 class_id = num1 if num2 == 10 else num1 * 10 + num2
+
                 self.samples.append({
-                    'img_name': parts[0], 'class_id': class_id,
+                    'img_path': img_path, 
+                    'class_id': class_id,
                     'coords': [float(p) for p in parts[3:]]
                 })
 
     def __len__(self):
+        """Returns the number of batches per epoch."""
         return int(np.floor(len(self.samples) / self.batch_size))
 
     def __getitem__(self, index):
+        """
+        Generates one batch of data. This version is more robust and
+        handles potential data loading errors gracefully.
+        """
         batch_samples = self.samples[index * self.batch_size:(index + 1) * self.batch_size]
-        X = np.empty((self.batch_size, IMG_HEIGHT, IMG_WIDTH, 3), dtype="float32")
-        y = np.empty((self.batch_size), dtype="int")
 
-        for i, sample in enumerate(batch_samples):
-            img_path = os.path.join(self.image_base_dir, sample['img_name'])
-            original_image = cv2.imread(img_path)
-            if original_image is None: continue
+        # Use lists to collect valid data before converting to numpy arrays
+        batch_X = []
+        batch_y = []
+
+        for sample in batch_samples:
+            original_image = cv2.imread(sample['img_path'])
+            if original_image is None: continue # Skip if image fails to load
+
             original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
             h, w, _ = original_image.shape
+            
             coords = np.array(sample['coords']).reshape(4, 2)
             startX, startY = coords.min(axis=0)
             endX, endY = coords.max(axis=0)
+
             xmin, ymin = int(startX * w), int(startY * h)
             xmax, ymax = int(endX * w), int(endY * h)
+            
             number_crop = original_image[ymin:ymax, xmin:xmax]
             if number_crop.shape[0] == 0 or number_crop.shape[1] == 0: continue
-            resized_crop = cv2.resize(number_crop, (IMG_HEIGHT, IMG_WIDTH))
-            X[i,] = resized_crop / 255.0
-            y[i] = sample['class_id']
             
-        return X, to_categorical(y, num_classes=self.num_classes)
+            resized_crop = cv2.resize(number_crop, (IMG_HEIGHT, IMG_WIDTH))
+            
+            batch_X.append(resized_crop / 255.0)
+            batch_y.append(sample['class_id'])
+            
+        return np.array(batch_X), to_categorical(np.array(batch_y), num_classes=self.num_classes)
 
 # =============================================================================
-# Model Training Function
+# Model Training Function (No changes needed here)
 # =============================================================================
 def train_number_classifier_with_generator():
-    """Trains the number classifier using the corrected architecture and data generator."""
+    """Trains the number classifier using the corrected data generator."""
     print("\n[INFO] Training the multi-digit number classifier with a data generator...")
     
     train_label_path = os.path.join(DATASET_BASE_PATH, 'train', 'train_pos_label.txt')
@@ -90,30 +112,23 @@ def train_number_classifier_with_generator():
     train_generator = JerseyNumberGenerator(train_label_path, train_image_dir, BATCH_SIZE, NUM_CLASSES)
     test_generator = JerseyNumberGenerator(test_label_path, test_image_dir, BATCH_SIZE, NUM_CLASSES)
 
-    # --- CORRECTED MODEL ARCHITECTURE ---
-    # This matches the efficient architecture from your original notebook.
+    # Correct, efficient model architecture
     classifier = Sequential()
     classifier.add(Conv2D(128, (3, 3), input_shape=(224, 224, 3), activation='relu'))
     classifier.add(MaxPooling2D(pool_size=(2, 2)))
     classifier.add(Dropout(0.2))
-
     classifier.add(Conv2D(64, (3, 3), activation='relu'))
     classifier.add(MaxPooling2D(pool_size=(2, 2)))
     classifier.add(Dropout(0.2))
-
     classifier.add(Conv2D(64, (3, 3), activation='relu'))
     classifier.add(MaxPooling2D(pool_size=(2, 2)))
     classifier.add(Dropout(0.2))
-
     classifier.add(Conv2D(32, (3, 3), activation='relu'))
     classifier.add(MaxPooling2D(pool_size=(2, 2)))
     classifier.add(Dropout(0.2))
-
-    # This extra Conv2D was in the original notebook and is important for reducing size
     classifier.add(Conv2D(32, (3, 3), activation='relu'))
     classifier.add(MaxPooling2D(pool_size=(2, 2)))
     classifier.add(Dropout(0.2))
-
     classifier.add(Flatten())
     classifier.add(Dense(units=128, activation='relu'))
     classifier.add(Dense(units=64, activation='relu'))
@@ -124,8 +139,6 @@ def train_number_classifier_with_generator():
     print(classifier.summary())
     
     print("[INFO] Starting training...")
-    # --- CORRECTED .fit() call ---
-    # Removed the 'workers' argument which is not supported on your system.
     H = classifier.fit(
         train_generator,
         validation_data=test_generator,
