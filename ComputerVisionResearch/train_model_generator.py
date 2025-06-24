@@ -15,7 +15,7 @@ from keras.layers import Conv2D, MaxPooling2D, Dropout
 # =============================================================================
 # Configuration
 # =============================================================================
-DATASET_BASE_PATH = '/home/hecke/Code/SJN-210k' #<-- SET THIS TO YOUR PATH
+DATASET_BASE_PATH = '/home/hecke/Documents/SJN-210k' #<-- SET THIS TO YOUR PATH
 OUTPUT_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection'
 
 NUMBER_CLASSIFICATION_MODEL_PATH = os.path.join(OUTPUT_DIR, 'numbers_classifier_multidigit.h5')
