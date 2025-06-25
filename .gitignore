@@ -33,6 +33,12 @@
 # Ignore large data files
 *.pickle
 *.h5
+*.mp4
+*.avi
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
 #CV Virtual Environment
 # pip install tensorflow opencv-python ultralytics matplotlib scikit-learn is ignored
 ComputerVisionResearch/virtualenv/
