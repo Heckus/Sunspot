@@ -129,8 +129,9 @@ class JerseyNumberGenerator(Sequence):
 # =============================================================================
 
 def train_number_bbox_detector(train_samples, test_samples):
-    """Trains the bounding box detection model."""
+    """Trains the bounding box detection model with callbacks."""
     print("\n[INFO] Training the number bounding box detector...")
+    
     train_generator = BboxDataGenerator(train_samples, BATCH_SIZE)
     test_generator = BboxDataGenerator(test_samples, BATCH_SIZE)
 
@@ -150,42 +151,47 @@ def train_number_bbox_detector(train_samples, test_samples):
     checkpoint = ModelCheckpoint(BBOX_MODEL_H5_PATH, monitor='val_loss', save_best_only=True, mode='min', verbose=1)
     early_stopping = EarlyStopping(monitor='val_loss', patience=5, verbose=1, mode='min')
 
+    print("[INFO] Starting BBox detector training...")
     model.fit(train_generator, validation_data=test_generator, epochs=EPOCHS, callbacks=[checkpoint, early_stopping])
     print("[INFO] BBox model training complete.")
 
-    # NEW: Convert the best saved H5 model to TFLite
+    # --- MODIFIED: Added custom_objects to the load_model call ---
     print(f"[INFO] Converting BBox model to TFLite...")
-    converter = tf.lite.TFLiteConverter.from_keras_model(tf.keras.models.load_model(BBOX_MODEL_H5_PATH))
+    custom_objects = {"mse": tf.keras.losses.MeanSquaredError()}
+    loaded_model = tf.keras.models.load_model(BBOX_MODEL_H5_PATH, custom_objects=custom_objects)
+    
+    converter = tf.lite.TFLiteConverter.from_keras_model(loaded_model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
     tflite_model = converter.convert()
+    
     with open(BBOX_MODEL_TFLITE_PATH, 'wb') as f:
         f.write(tflite_model)
     print(f"[INFO] TFLite BBox model saved to {BBOX_MODEL_TFLITE_PATH}")
 
 
 def train_number_classifier(train_samples, test_samples):
-    """Trains the number classification model."""
-    print("\n[INFO] Training the multi-digit number classifier...")
-    train_generator = JerseyNumberGenerator(train_samples, BATCH_SIZE, NUM_CLASSES)
-    test_generator = JerseyNumberGenerator(test_samples, BATCH_SIZE, NUM_CLASSES)
+    # """Trains the number classification model."""
+    # print("\n[INFO] Training the multi-digit number classifier...")
+    # train_generator = JerseyNumberGenerator(train_samples, BATCH_SIZE, NUM_CLASSES)
+    # test_generator = JerseyNumberGenerator(test_samples, BATCH_SIZE, NUM_CLASSES)
     
-    classifier = Sequential([
-        Conv2D(128, (3, 3), input_shape=(224, 224, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
-        Conv2D(64, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
-        Conv2D(64, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
-        Conv2D(32, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
-        Conv2D(32, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
-        Flatten(),
-        Dense(128, activation='relu'), Dense(64, activation='relu'), Dense(64, activation='relu'),
-        Dense(NUM_CLASSES, activation='softmax')
-    ])
-    classifier.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    # classifier = Sequential([
+    #     Conv2D(128, (3, 3), input_shape=(224, 224, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
+    #     Conv2D(64, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
+    #     Conv2D(64, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
+    #     Conv2D(32, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
+    #     Conv2D(32, (3, 3), activation='relu'), MaxPooling2D(pool_size=(2, 2)), Dropout(0.2),
+    #     Flatten(),
+    #     Dense(128, activation='relu'), Dense(64, activation='relu'), Dense(64, activation='relu'),
+    #     Dense(NUM_CLASSES, activation='softmax')
+    # ])
+    # classifier.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     
-    checkpoint = ModelCheckpoint(CLASSIFICATION_MODEL_H5_PATH, monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
-    early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min')
+    # checkpoint = ModelCheckpoint(CLASSIFICATION_MODEL_H5_PATH, monitor='val_accuracy', save_best_only=True, mode='max', verbose=1)
+    # early_stopping = EarlyStopping(monitor='val_loss', patience=10, verbose=1, mode='min')
 
-    classifier.fit(train_generator, validation_data=test_generator, epochs=EPOCHS, callbacks=[checkpoint, early_stopping])
-    print("[INFO] Classifier training complete.")
+    # classifier.fit(train_generator, validation_data=test_generator, epochs=EPOCHS, callbacks=[checkpoint, early_stopping])
+    # print("[INFO] Classifier training complete.")
     
     # NEW: Convert the best saved H5 model to TFLite
     print(f"[INFO] Converting Classifier model to TFLite...")
@@ -215,7 +221,7 @@ if __name__ == '__main__':
         print("[ERROR] No valid samples found. Please check dataset paths and label files.")
     else:
         # Run both training processes sequentially
-        train_number_bbox_detector(train_samples_list, test_samples_list)
+        #train_number_bbox_detector(train_samples_list, test_samples_list)
         train_number_classifier(train_samples_list, test_samples_list)
         
         print("\n[SUCCESS] Both models have been trained and saved.")
