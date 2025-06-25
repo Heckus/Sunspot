@@ -30,7 +30,9 @@
 *.exe
 *.out
 *.app
-
+# Ignore large data files
+*.pickle
+*.h5
 #CV Virtual Environment
 # pip install tensorflow opencv-python ultralytics matplotlib scikit-learn is ignored
 ComputerVisionResearch/virtualenv/
