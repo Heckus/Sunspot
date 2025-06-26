@@ -1,4 +1,4 @@
-# fused_applydetection.py
+# fused_applydetection_final.py
 
 # =============================================================================
 # --- Imports ---
@@ -31,21 +31,21 @@ INPUT_VIDEO_PATH = os.path.join(MODEL_DIR, 'video_samples/input/IMG_9088.mp4')
 OUTPUT_VIDEO_PATH = os.path.join(MODEL_DIR, 'video_samples/output/volleyball_output_fused.mp4')
 
 # MODIFIED: Tuned thresholds and model selection
-YOLO_MODEL = 'yolov8s.pt'  # Switched to a more accurate model
-YOLO_CONF_THRESHOLD = 0.3   # Lowered for better recall
+YOLO_MODEL = 'yolov8s.pt'
+YOLO_CONF_THRESHOLD = 0.3
 NUMBER_CONF_THRESHOLD = 0.5
 
 # NEW: Configuration for performance and tracking
 PROCESSING_WIDTH = 1280
 PROCESSING_HEIGHT = 720
-IOU_THRESHOLD = 0.4  # Threshold for matching objects between frames
-MAX_FRAMES_TO_SKIP = 10  # How many frames an object can be missed before being delisted
-PLAYER_NUM_HISTORY = 15 # Number of recent number detections to store per player
+IOU_THRESHOLD = 0.4
+MAX_FRAMES_TO_SKIP = 10
+PLAYER_NUM_HISTORY = 15
 
 # NEW: Boolean toggles for controlling detection features
 DETECT_PLAYERS = True
 DETECT_BALL = True
-RECOGNIZE_PLAYER_NUMBERS = True  # Note: DETECT_PLAYERS must be True for this to have an effect
+RECOGNIZE_PLAYER_NUMBERS = True
 
 # =============================================================================
 # --- TFLite & Tracking Helper Functions ---
@@ -376,6 +376,7 @@ def main():
 
             if frame_count > 0 and frame_count % 50 == 0:
                 print(f"[INFO] Processed {frame_count} frames...")
+
 
     # --- Cleanup ---
     frame_queue.put(None)
