@@ -41,5 +41,6 @@
 *.tar.xz
 #CV Virtual Environment
 # pip install tensorflow opencv-python ultralytics matplotlib scikit-learn is ignored
-ComputerVisionResearch/virtualenv/
-ComputerVisionResearch/venv/
+ComputerVisionResearch/version1/virtualenv/
+ComputerVisionResearch/version1/venv/
+ComputerVisionResearch/version2/venv/
