@@ -1,5 +1,6 @@
-# yolo_test_harness.py
-# A simplified script to test object detection performance of a YOLOv8 .pt model on a video.
+# yolo_test_harness_cli.py
+# A flexible script to test object detection of a YOLOv8 .pt model on a video.
+# Model and video paths are provided as command-line arguments.
 
 # =============================================================================
 # --- Imports ---
@@ -11,28 +12,16 @@ from ultralytics import YOLO
 import time
 import threading
 import queue
+import argparse # Added for command-line arguments
 
 # =============================================================================
 # --- Configuration ---
 # =============================================================================
-# --- File Paths ---
-# TODO: Set the path to the folder containing your models and videos
-MODEL_DIR = 'drive/MyDrive/Colab Notebooks/numbers_detection' 
-
-# TODO: Set the name of the .pt file you want to test
-YOLO_MODEL_PATH = os.path.join(MODEL_DIR, 'yolov8m.pt') 
-
-# TODO: Set your input and output video paths
-INPUT_VIDEO_PATH = os.path.join(MODEL_DIR, 'video_samples/input/IMG_9086.mp4')
-OUTPUT_VIDEO_PATH = os.path.join(MODEL_DIR, 'video_samples/output/yolo_test_output.mp4')
-
 # --- Detection Settings ---
 # Confidence threshold for YOLO detections. Detections below this will be ignored.
 YOLO_CONF_THRESHOLD = 0.4 
 
 # A list of class IDs that you want to detect. 
-# For example, if your model detects 'player' (class 0) and 'ball' (class 1), 
-# and you only want to see ball detections, you would set this to [1].
 # Set to None to detect all classes in the model.
 CLASSES_TO_DETECT = None # Example: [0, 32] for person and sports ball in COCO
 
@@ -57,72 +46,69 @@ def process_frames(frame_queue, result_queue, yolo_model):
             frame,
             conf=YOLO_CONF_THRESHOLD,
             classes=CLASSES_TO_DETECT,
-            verbose=False # Set to True for detailed console output per frame
+            verbose=False
         )
-
-        # Get the first result object
-        result = results[0]
         
-        # Get the class names from the model
+        result = results[0]
         class_names = result.names
 
         # Iterate through each detected object in the frame
         for box in result.boxes:
-            # Get bounding box coordinates, confidence, and class ID
             coords = [int(i) for i in box.xyxy[0]]
             conf = float(box.conf[0])
             cls_id = int(box.cls[0])
             class_name = class_names.get(cls_id, f"Class {cls_id}")
 
             x1, y1, x2, y2 = coords
-
-            # Draw the bounding box on the frame
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Create the label text (Class Name + Confidence)
+            
             label = f"{class_name}: {conf:.2f}"
-
-            # Draw a filled rectangle for the label background
             (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.rectangle(frame, (x1, y1 - text_height - baseline), (x1 + text_width, y1), (0, 255, 0), -1)
-
-            # Put the label text on the background
             cv2.putText(frame, label, (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-        # Put the processed frame in the result queue
         result_queue.put(frame)
 
 # =============================================================================
 # --- Main Pipeline ---
 # =============================================================================
-def main():
+def main(args):
     """
     Main function to set up the video processing pipeline.
     """
-    print(f"[INFO] Loading YOLO model: {YOLO_MODEL_PATH}")
-    if not os.path.exists(YOLO_MODEL_PATH):
-        print(f"[ERROR] YOLO model file not found at: {YOLO_MODEL_PATH}")
-        return
-    yolo_model = YOLO(YOLO_MODEL_PATH)
-
-    print(f"[INFO] Opening video file: {INPUT_VIDEO_PATH}")
-    video = cv2.VideoCapture(INPUT_VIDEO_PATH)
-    if not video.isOpened():
-        print(f"[ERROR] Could not open video file: {INPUT_VIDEO_PATH}")
-        return
-
-    # Ensure the output directory exists
-    os.makedirs(os.path.dirname(OUTPUT_VIDEO_PATH), exist_ok=True)
+    input_video_path = args.input
+    yolo_model_path = args.model
     
-    # Set up the video writer
+    # Determine output video path
+    if args.output:
+        output_video_path = args.output
+    else:
+        # Auto-generate output path based on input video name
+        base_name, ext = os.path.splitext(os.path.basename(input_video_path))
+        output_dir = os.path.dirname(input_video_path)
+        output_video_path = os.path.join(output_dir, f"{base_name}_output.mp4")
+
+    print(f"[INFO] Loading YOLO model: {yolo_model_path}")
+    if not os.path.exists(yolo_model_path):
+        print(f"[ERROR] YOLO model file not found at: {yolo_model_path}")
+        return
+    yolo_model = YOLO(yolo_model_path)
+
+    print(f"[INFO] Opening video file: {input_video_path}")
+    video = cv2.VideoCapture(input_video_path)
+    if not video.isOpened():
+        print(f"[ERROR] Could not open video file: {input_video_path}")
+        return
+
+    os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
+    
     writer = cv2.VideoWriter(
-        OUTPUT_VIDEO_PATH,
+        output_video_path,
         cv2.VideoWriter_fourcc(*'mp4v'),
         video.get(cv2.CAP_PROP_FPS),
         (PROCESSING_WIDTH, PROCESSING_HEIGHT)
     )
     
-    # Create queues for communication between threads
     frame_queue = queue.Queue(maxsize=8)
     result_queue = queue.Queue()
     
@@ -139,14 +125,11 @@ def main():
     print("[INFO] Reading frames from video...")
     while True:
         ret, frame = video.read()
-        if not ret:
-            break
+        if not ret: break
         
-        # Resize frame and put it into the queue for the worker thread
         resized_frame = cv2.resize(frame, (PROCESSING_WIDTH, PROCESSING_HEIGHT))
         frame_queue.put(resized_frame)
         
-        # If there's a processed frame available, write it to the output video
         if not result_queue.empty():
             processed_frame = result_queue.get()
             writer.write(processed_frame)
@@ -155,10 +138,9 @@ def main():
                 print(f"[INFO] Processed {frame_count} frames...")
 
     print("[INFO] End of video reached. Cleaning up...")
-    frame_queue.put(None)  # Signal the processing thread to terminate
-    processing_thread.join()  # Wait for the thread to finish
+    frame_queue.put(None)
+    processing_thread.join()
 
-    # Write any remaining frames from the result queue
     while not result_queue.empty():
         writer.write(result_queue.get())
         frame_count += 1
@@ -168,13 +150,26 @@ def main():
     fps = frame_count / processing_time if processing_time > 0 else 0
 
     print(f"\n[INFO] Processing complete.")
-    print(f"Output video saved to: {OUTPUT_VIDEO_PATH}")
+    print(f"Output video saved to: {output_video_path}")
     print(f"Total frames processed: {frame_count}, Total time: {processing_time:.2f}s, Estimated FPS: {fps:.2f}")
 
-    # Release resources
     video.release()
     writer.release()
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    main()
+    # Set up the argument parser
+    parser = argparse.ArgumentParser(description="Process a video with a YOLOv8 model to detect objects.")
+    
+    # Required arguments
+    parser.add_argument("-m", "--model", required=True, help="Path to the YOLOv8 .pt model file.")
+    parser.add_argument("-i", "--input", required=True, help="Path to the input video file.")
+    
+    # Optional argument
+    parser.add_argument("-o", "--output", help="Optional. Path to save the output video file. If not provided, it will be saved next to the input file with an '_output' suffix.")
+    
+    # Parse the command-line arguments
+    args = parser.parse_args()
+    
+    # Run the main function
+    main(args)
