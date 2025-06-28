@@ -1,6 +1,7 @@
 # yolo_test_harness_cli.py
 # A flexible script to test object detection of a YOLOv8 .pt model on a video.
 # Model and video paths are provided as command-line arguments.
+# Includes an optional aesthetic trail for ball tracking.
 
 # =============================================================================
 # --- Imports ---
@@ -12,18 +13,24 @@ from ultralytics import YOLO
 import time
 import threading
 import queue
-import argparse # Added for command-line arguments
+import argparse
+from collections import deque # Added for ball trail
 
 # =============================================================================
 # --- Configuration ---
 # =============================================================================
 # --- Detection Settings ---
-# Confidence threshold for YOLO detections. Detections below this will be ignored.
-YOLO_CONF_THRESHOLD = 0.4 
-
-# A list of class IDs that you want to detect. 
-# Set to None to detect all classes in the model.
+YOLO_CONF_THRESHOLD = 0.4
 CLASSES_TO_DETECT = None # Example: [0, 32] for person and sports ball in COCO
+
+# --- Ball Trail Settings ---
+# Set to True to enable the visual trail for the ball
+ENABLE_BALL_TRAIL = True
+# The class name of the ball in your YOLO model. This MUST match the name in your model's .yaml file.
+# The default for the standard COCO model is "sports ball".
+BALL_CLASS_NAME = "volleyball"
+# The number of frames the trail will last.
+BALL_TRAIL_LENGTH = 16
 
 # --- Processing Settings ---
 PROCESSING_WIDTH = 1280
@@ -34,8 +41,12 @@ PROCESSING_HEIGHT = 720
 # =============================================================================
 def process_frames(frame_queue, result_queue, yolo_model):
     """
-    Worker thread function to perform YOLO detection on frames.
+    Worker thread function to perform YOLO detection and draw visuals on frames.
     """
+    # Initialize a deque to store the center points of the ball for the trail
+    if ENABLE_BALL_TRAIL:
+        trail_points = deque(maxlen=BALL_TRAIL_LENGTH)
+
     while True:
         frame = frame_queue.get()
         if frame is None:  # Sentinel value to signal the end
@@ -59,6 +70,14 @@ def process_frames(frame_queue, result_queue, yolo_model):
             cls_id = int(box.cls[0])
             class_name = class_names.get(cls_id, f"Class {cls_id}")
 
+            # --- Ball Trail Logic ---
+            # If ball tracking is enabled and the detected object is a ball, add its center to the trail
+            if ENABLE_BALL_TRAIL and class_name == BALL_CLASS_NAME:
+                x1_b, y1_b, x2_b, y2_b = coords
+                center = ((x1_b + x2_b) // 2, (y1_b + y2_b) // 2)
+                trail_points.append(center)
+
+            # --- Drawing Logic ---
             x1, y1, x2, y2 = coords
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
@@ -66,6 +85,16 @@ def process_frames(frame_queue, result_queue, yolo_model):
             (text_width, text_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
             cv2.rectangle(frame, (x1, y1 - text_height - baseline), (x1 + text_width, y1), (0, 255, 0), -1)
             cv2.putText(frame, label, (x1, y1 - baseline), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+
+        # --- Draw the Ball Trail ---
+        if ENABLE_BALL_TRAIL:
+            for i in range(1, len(trail_points)):
+                if trail_points[i - 1] is None or trail_points[i] is None:
+                    continue
+                # Calculate thickness to make the trail fade out
+                thickness = int(np.sqrt(BALL_TRAIL_LENGTH / float(i + 1)) * 2.5)
+                # Draw a line segment for the trail
+                cv2.line(frame, trail_points[i - 1], trail_points[i], (0, 165, 255), thickness)
 
         result_queue.put(frame)
 
@@ -79,13 +108,11 @@ def main(args):
     input_video_path = args.input
     yolo_model_path = args.model
     
-    # Determine output video path
     if args.output:
         output_video_path = args.output
     else:
-        # Auto-generate output path based on input video name
         base_name, ext = os.path.splitext(os.path.basename(input_video_path))
-        output_dir = os.path.dirname(input_video_path)
+        output_dir = os.path.dirname(input_video_path) if os.path.dirname(input_video_path) else '.'
         output_video_path = os.path.join(output_dir, f"{base_name}_output.mp4")
 
     print(f"[INFO] Loading YOLO model: {yolo_model_path}")
@@ -158,18 +185,12 @@ def main(args):
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
-    # Set up the argument parser
-    parser = argparse.ArgumentParser(description="Process a video with a YOLOv8 model to detect objects.")
+    parser = argparse.ArgumentParser(description="Process a video with a YOLOv8 model to detect objects and optionally draw a trail for a specific class.")
     
-    # Required arguments
     parser.add_argument("-m", "--model", required=True, help="Path to the YOLOv8 .pt model file.")
     parser.add_argument("-i", "--input", required=True, help="Path to the input video file.")
-    
-    # Optional argument
     parser.add_argument("-o", "--output", help="Optional. Path to save the output video file. If not provided, it will be saved next to the input file with an '_output' suffix.")
     
-    # Parse the command-line arguments
     args = parser.parse_args()
     
-    # Run the main function
     main(args)
