@@ -206,7 +206,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # --- Step 1: Load the YOLO model ---
-    model = YOLO(args.model)
+    model = YOLO("models/" + args.model)
 
     # --- Step 2: Define the core training parameters ---
     # These are the settings you would normally change for any training run.
@@ -233,3 +233,22 @@ if __name__ == '__main__':
     
     # --- Step 5: Start training using the wrapper function ---
     train_with_config(model, training_parameters, selected_augmentations)
+
+
+
+
+## 2. EVALUATE ON THE TEST SET (AFTER TRAINING IS COMPLETE)
+# from ultralytics import YOLO
+
+# # Load the best model that was saved during training
+# final_model = YOLO("path/to/your/runs/train/exp/weights/best.pt")
+
+# # Evaluate the final model's performance on the test set
+# # Make sure your data.yaml has a 'test:' key pointing to your test images
+# print("\n--- Evaluating on the TEST set ---")
+# metrics = final_model.val(data="path/to/your/data.yaml", split='test')
+
+# print("\n--- Test Set Metrics ---")
+# print(f"mAP50-95: {metrics.box.map:.4f}")
+# print(f"   mAP50: {metrics.box.map50:.4f}")
+# print(f"   mAP75: {metrics.box.map75:.4f}")
