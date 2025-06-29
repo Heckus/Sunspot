@@ -1,168 +1,228 @@
-# interactive_labeler.py (V3 - 'm' to save manual box)
-
 import os
 import cv2
 import numpy as np
 from ultralytics import YOLO
 import argparse
 import yaml
+import math
 
 # =============================================================================
-# --- Global Variables for Manual Drawing ---
+# --- Assistant Detector for MULTIPLE BALLS ---
+# =============================================================================
+class ColorBlobDetector:
+    def __init__(self):
+        self.backSub = cv2.createBackgroundSubtractorMOG2(history=500, varThreshold=50, detectShadows=False)
+        self.lower_yellow = np.array([18, 100, 100])
+        self.upper_yellow = np.array([40, 255, 255])
+        self.frame_count = 0
+        self.warmup_frames = 50
+
+    def detect(self, frame):
+        self.frame_count += 1
+        fgMask = self.backSub.apply(frame)
+        if self.frame_count < self.warmup_frames:
+            return []
+
+        hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        colorMask = cv2.inRange(hsv_frame, self.lower_yellow, self.upper_yellow)
+        combinedMask = cv2.bitwise_and(fgMask, colorMask)
+        kernel = np.ones((11, 11), np.uint8)
+        closed_mask = cv2.morphologyEx(combinedMask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if not contours:
+            return []
+
+        detected_boxes = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area < 100 or area > 20000:
+                continue
+            x, y, w, h = cv2.boundingRect(c)
+            aspect_ratio = w / float(h)
+            if aspect_ratio < 0.7 or aspect_ratio > 1.3:
+                continue
+            hull = cv2.convexHull(c)
+            solidity = area / float(cv2.contourArea(hull))
+            if solidity < 0.85:
+                continue
+            detected_boxes.append((x, y, x + w, y + h))
+        return detected_boxes
+
+# =============================================================================
+# --- Global Variables & Multi-Box Mouse Callback ---
 # =============================================================================
 drawing = False
 ix, iy = -1, -1
-manual_bbox = ()
 WINDOW_NAME = 'Volleyball Labeler'
 
-# =============================================================================
-# --- Mouse Callback Function for Drawing Bounding Boxes ---
-# =============================================================================
-def draw_bounding_box(event, x, y, flags, param):
-    """Callback function for drawing a rectangle with the mouse."""
-    global ix, iy, drawing, manual_bbox
-    frame_to_draw_on = param['frame']
+def multi_box_editor_callback(event, x, y, flags, param):
+    global ix, iy, drawing
+    boxes = param['boxes']
+    frame_copy = param['frame'].copy()
+    # --- FIX 1: Get source_map from the callback parameters ---
+    source_map = param['source_map']
 
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
         ix, iy = x, y
-        manual_bbox = ()
 
     elif event == cv2.EVENT_MOUSEMOVE:
         if drawing:
-            temp_frame = frame_to_draw_on.copy()
-            cv2.rectangle(temp_frame, (ix, iy), (x, y), (0, 255, 0), 2)
-            param['temp_frame'] = temp_frame
+            # --- FIX 2: Pass source_map to the drawing function ---
+            draw_all_boxes(frame_copy, boxes, source_map)
+            cv2.rectangle(frame_copy, (ix, iy), (x, y), (0, 255, 0), 2)
+            cv2.imshow(WINDOW_NAME, frame_copy)
 
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
-        x1, y1 = min(ix, x), min(iy, y)
-        x2, y2 = max(ix, x), max(iy, y)
+        x1, y1, x2, y2 = min(ix, x), min(iy, y), max(ix, x), max(iy, y)
         if x2 > x1 and y2 > y1:
-            manual_bbox = (x1, y1, x2, y2)
-            cv2.rectangle(frame_to_draw_on, manual_bbox[:2], manual_bbox[2:], (0, 255, 0), 2)
-            param['temp_frame'] = frame_to_draw_on.copy()
+            boxes.append((x1, y1, x2, y2))
 
-# (Helper & Core Logic Functions remain the same)
+    elif event == cv2.EVENT_RBUTTONDOWN:
+        if boxes:
+            min_dist, box_to_delete_idx = float('inf'), -1
+            for i, box in enumerate(boxes):
+                center_x, center_y = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+                dist = math.sqrt((center_x - x)**2 + (center_y - y)**2)
+                if dist < min_dist:
+                    min_dist, box_to_delete_idx = dist, i
+            
+            if box_to_delete_idx != -1:
+                box_width = boxes[box_to_delete_idx][2] - boxes[box_to_delete_idx][0]
+                if min_dist < box_width:
+                    boxes.pop(box_to_delete_idx)
+                    # Since a manual box has no source, we don't need to pop from source_map
+                    # The main loop will redraw with the correct colors
+
+# =============================================================================
+# --- Core Functions (Drawing, Saving, etc.) ---
+# =============================================================================
+def draw_all_boxes(frame, boxes, source_map):
+    # This function now correctly receives source_map
+    for i, box in enumerate(boxes):
+        # Manually drawn boxes won't be in the source_map, so they get a default color
+        color = source_map.get(i, (0, 255, 0)) # Default to green for manual
+        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
+
 def convert_to_yolo_format(bbox, img_width, img_height):
     x1, y1, x2, y2 = bbox
-    dw = 1.0 / img_width; dh = 1.0 / img_height
-    x_center = (x1 + x2) / 2.0; y_center = (y1 + y2) / 2.0
-    width = x2 - x1; height = y2 - y1
-    x_center_norm, y_center_norm = x_center * dw, y_center * dh
-    width_norm, height_norm = width * dw, height * dh
-    return f"0 {x_center_norm:.6f} {y_center_norm:.6f} {width_norm:.6f} {height_norm:.6f}"
+    dw, dh = 1.0 / img_width, 1.0 / img_height
+    x_center, y_center = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    width, height = x2 - x1, y2 - y1
+    return f"0 {x_center*dw:.6f} {y_center*dh:.6f} {width*dw:.6f} {height*dh:.6f}"
 
-def save_data(frame, bbox, base_filename, dirs, target_dims):
+def save_labels_and_image(frame, bboxes, base_filename, dirs, target_dims):
     target_width, target_height = target_dims
-    orig_height, orig_width, _ = frame.shape
     resized_frame = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_AREA)
-    x_ratio, y_ratio = target_width / orig_width, target_height / orig_height
-    x1, y1, x2, y2 = bbox
-    scaled_bbox = (int(x1 * x_ratio), int(y1 * y_ratio), int(x2 * x_ratio), int(y2 * y_ratio))
     image_path = os.path.join(dirs['images'], f"{base_filename}.jpg")
-    label_path = os.path.join(dirs['labels'], f"{base_filename}.txt")
     cv2.imwrite(image_path, resized_frame)
-    yolo_label = convert_to_yolo_format(scaled_bbox, target_width, target_height)
+    
+    label_path = os.path.join(dirs['labels'], f"{base_filename}.txt")
+    if not bboxes:
+        open(label_path, 'w').close()
+        return True
+
+    orig_height, orig_width, _ = frame.shape
+    yolo_labels = []
+    # Note: We now scale inside this function, assuming bboxes are for the original frame.
+    for bbox in bboxes:
+        x_ratio, y_ratio = target_width / orig_width, target_height / orig_height
+        x1, y1, x2, y2 = bbox
+        # It's better practice to convert to YOLO format using target dimensions directly
+        yolo_labels.append(convert_to_yolo_format(bbox, orig_width, orig_height))
+
     with open(label_path, 'w') as f:
-        f.write(yolo_label)
+        f.write("\n".join(yolo_labels))
     return True
 
-## --- MODIFIED: Updated instructions
 def print_instructions():
-    """Prints usage instructions to the console."""
-    print("\n--- Volleyball Interactive Labeler ---")
-    print("  's' - Save auto-detection")
-    print("  'd' - Discard detection / drawing / frame")
-    print("  'm' - Enter MANUAL drawing mode. Press 'm' AGAIN to save.")
+    print("\n--- Volleyball Interactive Labeler (Multi-Ball Edition) ---")
+    # ... (instructions remain the same)
     print("  'q' - Quit the application")
-    print("-------------------------------------\n")
+    print("\n--- Review & Edit Mode ---")
+    print("  's' - Save all current boxes and advance")
+    print("  'd' - Discard frame and advance")
+    print("  'c' - Clear all boxes to draw manually")
+    print("  Left-Click & Drag - Add a new box")
+    print("  Right-Click       - Delete the nearest box")
+    print("\n--- Box Colors ---")
+    print("  BLUE   - YOLO Detection")
+    print("  YELLOW - Color Detection Assistant")
+    print("  GREEN  - Manually Drawn Box")
+    print("----------------------------------------------------------\n")
 
 # =============================================================================
 # --- Main Function ---
 # =============================================================================
 def main(args):
-    # (Setup is the same)
-    TARGET_DIMS = (640, 640); YOLO_MODEL = 'yolov8n.pt'
+    TARGET_DIMS = (640, 640); YOLO_MODEL = "Code/modeln_ballV1.pt"
     print_instructions()
-    print("[INFO] Loading YOLOv8 model...")
     yolo_model = YOLO(YOLO_MODEL)
-    video_path = args.video; output_dir = args.output_dir
+    video_path, output_dir = args.video, args.output_dir
     video_filename = os.path.splitext(os.path.basename(video_path))[0]
     dirs = {'images': os.path.join(output_dir, "images"), 'labels': os.path.join(output_dir, "labels")}
     os.makedirs(dirs['images'], exist_ok=True); os.makedirs(dirs['labels'], exist_ok=True)
+    
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened(): print(f"[ERROR] Could not open video file: {video_path}"); return
-    cv2.namedWindow(WINDOW_NAME)
-    frame_idx = 0; saved_frame_count = 0
     
+    frame_idx, saved_frame_count = 0, 0
+    assistant_detector = ColorBlobDetector()
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
+        frame = cv2.rotate(frame,cv2.ROTATE_180)
+        yolo_results = yolo_model.predict(frame, conf=args.conf, classes=[0], verbose=False)
+        current_boxes = [ [int(i) for i in box.xyxy[0]] for box in yolo_results[0].boxes ]
+        source_map = {i: (255, 100, 0) for i in range(len(current_boxes))} # Blue for YOLO
 
-        yolo_results = yolo_model.predict(frame, conf=args.conf, classes=[32], verbose=False)
-        detections = [ [int(i) for i in box.xyxy[0]] for box in yolo_results[0].boxes ]
-        display_frame = frame.copy()
-        
-        if detections:
-            final_ball_box = detections[0]
-            x1, y1, x2, y2 = final_ball_box
-            cv2.rectangle(display_frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-            cv2.putText(display_frame, "Auto: Save (s) or Discard (d)?", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
-            cv2.imshow(WINDOW_NAME, display_frame)
-            key = cv2.waitKey(0) & 0xFF
-            if key == ord('s'):
-                base_filename = f"{video_filename}_frame_{frame_idx:06d}"
-                if save_data(frame, final_ball_box, base_filename, dirs, TARGET_DIMS):
-                    saved_frame_count += 1
-                    print(f"Saved auto-detection for frame {frame_idx}")
-            elif key == ord('d'): print(f"Discarded auto-detection for frame {frame_idx}")
-            elif key == ord('q'): break
-        else:
-            cv2.putText(display_frame, "No Detection: Skip (d) or Manual (m)?", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            cv2.imshow(WINDOW_NAME, display_frame)
-            key = cv2.waitKey(0) & 0xFF
+        if not current_boxes:
+            assistant_boxes = assistant_detector.detect(frame)
+            if assistant_boxes:
+                current_boxes = assistant_boxes
+                source_map = {i: (0, 255, 255) for i in range(len(current_boxes))} # Yellow
 
-            if key == ord('m'):
-                global manual_bbox
-                manual_bbox = ()
-                
-                callback_param = {'frame': frame.copy(), 'temp_frame': frame.copy()}
-                ## --- MODIFIED: Updated on-screen instructions
-                cv2.putText(callback_param['frame'], "Draw box. Then: Save (m) or Discard (d)", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                callback_param['temp_frame'] = callback_param['frame'].copy()
+        cv2.namedWindow(WINDOW_NAME)
+        # --- FIX 3: Add source_map to the dictionary passed to the callback ---
+        callback_param = {'boxes': current_boxes, 'frame': frame, 'source_map': source_map}
+        cv2.setMouseCallback(WINDOW_NAME, multi_box_editor_callback, callback_param)
 
-                cv2.setMouseCallback(WINDOW_NAME, draw_bounding_box, callback_param)
-                
-                while True: 
-                    cv2.imshow(WINDOW_NAME, callback_param['temp_frame'])
-                    ## --- MODIFIED: The key to break the loop is now 'm' instead of 's'
-                    key_manual = cv2.waitKey(1) & 0xFF
-                    if key_manual in [ord('m'), ord('d'), ord('q')]:
-                        break
-                
-                ## --- MODIFIED: The key to save is now 'm' instead of 's'
-                if key_manual == ord('m') and manual_bbox:
-                    base_filename = f"{video_filename}_frame_{frame_idx:06d}"
-                    if save_data(frame, manual_bbox, base_filename, dirs, TARGET_DIMS):
-                        saved_frame_count += 1
-                        print(f"Saved MANUAL label for frame {frame_idx}")
-                elif key_manual == ord('q'):
-                    break 
-                else: # This will catch the 'd' key or 'm' without a box drawn
-                    print(f"Discarded manual annotation for frame {frame_idx}")
-
-                cv2.setMouseCallback(WINDOW_NAME, lambda *args: None)
+        while True:
+            frame_copy = frame.copy()
+            # The main loop's draw call always has access to the correct source_map
+            draw_all_boxes(frame_copy, current_boxes, source_map)
             
-            elif key == ord('d'): pass
-            elif key == ord('q'): break
+            info_text = "'s' Save | 'd' Discard | 'c' Clear | 'q' Quit"
+            cv2.putText(frame_copy, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2, cv2.LINE_AA)
+            cv2.imshow(WINDOW_NAME, frame_copy)
 
+            key = cv2.waitKey(20) & 0xFF
+            
+            if key == ord('q'):
+                cap.release()
+                break
+            elif key == ord('s'):
+                base_filename = f"{video_filename}_frame_{frame_idx:06d}"
+                # The save function now correctly takes the original frame and its boxes
+                if save_labels_and_image(frame, current_boxes, base_filename, dirs, TARGET_DIMS):
+                    saved_frame_count += 1
+                    print(f"Saved {len(current_boxes)} boxes for frame {frame_idx}")
+                break
+            elif key == ord('d'):
+                print(f"Discarded frame {frame_idx}")
+                break
+            elif key == ord('c'):
+                current_boxes.clear()
+                source_map.clear()
+        
+        if not cap.isOpened(): break
         frame_idx += 1
-
-    # (Cleanup is the same)
-    print(f"\n[INFO] Exiting. Total images saved: {saved_frame_count}")
-    cap.release()
+    
     cv2.destroyAllWindows()
+    print(f"\n[INFO] Exiting. Total images saved: {saved_frame_count}")
     yaml_path = os.path.join(output_dir, "data.yaml")
     abs_output_dir = os.path.abspath(output_dir)
     yaml_data = {'path': abs_output_dir, 'train': 'images', 'val': 'images', 'names': {0: 'volleyball'}}
@@ -172,9 +232,9 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Interactively label volleyballs in a video for a YOLOv8 dataset.")
+    parser = argparse.ArgumentParser(description="Interactively label multiple volleyballs in a video.")
     parser.add_argument("--video", type=str, required=True, help="Path to the input video file.")
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save the dataset.")
-    parser.add_argument("--conf", type=float, default=0.3, help="Confidence threshold for initial YOLO detection.")
+    parser.add_argument("--conf", type=float, default=0.4, help="Confidence threshold for initial YOLO detection.")
     args = parser.parse_args()
     main(args)
