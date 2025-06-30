@@ -157,7 +157,7 @@ def print_instructions():
 # --- Main Function ---
 # =============================================================================
 def main(args):
-    TARGET_DIMS = (640, 640); YOLO_MODEL = "Code/modeln_ballV1.pt"
+    TARGET_DIMS = (640, 640); YOLO_MODEL = "models/modeln_ball2.pt"
     print_instructions()
     yolo_model = YOLO(YOLO_MODEL)
     video_path, output_dir = args.video, args.output_dir
@@ -174,7 +174,7 @@ def main(args):
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
-        frame = cv2.rotate(frame,cv2.ROTATE_180)
+        #frame = cv2.rotate(frame,cv2.ROTATE_180)
         yolo_results = yolo_model.predict(frame, conf=args.conf, classes=[0], verbose=False)
         current_boxes = [ [int(i) for i in box.xyxy[0]] for box in yolo_results[0].boxes ]
         source_map = {i: (255, 100, 0) for i in range(len(current_boxes))} # Blue for YOLO
