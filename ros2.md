@@ -136,3 +136,9 @@ This is the most powerful feature of this setup.
     colcon build
     ```
 Because the files are shared, any changes you make to the code on the Pi are instantly reflected inside the container, and vice versa.
+
+
+Do this to ensure ros2 commands work in the container
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+
+hecke@Rpi:~ $ xhost +local: to allow rviz2 to work
