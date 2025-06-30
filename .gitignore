@@ -44,4 +44,4 @@
 ComputerVisionResearch/version1/venv/
 # pip install ultralytics opencv-python numpy pyyaml
 ComputerVisionResearch/version2/venv/
-
+ComputerVisionResearch/version2/yolo_dataset_manager/node_modules

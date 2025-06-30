@@ -1,9 +1,0 @@
-streamlit
-pyyaml
-pandas
-matplotlib
-opencv-python-headless
-Pillow
-torch
-ultralytics
-streamlit-drawable-canvas

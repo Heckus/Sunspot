@@ -1,52 +1,70 @@
-# YOLOv8 Dataset Manager & Annotation Tool
+YOLOv8 Dataset Manager & Annotation Tool
+A modern web application built with React, TypeScript, and Node.js to visualize, manage, analyze, and edit YOLOv8 datasets with an enhanced user experience.
+Features
 
-An interactive Streamlit application to visualize, manage, analyze, and edit your YOLOv8 datasets.
+File Manager Grid View:
 
-This tool provides a comprehensive suite of features to streamline your computer vision workflow, moving beyond simple viewing to active dataset curation.
+View dataset splits (train, valid, test) in a responsive, virtualized grid for optimal performance.
+Toggle between annotated and background images.
+Select images to enter the annotation editor.
 
-## Features
 
--   **File Manager Grid View:**
-    -   View your entire dataset split (train, valid, test) in a configurable grid.
-    -   See annotations overlaid on all images at once for rapid scanning.
-    -   Select any image to enter the powerful "Edit Mode".
+Advanced Image Management:
 
--   **Advanced Image Management:**
-    -   **Flag Images:** Mark problematic or interesting images for later review. Flagged image paths are saved to `flagged_images.txt`.
-    -   **Delete Images:** Permanently remove an image and its corresponding label file from the dataset (with a confirmation step).
+Flag Images: Mark images for review, saved to flagged_images.txt.
+Delete Images: Remove images and their labels with confirmation.
 
--   **Visual Annotation Editor:**
-    -   **Edit Boxes:** Adjust the position and size of existing bounding boxes by dragging their corners.
-    -   **Add Boxes:** Draw new bounding boxes directly onto the image.
-    -   **Delete Boxes:** Remove incorrect annotations.
-    -   **Change Classes:** Assign the correct class to new or existing boxes.
-    -   **Save Changes:** Overwrite the label file with your corrected annotations.
 
--   **In-Depth Dataset Analytics:**
-    -   **Class Distribution:** Visualize the number of instances per class.
-    -   **Annotation Stats:** See total bounding box counts and average boxes per image.
-    -   **Image Dimensions:** Analyze the distribution of image resolutions in your dataset.
-    -   **Bounding Box Size Analysis:** View a scatter plot of annotation width vs. height to understand object size distribution.
+Enhanced Annotation Editor:
 
--   **Model Testing:**
-    -   Load and test your own `.pt` model files on any image from your dataset.
+Draw, transform, and delete bounding boxes using Fabric.js.
+Real-time class selection per box, with undo/redo and zoom support.
+Immediate save functionality with instant grid view updates.
 
-## Setup and Installation
 
-1.  **Clone the repository or save the files** into a directory.
+Dataset Analytics:
 
-2.  **Install the required libraries.** It's recommended to do this in a virtual environment.
+Visualize class distribution, image dimensions, and bounding box sizes.
+Display total images, bounding boxes, and average boxes per image.
 
-    ```bash
-    pip install -r requirements.txt
-    ```
 
-## How to Run
+Model Testing:
 
-1.  Navigate to the project directory in your terminal.
+Test YOLOv8 .pt models on selected images with real-time results.
 
-2.  Run the Streamlit app:
 
-    ```bash
-    streamlit run app.py
-    ```
+
+Setup and Installation
+
+Clone the repository or save the files into a directory.
+
+Install Node.js dependencies:
+npm install
+
+
+Install Python dependencies for YOLOv8 inference (in a virtual environment):
+pip install pyyaml opencv-python-headless pillow torch ultralytics
+
+
+
+How to Run
+
+Start the backend server:
+node server.js
+
+
+Open index.html in a browser or serve it via a static file server (e.g., npx serve).
+
+Provide the data.yaml path when prompted by the browser.
+
+
+Dependencies
+
+Frontend: React 18.2.0, Fabric.js 5.3.0, Axios 1.4.0, react-window 1.8.9, Tailwind CSS 2.2.19
+Backend: Express, js-yaml, canvas, ultralytics, node-cache
+
+Notes
+
+Ensure the data.yaml file follows the YOLOv8 format.
+The backend assumes YOLOv8 .pt models are available in the specified directory.
+For optimal performance, run the backend on a machine with sufficient resources for YOLO inference.
