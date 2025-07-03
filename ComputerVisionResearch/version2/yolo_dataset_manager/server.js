@@ -5,7 +5,7 @@ const path = require('path');
 const yaml = require('js-yaml');
 const { Image, createCanvas } = require('canvas');
 const NodeCache = require('node-cache');
-const cors =require('cors');
+const cors = require('cors');
 const { spawn } = require('child_process');
 
 const app = express();
@@ -83,6 +83,32 @@ const absToYolo = (absCoords, imgWidth, imgHeight) => {
   return [classId, xCenter, yCenter, width, height];
 };
 
+app.post('/delete-images', async (req, res) => {
+    const { imagePaths } = req.body;
+    if (!imagePaths || !Array.isArray(imagePaths)) {
+        return res.status(400).json({ error: 'imagePaths must be an array.' });
+    }
+
+    const deletionPromises = imagePaths.map(async (imagePath) => {
+        const labelPath = getLabelPath(imagePath);
+        try {
+            if (fs.existsSync(imagePath)) await fsPromises.unlink(imagePath);
+            if (fs.existsSync(labelPath)) await fsPromises.unlink(labelPath);
+            return { path: imagePath, status: 'success' };
+        } catch (error) {
+            return { path: imagePath, status: 'error', reason: error.message };
+        }
+    });
+
+    try {
+        const results = await Promise.all(deletionPromises);
+        res.json({ success: true, results });
+    } catch (error) {
+        res.status(500).json({ error: `An unexpected error occurred: ${error.message}` });
+    }
+});
+
+
 app.get('/', (req, res) => {
   res.json({ message: 'Welcome to the YOLOv8 Dataset Manager Backend!' });
 });
@@ -104,36 +130,42 @@ app.get('/load-data', async (req, res) => {
 });
 
 app.post('/load-images', async (req, res) => {
-  try {
-    const { paths, viewMode } = req.body;
-    const images = [];
-    for (const imgPath of paths) {
-      const cacheKey = `${imgPath}_${viewMode}`;
-      let imgData = cache.get(cacheKey);
-      if (!imgData) {
-        const img = new Image();
-        img.src = await fsPromises.readFile(imgPath);
-        const labels = viewMode === 'Annotated' ? await parseYoloLabels(getLabelPath(imgPath)) : [];
-        const canvas = createCanvas(img.width, img.height);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        if (viewMode === 'Annotated') {
-          labels.forEach(label => {
-            const [classId, xMin, yMin, xMax, yMax] = yoloToAbs(label, img.width, img.height);
-            ctx.strokeStyle = '#f472b6';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
-          });
+    try {
+        const { paths, viewMode } = req.body;
+        const images = [];
+        for (const imgPath of paths) {
+            const labels = await parseYoloLabels(getLabelPath(imgPath));
+            if (viewMode === 'Background' && labels.length > 0) {
+                continue;
+            }
+
+            const cacheKey = `${imgPath}_${viewMode}`;
+            let imgData = cache.get(cacheKey);
+
+            if (!imgData) {
+                const img = new Image();
+                img.src = await fsPromises.readFile(imgPath);
+                const canvas = createCanvas(img.width, img.height);
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+
+                if (viewMode === 'Annotated') {
+                    labels.forEach(label => {
+                        const [classId, xMin, yMin, xMax, yMax] = yoloToAbs(label, img.width, img.height);
+                        ctx.strokeStyle = '#f472b6';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(xMin, yMin, xMax - xMin, yMax - yMin);
+                    });
+                }
+                imgData = { path: imgPath, base64: canvas.toDataURL(), numLabels: labels.length };
+                cache.set(cacheKey, imgData);
+            }
+            images.push(imgData);
         }
-        imgData = { path: imgPath, base64: canvas.toDataURL(), numLabels: labels.length };
-        cache.set(cacheKey, imgData);
-      }
-      images.push(imgData);
+        res.json(images);
+    } catch (error) {
+        res.status(500).json({ error: `Server error: ${error.message}` });
     }
-    res.json(images);
-  } catch (error) {
-    res.status(500).json({ error: `Server error: ${error.message}` });
-  }
 });
 
 app.get('/annotations', async (req, res) => {
@@ -205,57 +237,40 @@ app.post('/run-inference', (req, res) => {
 });
 
 app.get('/analytics', async (req, res) => {
-  const { yamlPath } = req.query;
-  const cacheKey = `analytics_${yamlPath}`;
-  let analytics = cache.get(cacheKey);
+    const { yamlPath } = req.query;
+    const cacheKey = `analytics_${yamlPath}`;
+    let analytics = cache.get(cacheKey);
 
-  if (!analytics) {
-    try {
-      const config = await loadConfig(yamlPath);
-      const datasetRoot = path.isAbsolute(config.path) ? config.path : path.join(path.dirname(yamlPath), config.path);
-      const allImagePaths = [
-        ...await getImageFiles(datasetRoot, config.train || ''),
-        ...await getImageFiles(datasetRoot, config.val || ''),
-        ...await getImageFiles(datasetRoot, config.test || '')
-      ];
-
-      let totalBoxes = 0;
-      const classDistribution = new Array(config.names.length).fill(0);
-      const imageDimensions = {};
-
-      for (const imgPath of allImagePaths) {
-        const labels = await parseYoloLabels(getLabelPath(imgPath));
-        totalBoxes += labels.length;
-        labels.forEach(label => {
-          if (label[0] < classDistribution.length) {
-            classDistribution[label[0]]++;
-          }
-        });
-
+    if (!analytics) {
         try {
-            const img = new Image();
-            img.src = await fsPromises.readFile(imgPath);
-            const dimKey = `${img.width}x${img.height}`;
-            imageDimensions[dimKey] = (imageDimensions[dimKey] || 0) + 1;
-        } catch(e) {
-            // Ignore errors for single corrupt images
+            const config = await loadConfig(yamlPath);
+            const datasetRoot = path.isAbsolute(config.path) ? config.path : path.join(path.dirname(yamlPath), config.path);
+            
+            const calculateSplitAnalytics = async (relativePath) => {
+                const imagePaths = await getImageFiles(datasetRoot, relativePath);
+                let singleBox = 0;
+                let multiBox = 0;
+                let zeroBox = 0;
+                for (const imgPath of imagePaths) {
+                    const labels = await parseYoloLabels(getLabelPath(imgPath));
+                    if (labels.length === 0) zeroBox++;
+                    else if (labels.length === 1) singleBox++;
+                    else multiBox++;
+                }
+                return { total: imagePaths.length, singleBox, multiBox, zeroBox };
+            };
+
+            analytics = {
+                train: await calculateSplitAnalytics(config.train || ''),
+                valid: await calculateSplitAnalytics(config.val || ''),
+                test: await calculateSplitAnalytics(config.test || '')
+            };
+            cache.set(cacheKey, analytics);
+        } catch (error) {
+            return res.status(500).json({ error: `Analytics error: ${error.message}` });
         }
-      }
-      
-      analytics = {
-        totalImages: allImagePaths.length,
-        totalBoxes,
-        avgBoxes: allImagePaths.length > 0 ? (totalBoxes / allImagePaths.length).toFixed(2) : 0,
-        classNames: config.names,
-        classDistribution,
-        imageDimensions
-      };
-      cache.set(cacheKey, analytics);
-    } catch (error) {
-      return res.status(500).json({ error: `Analytics error: ${error.message}` });
     }
-  }
-  res.json(analytics);
+    res.json(analytics);
 });
 
 app.listen(3000, () => console.log('Server running on port 3000'))

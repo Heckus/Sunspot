@@ -2,9 +2,15 @@ import sys
 import json
 from ultralytics import YOLO
 from PIL import Image
+import os
 
 def run_inference(model_path, image_path):
     try:
+        # Check if the image path exists
+        if not os.path.exists(image_path):
+            print(json.dumps({"error": f"Image path does not exist: {image_path}"}))
+            sys.exit(1)
+            
         model = YOLO(model_path)
         results = model.predict(image_path, conf=0.25, verbose=False)
         
