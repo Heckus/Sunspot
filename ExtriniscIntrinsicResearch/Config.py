@@ -31,7 +31,7 @@ WEB_STREAM_MAX_FPS = 20      # Cap FPS for web stream to reduce load
 CAMERA_INDEX = 0
 CAM_REQUESTED_WIDTH = 1920
 CAM_REQUESTED_HEIGHT = 1080
-CAM_REQUESTED_FPS = 10.0
+CAM_REQUESTED_FPS = 20.0
 
 CAMERA_INTRINSIC_MTX = np.array([[1000.0, 0.0, CAM_REQUESTED_WIDTH/2],
                                  [0.0, 1000.0, CAM_REQUESTED_HEIGHT/2],
@@ -45,17 +45,27 @@ CHECKERBOARD_INNER_CORNERS_HEIGHT = 7
 SQUARE_SIZE_MM = 20.0
 NUM_CALIBRATION_IMAGES = 30
 
-# --- World Coordinate System ---
+# --- World Coordinate System (MODIFIED FOR 3D) ---
+# Define a 1x1x1 meter cube for full 3D extrinsic calibration.
 BOX_WIDTH_M = 1.0
 BOX_DEPTH_M = 1.0
-BOX_HEIGHT_M = 0.05
+BOX_HEIGHT_M = 1.0 # Changed from 0.05 to 1.0
 
+# The 8 corners of the cube. The order is important for calibration.
+# Bottom face (Z=0), then top face (Z=BOX_HEIGHT_M)
 WORLD_BOX_CORNERS_M = np.array([
-    [0.0, 0.0, 0.0],
-    [BOX_WIDTH_M, 0.0, 0.0],
-    [BOX_WIDTH_M, BOX_DEPTH_M, 0.0],
-    [0.0, BOX_DEPTH_M, 0.0]
+    # Bottom face (Z=0) - Click these first
+    [0.0, 0.0, 0.0],                # 1. Origin (Bottom-Front-Left)
+    [BOX_WIDTH_M, 0.0, 0.0],        # 2. X-axis (Bottom-Front-Right)
+    [BOX_WIDTH_M, BOX_DEPTH_M, 0.0],# 3. X-Y (Bottom-Back-Right)
+    [0.0, BOX_DEPTH_M, 0.0],        # 4. Y-axis (Bottom-Back-Left)
+    # Top face (Z=BOX_HEIGHT_M) - Click these second
+    [0.0, 0.0, BOX_HEIGHT_M],                # 5. Top-Front-Left
+    [BOX_WIDTH_M, 0.0, BOX_HEIGHT_M],        # 6. Top-Front-Right
+    [BOX_WIDTH_M, BOX_DEPTH_M, BOX_HEIGHT_M],# 7. Top-Back-Right
+    [0.0, BOX_DEPTH_M, BOX_HEIGHT_M]         # 8. Top-Back-Left
 ], dtype=np.float32)
+
 
 # --- Volleyball Detection (CV_FUNCTIONS) ---
 # HSV Color Ranges for Mikasa Volleyball (Yellow and Blue)
@@ -80,37 +90,24 @@ BALL_DETECTION_ROI = None # Example: (100, 200, 1000, 600) -> (x, y, width, heig
 # Minimum and maximum expected ball radius in pixels (for filtering detections)
 # These are highly dependent on camera distance and ball size.
 # Measure the ball's radius in pixels from your test images if possible.
-MIN_BALL_RADIUS_PX = 15  # Increased slightly, adjust based on your image
-MAX_BALL_RADIUS_PX = 200 # Increased slightly, adjust
+MIN_BALL_RADIUS_PX = 15
+MAX_BALL_RADIUS_PX = 200
 MIN_BALL_CONTOUR_AREA = np.pi * (MIN_BALL_RADIUS_PX**2) * 0.6 # Area can be less than perfect circle
 MAX_BALL_CONTOUR_AREA = np.pi * (MAX_BALL_RADIUS_PX**2) * 1.4
 
 VOLLEYBALL_RADIUS_M = 0.105 # Approx. 10.5 cm
-
-# --- 3D Visualization (WEB_UI - Open3D - not used by Three.js in WebUi.py) ---
-VIS_WINDOW_TITLE = "Real-Time 3D Volleyball Tracker" # General title
-VIS_WINDOW_WIDTH = 1024 # For Open3D or other desktop UI
-VIS_WINDOW_HEIGHT = 768 # For Open3D or other desktop UI
-VIS_BOX_COLOR = [0.5, 0.5, 0.5] # For Open3D or other desktop UI
-VIS_VOLLEYBALL_COLOR = [1.0, 0.84, 0.0] # For Open3D or other desktop UI
-VIS_AXES_ENABLED = True # For Open3D or other desktop UI
-VIS_CAMERA_LOOKAT = [BOX_WIDTH_M / 2, BOX_DEPTH_M / 2, 0.0] # For Open3D
-VIS_CAMERA_FRONT = [-0.7, -0.7, -0.5] # For Open3D
-VIS_CAMERA_UP = [0.0, 0.0, 1.0] # For Open3D
-VIS_CAMERA_ZOOM = 0.5 # For Open3D
-
 
 # --- 3D Visualization (Three.js in WebUI) ---
 # Camera position: X (center), Y (in front), Z (elevated)
 # Look at the center of the box volume.
 # These values are in meters.
 VIS_CAMERA_POSITION_THREEJS_X_M = BOX_WIDTH_M / 2
-VIS_CAMERA_POSITION_THREEJS_Y_M = BOX_DEPTH_M / 2 - BOX_DEPTH_M * 1.8 # Further 'in front' of the center of the box depth
-VIS_CAMERA_POSITION_THREEJS_Z_M = BOX_HEIGHT_M + max(BOX_WIDTH_M, BOX_DEPTH_M) * 1.5 # Higher up, relative to max(width,depth)
+VIS_CAMERA_POSITION_THREEJS_Y_M = BOX_DEPTH_M / 2 - BOX_DEPTH_M * 1.8
+VIS_CAMERA_POSITION_THREEJS_Z_M = BOX_HEIGHT_M / 2 + max(BOX_WIDTH_M, BOX_DEPTH_M) * 1.5
 
 VIS_CAMERA_LOOKAT_THREEJS_X_M = BOX_WIDTH_M / 2
 VIS_CAMERA_LOOKAT_THREEJS_Y_M = BOX_DEPTH_M / 2
-VIS_CAMERA_LOOKAT_THREEJS_Z_M = BOX_HEIGHT_M / 2 # Center of the box volume
+VIS_CAMERA_LOOKAT_THREEJS_Z_M = BOX_HEIGHT_M / 2
 
 # These will be passed as lists/arrays to JavaScript
 VIS_CAMERA_POSITION_THREEJS = [VIS_CAMERA_POSITION_THREEJS_X_M, VIS_CAMERA_POSITION_THREEJS_Y_M, VIS_CAMERA_POSITION_THREEJS_Z_M]
