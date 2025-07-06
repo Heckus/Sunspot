@@ -202,7 +202,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch', type=int, default=8, help='Batch size.')
     parser.add_argument('--imgsz', type=int, default=640, help='Image size.')
     parser.add_argument('--aug', type=str, default='medium', choices=['light', 'medium', 'heavy', 'none'], help='The augmentation preset to use.')
-    
+    parser.add_argument('--pat', type=str, default='10', choices=['1-10'], help='Stop if no improvement for x epochs.')
     args = parser.parse_args()
 
     # --- Step 1: Load the YOLO model ---
@@ -217,7 +217,8 @@ if __name__ == '__main__':
         'imgsz': args.imgsz,
         'plots': True,  # Save plots like confusion matrix and PR curves
         'project': 'modeltraining/runs/', # Project folder for results
-        'name': f'{args.model.split(".")[0]}_{args.aug}_aug_e{args.epochs}' # Experiment name
+        'name': f'{args.model.split(".")[0]}_{args.aug}_aug_e{args.epochs}', # Experiment name
+        'patience': args.pat  # Stop if no improvement for 10 epochs
     }
 
     # --- Step 3: Get the augmentation presets and select one ---
