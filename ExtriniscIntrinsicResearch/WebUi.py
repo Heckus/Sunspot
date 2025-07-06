@@ -37,15 +37,12 @@ class WebUIManager:
     def _setup_routes(self):
         @self.app.route('/')
         def index():
-            # MODIFIED: Added OrbitControls.js script and updated Three.js setup
+            # MODIFIED: Rewritten JavaScript using modern ES6 modules for robust controls.
             html_template = """
             <!DOCTYPE html>
             <html>
             <head>
                 <title>3D Volleyball Tracker</title>
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-                <!-- ADDED: Import OrbitControls for mouse interaction -->
-                <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
                 <style>
                     body { margin: 0; font-family: sans-serif; background-color: #f0f0f0; color: #333; display: flex; flex-direction: column; align-items: center; padding: 10px; box-sizing: border-box; }
                     h1, h2 { text-align: center; color: #333; margin-top: 10px; margin-bottom: 15px; }
@@ -58,7 +55,7 @@ class WebUIManager:
                     .data-group { flex: 1; min-width: 280px; }
                     .data-group h2 { text-align: left; margin-top: 0; margin-bottom: 10px; font-size: 1.3em; border-bottom: 1px solid #eee; padding-bottom: 5px; }
                     table { width: 100%; border-collapse: collapse; }
-                    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
+                    td { text-align: left; padding: 8px; border-bottom: 1px solid #eee;}
                     td:first-child { font-weight: bold; color: #555; width: 40%;}
                     pre { font-size:0.9em; white-space:pre-wrap; background-color: #f8f8f8; padding:8px; border-radius:4px; border:1px solid #ddd; margin-top: 5px; }
                 </style>
@@ -77,16 +74,50 @@ class WebUIManager:
                         </div>
                     </div>
                     <div class="data-section">
-                        <!-- Data fields remain the same -->
+                        <div class="data-group">
+                            <h2>Live Data</h2>
+                            <table>
+                                <tr><td>Status:</td><td><span id="status">N/A</span></td></tr>
+                                <tr><td>FPS:</td><td><span id="fps">N/A</span></td></tr>
+                                <tr><td>Resolution:</td><td><span id="resolution">N/A</span></td></tr>
+                            </table>
+                        </div>
+                        <div class="data-group">
+                            <h2>Ball Data</h2>
+                            <table>
+                                <tr><td>2D (px):</td><td><span id="ball_2d_px">N/A</span></td></tr>
+                                <tr><td>Radius (px):</td><td><span id="ball_pixel_radius_px">N/A</span></td></tr>
+                                <tr><td>3D (m):</td><td><span id="ball_3d_m">N/A</span></td></tr>
+                            </table>
+                        </div>
+                        <div class="data-group">
+                            <h2>Camera Parameters</h2>
+                            <p><strong>Intrinsics:</strong> <pre id="cam_intrinsics">N/A</pre></p>
+                            <p><strong>Extrinsics:</strong> <pre id="cam_extrinsics">N/A</pre></p>
+                        </div>
                     </div>
                 </div>
 
-                <script>
+                <!-- Use importmap for modern Three.js module loading -->
+                <script type="importmap">
+                {
+                    "imports": {
+                        "three": "https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js",
+                        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/jsm/"
+                    }
+                }
+                </script>
+
+                <script type="module">
+                    import * as THREE from 'three';
+                    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+                    let scene, camera, renderer, volleyballMesh, controls;
+
                     function updateDataFields() {
                         fetch('/status_json')
                             .then(response => response.json())
                             .then(data => {
-                                // This data update logic remains the same
                                 document.getElementById('status').textContent = data.status || 'N/A';
                                 document.getElementById('fps').textContent = data.fps !== undefined ? parseFloat(data.fps).toFixed(2) : 'N/A';
                                 document.getElementById('resolution').textContent = data.resolution || 'N/A';
@@ -97,98 +128,74 @@ class WebUIManager:
                                 document.getElementById('cam_intrinsics').textContent = data.cam_intrinsics || 'N/A';
                                 document.getElementById('cam_extrinsics').textContent = data.cam_extrinsics || 'N/A';
 
-                                if (typeof updateThreeJSScene === 'function' && data.ball_3d_m && data.ball_3d_m !== "N/A") {
+                                if (volleyballMesh && data.ball_3d_m && data.ball_3d_m !== "N/A") {
                                     try {
                                         const parts = ball3dText.split(',').map(p => parseFloat(p.split(':')[1]));
                                         if (parts.length === 3 && !parts.some(isNaN)) {
-                                            updateThreeJSScene({ x: parts[0], y: parts[1], z: parts[2] });
+                                            volleyballMesh.position.set(parts[0], parts[1], parts[2]);
                                         }
                                     } catch (e) { console.error("Error parsing ball_3d_m for Three.js:", e); }
                                 }
                             })
                             .catch(error => console.error('Error fetching status JSON:', error));
                     }
-                    setInterval(updateDataFields, 750);
-                    
-                    document.addEventListener('DOMContentLoaded', () => {
-                        updateDataFields();
-                         if (typeof initThreeJS === 'function') {
-                            const defaultBox = [{{ Config.BOX_WIDTH_M }}, {{ Config.BOX_DEPTH_M }}, {{ Config.BOX_HEIGHT_M }}];
-                            const defaultRadius = {{ Config.VOLLEYBALL_RADIUS_M }};
-                            const defaultCorners = JSON.parse(JSON.stringify({{ Config.WORLD_BOX_CORNERS_M.tolist() }}));
-                            const defaultCamPos = {{ Config.VIS_CAMERA_POSITION_THREEJS | tojson }};
-                            const defaultCamLookAt = {{ Config.VIS_CAMERA_LOOKAT_THREEJS | tojson }};
-                            initThreeJS(defaultBox, defaultRadius, defaultCorners, defaultCamPos, defaultCamLookAt);
-                        }
-                    });
 
-                    let scene, camera, renderer, boxMesh, volleyballMesh, controls;
-                    let initialBoxConfig;
+                    function animate() {
+                        requestAnimationFrame(animate);
+                        controls.update();
+                        renderer.render(scene, camera);
+                    }
 
-                    function initThreeJS(boxDims, ballRadius, worldBoxCorners, cameraPosition, cameraLookAt) {
-                        if (scene) return; // Prevent re-initialization
-                        
+                    function init() {
+                        const boxDims = [{{ Config.BOX_WIDTH_M }}, {{ Config.BOX_DEPTH_M }}, {{ Config.BOX_HEIGHT_M }}];
+                        const ballRadius = {{ Config.VOLLEYBALL_RADIUS_M }};
+                        const worldBoxCorners = {{ Config.WORLD_BOX_CORNERS_M.tolist() | tojson }};
+                        const cameraPosition = {{ Config.VIS_CAMERA_POSITION_THREEJS | tojson }};
+                        const cameraLookAt = {{ Config.VIS_CAMERA_LOOKAT_THREEJS | tojson }};
+
                         const canvas = document.getElementById('threejs-canvas');
                         scene = new THREE.Scene();
-                        scene.background = new THREE.Color(0x34495e); 
+                        scene.background = new THREE.Color(0x34495e);
 
                         const panel = canvas.parentElement;
                         canvas.width = panel.clientWidth - 30;
                         canvas.height = 450;
 
                         camera = new THREE.PerspectiveCamera(50, canvas.width / canvas.height, 0.1, 1000);
-                        
-                        if (cameraPosition && cameraPosition.length === 3) {
-                            camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
-                        } else {
-                            camera.position.set(boxDims[0] / 2, -boxDims[1], boxDims[2] * 1.5);
-                        }
+                        camera.position.set(cameraPosition[0], cameraPosition[1], cameraPosition[2]);
 
                         renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
                         renderer.setSize(canvas.width, canvas.height);
 
-                        // --- ADDED: Initialize OrbitControls ---
-                        controls = new THREE.OrbitControls(camera, renderer.domElement);
-                        if (cameraLookAt && cameraLookAt.length === 3) {
-                            controls.target.set(cameraLookAt[0], cameraLookAt[1], cameraLookAt[2]);
-                        } else {
-                            controls.target.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2);
-                        }
-                        controls.enableDamping = true; // an animation loop is required when either damping or auto-rotation are enabled
+                        controls = new OrbitControls(camera, renderer.domElement);
+                        controls.target.set(cameraLookAt[0], cameraLookAt[1], cameraLookAt[2]);
+                        controls.enableDamping = true;
                         controls.dampingFactor = 0.05;
-                        controls.screenSpacePanning = false;
-                        controls.minDistance = 1;
-                        controls.maxDistance = 50;
-                        controls.maxPolarAngle = Math.PI; // Allow looking from below
-                        // --- END: OrbitControls Initialization ---
 
-                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
                         scene.add(ambientLight);
-                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9);
                         directionalLight.position.set(5, 5, 10);
                         scene.add(directionalLight);
 
                         const boxGeometry = new THREE.BoxGeometry(boxDims[0], boxDims[1], boxDims[2]);
-                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, transparent: true, opacity:0.5 });
-                        boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
+                        const boxMaterial = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5 });
+                        const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial);
                         boxMesh.position.set(boxDims[0] / 2, boxDims[1] / 2, boxDims[2] / 2);
                         scene.add(boxMesh);
 
-                        const gridHelper = new THREE.GridHelper(Math.max(boxDims[0], boxDims[1]), 10);
-                        gridHelper.position.set(boxDims[0] / 2, boxDims[1] / 2, 0); 
+                        const gridHelper = new THREE.GridHelper(Math.max(boxDims[0], boxDims[1]), 10, 0x888888, 0x444444);
+                        gridHelper.position.set(boxDims[0] / 2, boxDims[1] / 2, 0);
                         gridHelper.rotation.x = Math.PI / 2;
                         scene.add(gridHelper);
 
-                        const cornerMarkerRadius = 0.03;
-                        const cornerMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-                        if (worldBoxCorners) {
-                            worldBoxCorners.forEach(corner => {
-                                const cornerSphere = new THREE.SphereGeometry(cornerMarkerRadius, 16, 16);
-                                const cornerMesh = new THREE.Mesh(cornerSphere, cornerMarkerMaterial);
-                                cornerMesh.position.set(corner[0], corner[1], corner[2]);
-                                scene.add(cornerMesh);
-                            });
-                        }
+                        const cornerMarkerMaterial = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+                        worldBoxCorners.forEach(corner => {
+                            const cornerSphere = new THREE.SphereGeometry(0.03, 16, 16);
+                            const cornerMesh = new THREE.Mesh(cornerSphere, cornerMarkerMaterial);
+                            cornerMesh.position.set(corner[0], corner[1], corner[2]);
+                            scene.add(cornerMesh);
+                        });
 
                         const volleyballGeometry = new THREE.SphereGeometry(ballRadius, 32, 32);
                         const volleyballMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd44 });
@@ -196,26 +203,15 @@ class WebUIManager:
                         scene.add(volleyballMesh);
                         
                         const axesHelper = new THREE.AxesHelper(1);
-                        axesHelper.position.set(0,0,0.005);
+                        axesHelper.position.set(0, 0, 0.001);
                         scene.add(axesHelper);
-                        
+
+                        updateDataFields();
+                        setInterval(updateDataFields, 750);
                         animate();
                     }
 
-                    function updateThreeJSScene(ballPosition) {
-                        if (volleyballMesh && ballPosition) {
-                            volleyballMesh.position.set(ballPosition.x, ballPosition.y, ballPosition.z);
-                        }
-                    }
-
-                    function animate() {
-                        requestAnimationFrame(animate);
-                        // ADDED: Update controls in the animation loop
-                        if (controls) controls.update();
-                        if (renderer && scene && camera) {
-                           renderer.render(scene, camera);
-                        }
-                    }
+                    document.addEventListener('DOMContentLoaded', init);
                 </script>
             </body>
             </html>
@@ -223,7 +219,6 @@ class WebUIManager:
             with self.data_lock:
                 return render_template_string(html_template, Config=Config)
 
-        # Other routes remain the same
         @self.app.route('/video_feed')
         def video_feed():
             return Response(self._generate_mjpeg_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -233,7 +228,6 @@ class WebUIManager:
             with self.data_lock:
                 return jsonify(self.display_variables)
 
-    # The rest of the WebUi.py file (generate_mjpeg_stream, update_data, run, stop) remains unchanged.
     def _generate_mjpeg_stream(self):
         logging.info("MJPEG stream: Client connected.")
         while not self.shutdown_event.is_set():
@@ -250,14 +244,17 @@ class WebUIManager:
             
             if frame_to_encode is not None:
                 try:
-                    flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, Config.WEB_STREAM_JPEG_QUALITY])
+                    jpeg_quality = Config.WEB_STREAM_JPEG_QUALITY if hasattr(Config, 'WEB_STREAM_JPEG_QUALITY') else 75
+                    flag, encoded_image = cv2.imencode('.jpg', frame_to_encode, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
                     if not flag: continue
                     yield (b'--frame\r\n'
                         b'Content-Type: image/jpeg\r\n\r\n' + bytearray(encoded_image) + b'\r\n')
                 except Exception as e:
                     logging.info(f"MJPEG stream: Client connection issue ({type(e).__name__}).")
                     break
-            time.sleep(1.0 / Config.WEB_STREAM_MAX_FPS)
+            
+            max_fps = Config.WEB_STREAM_MAX_FPS if hasattr(Config, 'WEB_STREAM_MAX_FPS') else 15.0
+            time.sleep(1.0 / max_fps)
         logging.info("MJPEG stream: Generator stopped.")
 
     def update_data(self, frame_for_stream=None,
