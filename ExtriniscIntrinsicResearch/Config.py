@@ -21,7 +21,7 @@ CALIBRATION_IMAGE_DIR = os.path.join(SCRIPT_DIR, "calibration_images")
 # --- NEW: YOLO Model Configuration ---
 # Path to your trained YOLO model file.
 # Place your 'yolo.pt' file in the same directory as this script.
-YOLO_MODEL_PATH = os.path.join(SCRIPT_DIR, "../ComputerVisionResearch/version2/models/models_ball2.pt")
+YOLO_MODEL_PATH = os.path.join(SCRIPT_DIR, "../ComputerVisionResearch/version2/models/models_ball4.pt")
 # Confidence threshold for detection. Detections below this score will be ignored.
 YOLO_CONFIDENCE_THRESHOLD = 0.65
 
