@@ -142,3 +142,15 @@ Do this to ensure ros2 commands work in the container
 echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
 hecke@Rpi:~ $ xhost +local: to allow rviz2 to work
+
+# Navigate to your workspace
+cd ~/Sunspot/ros2_ws
+
+# Rebuild to apply the new setup.py rules
+colcon build --symlink-install
+
+# Source the environment
+source install/setup.bash
+
+# Launch the application
+ros2 launch ball_tracker ball_tracker_launch.py
