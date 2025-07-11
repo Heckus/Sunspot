@@ -1,0 +1,507 @@
+# ROS2 Humble + libcamera for Raspberry Pi 5 with HQ Camera
+FROM ros:humble-ros-base
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LIBCAMERA_LOG_LEVELS=*:INFO
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/aarch64-linux-gnu
+ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
+
+# Install system dependencies optimized for Pi5 + HQ Camera
+RUN apt-get update && apt-get install -y \
+    # Build tools
+    build-essential \
+    cmake \
+    meson \
+    ninja-build \
+    pkg-config \
+    git \
+    wget \
+    curl \
+    # Python and development
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    python3-numpy \
+    python3-opencv \
+    # libcamera dependencies for Pi5
+    libyaml-dev \
+    libssl-dev \
+    openssl \
+    libboost-program-options-dev \
+    libdrm-dev \
+    libjpeg-dev \
+    libtiff-dev \
+    libpng-dev \
+    libgnutls28-dev \
+    libudev-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-good1.0-dev \
+    libgstreamer-plugins-bad1.0-dev \
+    # Hardware access and monitoring
+    i2c-tools \
+    udev \
+    lm-sensors \
+    # Camera and vision tools (media-ctl is included in v4l-utils)
+    v4l-utils \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install available ROS2 packages (split into multiple RUN commands for better error handling)
+RUN apt-get update && apt-get install -y \
+    # Core camera and vision packages
+    ros-humble-cv-bridge \
+    ros-humble-image-transport \
+    ros-humble-image-transport-plugins \
+    ros-humble-compressed-image-transport \
+    ros-humble-theora-image-transport \
+    ros-humble-camera-info-manager \
+    ros-humble-image-geometry \
+    ros-humble-image-proc \
+    ros-humble-image-pipeline \
+    ros-humble-vision-opencv \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    # Camera drivers and tools
+    ros-humble-usb-cam \
+    ros-humble-v4l2-camera \
+    ros-humble-camera-calibration \
+    ros-humble-camera-calibration-parsers \
+    ros-humble-image-view \
+    ros-humble-rqt-image-view \
+    ros-humble-image-rotate \
+    ros-humble-depth-image-proc \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    # Additional vision and perception
+    ros-humble-perception-pcl \
+    ros-humble-pcl-conversions \
+    ros-humble-pcl-msgs \
+    ros-humble-vision-msgs \
+    ros-humble-sensor-msgs \
+    ros-humble-geometry-msgs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    # ROS2 tools and utilities
+    ros-humble-rqt \
+    ros-humble-rqt-common-plugins \
+    ros-humble-rviz2 \
+    ros-humble-robot-state-publisher \
+    ros-humble-joint-state-publisher \
+    ros-humble-tf2-tools \
+    ros-humble-launch-xml \
+    ros-humble-launch-yaml \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    # Diagnostic and monitoring (for UPS)
+    ros-humble-diagnostic-msgs \
+    ros-humble-diagnostic-updater \
+    ros-humble-diagnostic-aggregator \
+    ros-humble-diagnostic-common-diagnostics \
+    # Development tools
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies with versions optimized for camera work
+RUN python3 -m pip install --no-cache-dir \
+    "jinja2>=2.10,<4.0" \
+    "MarkupSafe>=2.0.1,<3.0" \
+    "ply>=3.11" \
+    "PyYAML>=5.4" \
+    "pybind11>=2.6" \
+    numpy \
+    opencv-python \
+    opencv-contrib-python \
+    Pillow \
+    scipy \
+    scikit-image \
+    matplotlib \
+    # Camera calibration tools
+    camera-calibration-checker \
+    # I2C and hardware monitoring
+    smbus2 \
+    gpiozero \
+    # Additional useful packages
+    transforms3d \
+    python-dateutil
+
+# Create workspace
+WORKDIR /workspace
+
+# --- Build libcamera from source for Pi5 HQ Camera ---
+RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
+    cd libcamera && \
+    # Use latest stable version with Pi5 support
+    git checkout v0.2.0 && \
+    meson setup build \
+        --buildtype=release \
+        -Dpipelines=rpi/vc4,rpi/pisp \
+        -Dipas=rpi/vc4,rpi/pisp \
+        -Dv4l2=true \
+        -Dgstreamer=enabled \
+        -Dtest=false \
+        -Dlc-compliance=disabled \
+        -Dcam=enabled \
+        -Dqcam=disabled \
+        -Ddocumentation=disabled \
+        -Dpycamera=enabled && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig
+
+# --- Build libcamera-apps for Pi HQ Camera ---
+RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
+    cd libcamera-apps && \
+    # Use latest stable version
+    git checkout v1.4.4 && \
+    meson setup build \
+        --buildtype=release \
+        -Denable_libav=true \
+        -Denable_drm=true \
+        -Denable_egl=false \
+        -Denable_qt=false \
+        -Denable_opencv=true \
+        -Denable_tflite=false && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig
+
+# Create ROS2 workspace
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+# Clone useful camera-related ROS2 packages
+RUN cd src && \
+    git clone https://github.com/christianrauch/camera_ros.git && \
+    git clone https://github.com/ros-perception/image_common.git -b humble && \
+    git clone https://github.com/ros-perception/vision_opencv.git -b humble
+
+# Initialize rosdep and install dependencies
+RUN rosdep init && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y
+
+# Build the ROS2 workspace
+RUN /bin/bash -c "source /opt/ros/humble/setup.bash && colcon build --symlink-install"
+
+# Set up environment
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc && \
+    echo "export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH" >> /root/.bashrc && \
+    echo "export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:\$PKG_CONFIG_PATH" >> /root/.bashrc && \
+    echo "cd /ros2_ws" >> /root/.bashrc
+
+# Create calibration directory
+RUN mkdir -p /ros2_ws/calibration_data
+
+# Create comprehensive test script
+RUN echo '#!/bin/bash\n\
+echo "=== ROS2 Pi5 HQ Camera + UPS Container Test ==="\n\
+echo ""\n\
+echo "=== System Info ==="\n\
+uname -a\n\
+echo ""\n\
+echo "=== libcamera version ==="\n\
+libcamera-hello --version\n\
+echo ""\n\
+echo "=== Available cameras ==="\n\
+libcamera-hello --list-cameras\n\
+echo ""\n\
+echo "=== Video devices ==="\n\
+ls -la /dev/video* 2>/dev/null || echo "No video devices found"\n\
+echo ""\n\
+echo "=== V4L2 devices ==="\n\
+v4l2-ctl --list-devices 2>/dev/null || echo "V4L2 not available"\n\
+echo ""\n\
+echo "=== I2C devices ==="\n\
+i2cdetect -l\n\
+echo ""\n\
+echo "=== I2C bus 1 scan (UPS should appear here) ==="\n\
+i2cdetect -y 1 2>/dev/null || echo "Cannot access I2C bus 1"\n\
+echo ""\n\
+echo "=== ROS2 version ==="\n\
+ros2 --version\n\
+echo ""\n\
+echo "=== ROS2 camera packages ==="\n\
+ros2 pkg list | grep -E "(camera|image|vision)" | head -10\n\
+echo ""\n\
+echo "=== Testing HQ camera capture (5 seconds) ==="\n\
+timeout 8 libcamera-hello --timeout 5000 --width 1920 --height 1080 --nopreview 2>/dev/null || echo "Camera test failed or no camera detected"\n\
+echo ""\n\
+echo "=== HQ Camera still capture test ==="\n\
+libcamera-still -o /tmp/test_hq_capture.jpg --width 4056 --height 3040 --timeout 2000 2>/dev/null && echo "HQ still capture successful" || echo "HQ still capture failed"\n\
+echo ""\n\
+echo "=== Python libcamera bindings ==="\n\
+python3 -c "import libcamera; print(\"libcamera Python bindings: OK\")" 2>/dev/null || echo "Python bindings failed"\n\
+echo ""\n\
+echo "=== OpenCV version ==="\n\
+python3 -c "import cv2; print(f\"OpenCV version: {cv2.__version__}\")" 2>/dev/null || echo "OpenCV import failed"\n\
+echo ""\n\
+echo "=== Test complete. Container ready for ROS2 camera development! ==="\n\
+' > /test_setup.sh && chmod +x /test_setup.sh
+
+# Create UPS monitoring script for Waveshare 3S UPS
+RUN echo '#!/usr/bin/env python3\n\
+import smbus2\n\
+import time\n\
+\n\
+# Waveshare 3S UPS I2C address (typically 0x36)\n\
+UPS_ADDRESS = 0x36\n\
+\n\
+def read_ups_data():\n\
+    try:\n\
+        bus = smbus2.SMBus(1)\n\
+        # Read battery voltage (example registers - adjust for your UPS)\n\
+        voltage = bus.read_word_data(UPS_ADDRESS, 0x02) / 1000.0\n\
+        current = bus.read_word_data(UPS_ADDRESS, 0x04) / 1000.0\n\
+        capacity = bus.read_byte_data(UPS_ADDRESS, 0x06)\n\
+        \n\
+        print(f"UPS Battery Voltage: {voltage:.2f}V")\n\
+        print(f"UPS Current: {current:.2f}A")\n\
+        print(f"UPS Capacity: {capacity}%")\n\
+        \n\
+        bus.close()\n\
+    except Exception as e:\n\
+        print(f"Error reading UPS data: {e}")\n\
+        print("Make sure UPS is connected and I2C is enabled")\n\
+\n\
+if __name__ == "__main__":\n\
+    read_ups_data()\n\
+' > /test_ups.py && chmod +x /test_ups.py
+
+# Create camera calibration helper script
+RUN echo '#!/bin/bash\n\
+echo "=== ROS2 Camera Calibration Helper ==="\n\
+echo ""\n\
+echo "1. Start camera node:"\n\
+echo "   ros2 run camera_ros camera_node --ros-args -p width:=1920 -p height:=1080"\n\
+echo ""\n\
+echo "2. Run calibration (in another terminal):"\n\
+echo "   ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.108 image:=/image_raw camera:=/camera"\n\
+echo ""\n\
+echo "3. View camera feed:"\n\
+echo "   ros2 run rqt_image_view rqt_image_view"\n\
+echo ""\n\
+echo "4. Save calibration data to: /ros2_ws/calibration_data/"\n\
+echo ""\n\
+echo "Available ROS2 camera commands:"\n\
+echo "- List camera topics: ros2 topic list | grep camera"\n\
+echo "- Camera info: ros2 topic echo /camera_info"\n\
+echo "- Image info: ros2 topic echo /image_raw --field header"\n\
+' > /camera_calibration_help.sh && chmod +x /camera_calibration_help.sh
+
+# Expose common ROS2 ports
+EXPOSE 11311 7400 7401 7402 7403 7404
+
+# Set default working directory
+WORKDIR /ros2_ws
+
+# Default command
+CMD ["/bin/bash"]
+
+
+##
+#!/bin/bash
+
+# ===============================================
+# BUILD THE CONTAINER
+# ===============================================
+
+# Navigate to your Dockerfile directory
+cd /path/to/your/dockerfile
+
+# Build the container (this will take 15-30 minutes)
+docker build -t ros2-pi5-camera .
+
+# Optional: Build with no cache if you need to rebuild
+# docker build --no-cache -t ros2-pi5-camera .
+
+# ===============================================
+# RUN THE CONTAINER
+# ===============================================
+
+# Run with full hardware access for Pi5 HQ Camera + UPS
+docker run -it --privileged \
+  --device=/dev/i2c-1:/dev/i2c-1 \
+  --device=/dev/gpiomem:/dev/gpiomem \
+  -v /dev:/dev \
+  -v /sys:/sys \
+  -v /proc:/proc \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v /opt/vc:/opt/vc \
+  -v /boot:/boot:ro \
+  -v $(pwd)/calibration_data:/ros2_ws/calibration_data \
+  -e DISPLAY=$DISPLAY \
+  --network host \
+  --name ros2-pi5-hq-container \
+  ros2-pi5-camera
+
+# Alternative: More secure run (mount only specific devices you need)
+# First, check what devices you have:
+# ls /dev/video* /dev/i2c*
+
+# Then run with specific devices:
+# docker run -it \
+#   --device=/dev/i2c-1 \
+#   --device=/dev/video0 \
+#   --device=/dev/video1 \
+#   --device=/dev/video10 \
+#   --device=/dev/video11 \
+#   --device=/dev/video12 \
+#   --device=/dev/video13 \
+#   --device=/dev/video14 \
+#   --device=/dev/video15 \
+#   --device=/dev/video16 \
+#   --device=/dev/video17 \
+#   --device=/dev/video18 \
+#   --device=/dev/video19 \
+#   -v /tmp/.X11-unix:/tmp/.X11-unix \
+#   -e DISPLAY=$DISPLAY \
+#   --name ros2-pi5-container \
+#   ros2-pi5-camera
+
+# ===============================================
+# TEST THE CONTAINER
+# ===============================================
+
+# Run the comprehensive test script
+/test_setup.sh
+
+# Test UPS monitoring
+/test_ups.py
+
+# Get camera calibration help
+/camera_calibration_help.sh
+
+# Manual tests you can run inside the container:
+
+# 1. Test HQ camera with high resolution
+libcamera-still -o hq_test.jpg --width 4056 --height 3040 --timeout 2000
+
+# 2. Test HQ camera video recording
+libcamera-vid -o hq_test.h264 --width 1920 --height 1080 --timeout 10000
+
+# 3. List camera capabilities
+libcamera-hello --list-cameras
+
+# 4. Test different HQ camera modes
+libcamera-hello --mode 2028:1520:12:P --timeout 3000
+
+# 5. Test I2C for UPS (Waveshare 3S typically at 0x36)
+i2cdetect -y 1
+i2cget -y 1 0x36 0x02 w  # Read battery voltage
+
+# 6. Test ROS2 camera integration
+ros2 run camera_ros camera_node --ros-args -p width:=1920 -p height:=1080
+
+# 7. Start camera calibration
+ros2 run camera_calibration cameracalibrator --size 8x6 --square 0.108 image:=/image_raw camera:=/camera
+
+# 8. View camera feed in ROS2
+ros2 run rqt_image_view rqt_image_view
+
+# 9. Test image processing pipeline
+ros2 run image_proc image_proc
+
+# 10. List all ROS2 camera topics
+ros2 topic list | grep -E "(camera|image)"
+
+# 11. Test camera info
+ros2 topic echo /camera_info
+
+# 12. Test OpenCV integration
+python3 -c "
+import cv2
+import numpy as np
+print('OpenCV version:', cv2.__version__)
+# Test camera access
+cap = cv2.VideoCapture(0)
+if cap.isOpened():
+    print('Camera accessible via OpenCV')
+    ret, frame = cap.read()
+    if ret:
+        print('Frame captured successfully, shape:', frame.shape)
+    cap.release()
+else:
+    print('Camera not accessible via OpenCV')
+"
+
+# ===============================================
+# USEFUL DOCKER COMMANDS
+# ===============================================
+
+# Stop the container
+docker stop ros2-pi5-hq-container
+
+# Start existing container
+docker start ros2-pi5-hq-container
+
+# Attach to running container
+docker attach ros2-pi5-hq-container
+
+# Execute command in running container
+docker exec -it ros2-pi5-hq-container /bin/bash
+
+# Remove container
+docker rm ros2-pi5-hq-container
+
+# Remove image
+docker rmi ros2-pi5-camera
+
+# List all containers
+docker ps -a
+
+# List all images
+docker images
+
+# Copy files from container
+docker cp ros2-pi5-hq-container:/ros2_ws/calibration_data ./calibration_data
+
+# Copy files to container
+docker cp ./my_ros_package ros2-pi5-hq-container:/ros2_ws/src/
+
+# ===============================================
+# TROUBLESHOOTING
+# ===============================================
+
+# If HQ camera not detected, check on host:
+# vcgencmd get_camera
+# libcamera-hello --list-cameras
+# dmesg | grep -i camera
+
+# If I2C not working for UPS, check on host:
+# ls -la /dev/i2c*
+# i2cdetect -y 1
+# sudo raspi-config -> Interface Options -> I2C -> Enable
+
+# Check if camera is enabled in config:
+# sudo raspi-config -> Interface Options -> Camera -> Enable
+# Or check /boot/config.txt for camera_auto_detect=1
+
+# For Pi5 HQ camera specific issues:
+# Make sure you have latest firmware: sudo apt update && sudo apt full-upgrade
+# Check camera cable connection
+# Try different camera modes: libcamera-hello --list-cameras
+
+# UPS monitoring issues:
+# Check Waveshare 3S UPS manual for correct I2C address (usually 0x36)
+# Verify UPS is powered and connected
+# Check if UPS firmware is up to date
+
+# Common HQ camera resolutions for Pi5:
+# 4056x3040 (12MP full resolution)
+# 2028x1520 (4MP binned)
+# 1920x1080 (HD cropped)
+# 1640x1232 (2MP binned)
+
+# ROS2 camera troubleshooting:
+# Check camera topics: ros2 topic list | grep camera
+# Check camera node status: ros2 node list
+# View camera parameters: ros2 param list /camera_node
+# Test camera with gstreamer: gst-launch-1.0 libcamerasrc ! video/x-raw,width=1920,height=1080 ! autovideosink
