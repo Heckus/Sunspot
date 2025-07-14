@@ -1,4 +1,4 @@
-# ROS2 Humble + Pi Camera - Simple Version (No Compilation)
+# ROS2 Humble + Pi Camera - No pyv4l2 Version
 FROM ros:humble-ros-base
 
 # Set environment variables
@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     python3-numpy \
     python3-opencv \
-    # Basic camera support
+    # Camera support
     libv4l-dev \
     v4l-utils \
     # Hardware access
@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y \
     python3-rosdep \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies for computer vision and YOLO
+# Install Python dependencies (excluding pyv4l2)
 RUN python3 -m pip install --no-cache-dir \
     numpy \
     opencv-python \
@@ -61,16 +61,11 @@ RUN python3 -m pip install --no-cache-dir \
     Pillow \
     scipy \
     matplotlib \
-    # YOLO and AI dependencies
     ultralytics \
     torch \
     torchvision \
-    # Camera control (will work with V4L2)
-    pyv4l2 \
-    # Hardware monitoring
     smbus2 \
     gpiozero \
-    # Additional utilities
     transforms3d \
     python-dateutil \
     pyyaml
@@ -82,13 +77,30 @@ RUN mkdir -p src
 # Set up environment
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc 
 
-# Create basic camera test script
+# Create camera test script using OpenCV only
 RUN echo '#!/usr/bin/env python3\n\
 import cv2\n\
 import sys\n\
+import subprocess\n\
+\n\
+def list_v4l2_devices():\n\
+    """List available V4L2 devices using system command"""\n\
+    try:\n\
+        result = subprocess.run(["v4l2-ctl", "--list-devices"], \n\
+                              capture_output=True, text=True)\n\
+        if result.returncode == 0:\n\
+            print("V4L2 devices:")\n\
+            print(result.stdout)\n\
+        else:\n\
+            print("No V4L2 devices found or v4l2-ctl failed")\n\
+    except FileNotFoundError:\n\
+        print("v4l2-ctl not found")\n\
 \n\
 def test_camera():\n\
     print("Testing camera access...")\n\
+    \n\
+    # First list V4L2 devices\n\
+    list_v4l2_devices()\n\
     \n\
     # Try different camera indices\n\
     for i in range(5):\n\
@@ -98,6 +110,11 @@ def test_camera():\n\
             ret, frame = cap.read()\n\
             if ret:\n\
                 print(f"Camera {i} working! Frame shape: {frame.shape}")\n\
+                # Try to get some camera properties\n\
+                width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)\n\
+                height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)\n\
+                fps = cap.get(cv2.CAP_PROP_FPS)\n\
+                print(f"Resolution: {width}x{height}, FPS: {fps}")\n\
                 cap.release()\n\
                 return i\n\
             else:\n\
@@ -117,9 +134,59 @@ if __name__ == "__main__":\n\
         sys.exit(1)\n\
 ' > /test_camera.py && chmod +x /test_camera.py
 
+# Create ROS2 camera node example
+RUN echo '#!/usr/bin/env python3\n\
+import rclpy\n\
+from rclpy.node import Node\n\
+from sensor_msgs.msg import Image\n\
+from cv_bridge import CvBridge\n\
+import cv2\n\
+\n\
+class CameraNode(Node):\n\
+    def __init__(self):\n\
+        super().__init__(\"camera_node\")\n\
+        self.publisher = self.create_publisher(Image, \"camera/image\", 10)\n\
+        self.bridge = CvBridge()\n\
+        self.cap = cv2.VideoCapture(0)\n\
+        \n\
+        if not self.cap.isOpened():\n\
+            self.get_logger().error("Could not open camera")\n\
+            return\n\
+        \n\
+        self.timer = self.create_timer(0.1, self.publish_frame)\n\
+        self.get_logger().info("Camera node started")\n\
+    \n\
+    def publish_frame(self):\n\
+        ret, frame = self.cap.read()\n\
+        if ret:\n\
+            msg = self.bridge.cv2_to_imgmsg(frame, \"bgr8\")\n\
+            msg.header.stamp = self.get_clock().now().to_msg()\n\
+            self.publisher.publish(msg)\n\
+        else:\n\
+            self.get_logger().warn("Failed to capture frame")\n\
+    \n\
+    def destroy_node(self):\n\
+        self.cap.release()\n\
+        super().destroy_node()\n\
+\n\
+def main():\n\
+    rclpy.init()\n\
+    node = CameraNode()\n\
+    try:\n\
+        rclpy.spin(node)\n\
+    except KeyboardInterrupt:\n\
+        pass\n\
+    finally:\n\
+        node.destroy_node()\n\
+        rclpy.shutdown()\n\
+\n\
+if __name__ == "__main__":\n\
+    main()\n\
+' > /camera_node.py && chmod +x /camera_node.py
+
 # Create comprehensive test script
 RUN echo '#!/bin/bash\n\
-echo "=== ROS2 Pi Camera Container Test (Simple Version) ==="\n\
+echo "=== ROS2 Pi Camera Container Test (No pyv4l2 Version) ==="\n\
 echo ""\n\
 echo "=== System Info ==="\n\
 uname -a\n\
@@ -143,6 +210,7 @@ echo "=== Python packages test ==="\n\
 python3 -c "import cv2; print(f\"OpenCV version: {cv2.__version__}\")" 2>/dev/null || echo "OpenCV import failed"\n\
 python3 -c "import torch; print(f\"PyTorch version: {torch.__version__}\")" 2>/dev/null || echo "PyTorch import failed"\n\
 python3 -c "import ultralytics; print(f\"Ultralytics version: {ultralytics.__version__}\")" 2>/dev/null || echo "Ultralytics import failed"\n\
+python3 -c "from cv_bridge import CvBridge; print(\"cv_bridge available\")" 2>/dev/null || echo "cv_bridge import failed"\n\
 echo ""\n\
 echo "=== Camera test ==="\n\
 python3 /test_camera.py\n\
@@ -150,9 +218,13 @@ echo ""\n\
 echo "=== Test YOLO model download ==="\n\
 python3 -c "from ultralytics import YOLO; model = YOLO(\"yolov8n.pt\"); print(\"YOLO model loaded successfully\")" 2>/dev/null || echo "YOLO model test failed"\n\
 echo ""\n\
+echo "=== ROS2 V4L2 camera test ==="\n\
+echo "Testing ROS2 v4l2_camera node..."\n\
+timeout 5 ros2 run v4l2_camera v4l2_camera_node 2>/dev/null || echo "v4l2_camera node test failed or no camera"\n\
+echo ""\n\
 echo "=== Test complete ==="\n\
-echo "NOTE: This version uses V4L2 for camera access."\n\
-echo "For Pi HQ camera, you may need to enable legacy camera support."\n\
+echo "NOTE: This version uses OpenCV and ROS2 v4l2_camera for camera access."\n\
+echo "No pyv4l2 dependency - should work more reliably."\n\
 ' > /test_setup.sh && chmod +x /test_setup.sh
 
 # Create UPS monitoring script
