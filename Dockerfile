@@ -1,5 +1,5 @@
 # Description: ROS2 Humble with Pi 5 Camera Support using libcamera and picamera2
-# This version builds libcamera and installs the latest Meson via pip to meet dependencies.
+# This version builds libcamera and installs all required Python build dependencies.
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -30,8 +30,9 @@ RUN apt-get update && apt-get install -y \
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Install Latest Meson via Pip to meet libcamera requirements ---
-RUN pip3 install --upgrade meson
+# --- 2. Install Python build tools via Pip ---
+# This includes Meson and its Python dependencies (jinja2, ply)
+RUN pip3 install --upgrade meson jinja2 ply
 
 # --- 3. Build and Install libcamera From Source ---
 WORKDIR /usr/src
@@ -65,7 +66,7 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 7. Install Python Dependencies ---
+# --- 7. Install Python Run-time Dependencies ---
 RUN python3 -m pip install --no-cache-dir \
     numpy \
     opencv-python \
