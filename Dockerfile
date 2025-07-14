@@ -1,19 +1,15 @@
-# ROS2 Humble + libcamera for Raspberry Pi 5 with HQ Camera (Fixed)
+# ROS2 Humble + Pi Camera - Simple Version (No Compilation)
 FROM ros:humble-ros-base
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LIBCAMERA_LOG_LEVELS=*:INFO
 ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/aarch64-linux-gnu
-ENV PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    # Build tools
+    # Build tools (minimal)
     build-essential \
     cmake \
-    meson \
-    ninja-build \
     pkg-config \
     git \
     wget \
@@ -23,34 +19,15 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     python3-numpy \
     python3-opencv \
-    # libcamera core dependencies (minimal set)
-    libyaml-dev \
-    libssl-dev \
-    libboost-program-options-dev \
-    libdrm-dev \
-    libjpeg-dev \
-    libtiff-dev \
-    libpng-dev \
-    libudev-dev \
-    # FIX: Add libcap-dev for python-prctl dependency
-    libcap-dev \
-    # OpenCV dependencies for computer vision
-    libopencv-dev \
-    libopencv-contrib-dev \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    libgtk-3-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
+    # Basic camera support
     libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
+    v4l-utils \
     # Hardware access
     i2c-tools \
     udev \
-    # Camera tools
-    v4l-utils \
+    # Additional utilities
+    nano \
+    htop \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install ROS2 packages
@@ -76,12 +53,6 @@ RUN apt-get update && apt-get install -y \
     python3-rosdep \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Try to install available libcamera packages from Ubuntu repos
-RUN apt-get update && apt-get install -y \
-    libcamera-dev \
-    libcamera-tools \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* || true
-
 # Install Python dependencies for computer vision and YOLO
 RUN python3 -m pip install --no-cache-dir \
     numpy \
@@ -94,8 +65,8 @@ RUN python3 -m pip install --no-cache-dir \
     ultralytics \
     torch \
     torchvision \
-    # Picamera2 for Pi camera control (fallback to pip)
-    picamera2 \
+    # Camera control (will work with V4L2)
+    pyv4l2 \
     # Hardware monitoring
     smbus2 \
     gpiozero \
@@ -104,62 +75,60 @@ RUN python3 -m pip install --no-cache-dir \
     python-dateutil \
     pyyaml
 
-# Build minimal libcamera from source (lightweight version)
-RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
-    cd libcamera && \
-    git checkout v0.2.0 && \
-    meson setup build \
-        --buildtype=release \
-        -Dv4l2=true \
-        -Dtest=disabled \
-        -Ddocumentation=disabled \
-        -Dpycamera=enabled \
-        -Dpipelines=rpi/vc4,rpi/pisp \
-        -Dipas=rpi/vc4,rpi/pisp && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    cd .. && rm -rf libcamera
-
-# Build libcamera-apps (essential tools)
-RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
-    cd libcamera-apps && \
-    git checkout v1.4.4 && \
-    meson setup build \
-        --buildtype=release \
-        -Denable_libav=false \
-        -Denable_drm=false \
-        -Denable_egl=false \
-        -Denable_qt=false \
-        -Denable_opencv=true \
-        -Denable_tflite=false && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    cd .. && rm -rf libcamera-apps
-
-# Create ROS2 workspace and add camera nodes
+# Create ROS2 workspace
 WORKDIR /ros2_ws
 RUN mkdir -p src
 
 # Set up environment
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc 
 
+# Create basic camera test script
+RUN echo '#!/usr/bin/env python3\n\
+import cv2\n\
+import sys\n\
+\n\
+def test_camera():\n\
+    print("Testing camera access...")\n\
+    \n\
+    # Try different camera indices\n\
+    for i in range(5):\n\
+        print(f"Trying camera {i}...")\n\
+        cap = cv2.VideoCapture(i)\n\
+        if cap.isOpened():\n\
+            ret, frame = cap.read()\n\
+            if ret:\n\
+                print(f"Camera {i} working! Frame shape: {frame.shape}")\n\
+                cap.release()\n\
+                return i\n\
+            else:\n\
+                print(f"Camera {i} opened but no frame")\n\
+        cap.release()\n\
+    \n\
+    print("No working cameras found")\n\
+    return None\n\
+\n\
+if __name__ == "__main__":\n\
+    camera_id = test_camera()\n\
+    if camera_id is not None:\n\
+        print(f"Use camera {camera_id} for your applications")\n\
+        sys.exit(0)\n\
+    else:\n\
+        print("No cameras available")\n\
+        sys.exit(1)\n\
+' > /test_camera.py && chmod +x /test_camera.py
+
 # Create comprehensive test script
 RUN echo '#!/bin/bash\n\
-echo "=== ROS2 Pi5 Camera + YOLO Container Test ==="\n\
+echo "=== ROS2 Pi Camera Container Test (Simple Version) ==="\n\
 echo ""\n\
 echo "=== System Info ==="\n\
 uname -a\n\
 echo ""\n\
-echo "=== libcamera version ==="\n\
-libcamera-hello --version 2>/dev/null || echo "libcamera-hello not found"\n\
-echo ""\n\
-echo "=== Available cameras ==="\n\
-libcamera-hello --list-cameras 2>/dev/null || echo "No cameras detected"\n\
-echo ""\n\
 echo "=== V4L2 devices ==="\n\
 v4l2-ctl --list-devices 2>/dev/null || echo "V4L2 not available"\n\
+echo ""\n\
+echo "=== Video devices ==="\n\
+ls -la /dev/video* 2>/dev/null || echo "No video devices found"\n\
 echo ""\n\
 echo "=== I2C devices ==="\n\
 i2cdetect -l 2>/dev/null || echo "I2C not available"\n\
@@ -170,20 +139,20 @@ echo ""\n\
 echo "=== ROS2 camera packages ==="\n\
 ros2 pkg list | grep -E "(camera|image|vision)"\n\
 echo ""\n\
-echo "=== Test HQ camera (5 seconds) ==="\n\
-timeout 8 libcamera-hello --timeout 5000 --nopreview 2>/dev/null || echo "Camera test failed"\n\
-echo ""\n\
 echo "=== Python packages test ==="\n\
 python3 -c "import cv2; print(f\"OpenCV version: {cv2.__version__}\")" 2>/dev/null || echo "OpenCV import failed"\n\
 python3 -c "import torch; print(f\"PyTorch version: {torch.__version__}\")" 2>/dev/null || echo "PyTorch import failed"\n\
 python3 -c "import ultralytics; print(f\"Ultralytics version: {ultralytics.__version__}\")" 2>/dev/null || echo "Ultralytics import failed"\n\
-python3 -c "from picamera2 import Picamera2; print(\"Picamera2: OK\")" 2>/dev/null || echo "Picamera2 import failed"\n\
-python3 -c "import libcamera; print(\"libcamera Python bindings: OK\")" 2>/dev/null || echo "libcamera Python bindings not available"\n\
+echo ""\n\
+echo "=== Camera test ==="\n\
+python3 /test_camera.py\n\
 echo ""\n\
 echo "=== Test YOLO model download ==="\n\
 python3 -c "from ultralytics import YOLO; model = YOLO(\"yolov8n.pt\"); print(\"YOLO model loaded successfully\")" 2>/dev/null || echo "YOLO model test failed"\n\
 echo ""\n\
 echo "=== Test complete ==="\n\
+echo "NOTE: This version uses V4L2 for camera access."\n\
+echo "For Pi HQ camera, you may need to enable legacy camera support."\n\
 ' > /test_setup.sh && chmod +x /test_setup.sh
 
 # Create UPS monitoring script
