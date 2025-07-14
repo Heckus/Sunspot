@@ -123,13 +123,13 @@ RUN python3 -m pip install --no-cache-dir \
     scikit-image \
     matplotlib \
     # Camera calibration tools
-    camera-calibration-checker \
     # I2C and hardware monitoring
     smbus2 \
     gpiozero \
     # Additional useful packages
     transforms3d \
     python-dateutil
+    ultralytics
 
 # Create workspace
 WORKDIR /workspace
