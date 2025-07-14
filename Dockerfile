@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use bash for shell commands
 SHELL ["/bin/bash", "-c"]
 
-# --- 1. Install All Build-Time and Run-Time Dependencies (from APT) ---
+# --- 1. Install Core Build-Time Dependencies (for libcamera) ---
 RUN apt-get update && apt-get install -y \
     # Build tools for libcamera and others
     build-essential \
@@ -27,7 +27,6 @@ RUN apt-get update && apt-get install -y \
     libavdevice-dev \
     libpng-dev \
     libdrm-dev \
-    libcap-dev \
     # Python tools
     python3-pip \
     python3-dev \
@@ -72,7 +71,11 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 7. Install Python Run-time Dependencies ---
+# --- 7. Install Final Build Dependency for Python Packages ---
+# This is placed here to guarantee it's available for the next step.
+RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/*
+
+# --- 8. Install Python Run-time Dependencies ---
 RUN python3 -m pip install --no-cache-dir \
     numpy \
     opencv-python \
@@ -82,13 +85,13 @@ RUN python3 -m pip install --no-cache-dir \
     pyyaml \
     picamera2
 
-# --- 8. Setup Workspace and Test Script ---
+# --- 9. Setup Workspace and Test Script ---
 WORKDIR /ros2_ws
 RUN mkdir -p src
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
 COPY test_camera_stack.sh /test_camera_stack.sh
 RUN chmod +x /test_camera_stack.sh
 
-# --- 9. Set Default Directory and Command ---
+# --- 10. Set Default Directory and Command ---
 WORKDIR /ros2_ws
 CMD ["/bin/bash"]
