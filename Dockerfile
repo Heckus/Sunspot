@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     libgnutls28-dev \
     libtiff5-dev \
     libevent-dev \
+    libexif-dev \
+    libavcodec-dev \
     # Python tools
     python3-pip \
     python3-dev \
