@@ -1,6 +1,5 @@
 # Description: ROS2 Humble on Debian Bookworm for Raspberry Pi 5
-# This version uses the Debian base image for hardware compatibility AND
-# builds the camera stack from source to ensure its availability.
+# This version uses the Debian base image and adds --break-system-packages to pip.
 FROM debian:bookworm-slim
 
 # Set environment variables
@@ -8,7 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # --- 1. Install ALL Build-Time & System Dependencies ---
-# This is the complete list of .dev packages we discovered were needed.
 RUN apt-get update && apt-get install -y \
     # Build tools
     build-essential \
@@ -39,7 +37,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- 2. Install Python build tools via Pip ---
-RUN pip3 install --upgrade meson jinja2 ply
+RUN pip3 install --upgrade --break-system-packages meson jinja2 ply
 
 # --- 3. Add the ROS2 APT Repository ---
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
@@ -72,7 +70,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-image-view \
     ros-humble-rqt-image-view \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir \
+    && pip3 install --no-cache-dir --break-system-packages \
        picamera2 \
        ultralytics \
        torch \
