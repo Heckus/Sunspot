@@ -76,14 +76,11 @@ RUN apt-get update && apt-get install -y \
     python3-rosdep \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install libcamera system packages
+# Try to install available libcamera packages from Ubuntu repos
 RUN apt-get update && apt-get install -y \
     libcamera-dev \
     libcamera-tools \
-    libcamera-apps \
-    python3-libcamera \
-    python3-picamera2 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* || true
 
 # Install Python dependencies for computer vision and YOLO
 RUN python3 -m pip install --no-cache-dir \
@@ -97,6 +94,8 @@ RUN python3 -m pip install --no-cache-dir \
     ultralytics \
     torch \
     torchvision \
+    # Picamera2 for Pi camera control (fallback to pip)
+    picamera2 \
     # Hardware monitoring
     smbus2 \
     gpiozero \
@@ -104,6 +103,40 @@ RUN python3 -m pip install --no-cache-dir \
     transforms3d \
     python-dateutil \
     pyyaml
+
+# Build minimal libcamera from source (lightweight version)
+RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
+    cd libcamera && \
+    git checkout v0.2.0 && \
+    meson setup build \
+        --buildtype=release \
+        -Dv4l2=true \
+        -Dtest=disabled \
+        -Ddocumentation=disabled \
+        -Dpycamera=enabled \
+        -Dpipelines=rpi/vc4,rpi/pisp \
+        -Dipas=rpi/vc4,rpi/pisp && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    cd .. && rm -rf libcamera
+
+# Build libcamera-apps (essential tools)
+RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
+    cd libcamera-apps && \
+    git checkout v1.4.4 && \
+    meson setup build \
+        --buildtype=release \
+        -Denable_libav=false \
+        -Denable_drm=false \
+        -Denable_egl=false \
+        -Denable_qt=false \
+        -Denable_opencv=true \
+        -Denable_tflite=false && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    cd .. && rm -rf libcamera-apps
 
 # Create ROS2 workspace and add camera nodes
 WORKDIR /ros2_ws
