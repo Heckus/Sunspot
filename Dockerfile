@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     git \
     ninja-build \
     pkg-config \
+    openssh-client \
     # libcamera & libcamera-apps dependencies
     libboost-dev \
     libboost-program-options-dev \
@@ -40,6 +41,11 @@ RUN apt-get update && apt-get install -y \
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# --- Add known git hosts to avoid manual confirmation ---
+RUN mkdir -p -m 0700 ~/.ssh && \
+    ssh-keyscan github.com >> ~/.ssh/known_hosts && \
+    ssh-keyscan gitlab.com >> ~/.ssh/known_hosts && \
+    ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
 # --- 2. Install Python build tools via Pip ---
 RUN pip3 install --upgrade meson jinja2 ply
 
@@ -90,12 +96,9 @@ RUN python3 -m pip install --no-cache-dir \
     picamera2
 
 # --- 9. Setup Workspace and Test Script ---
-WORKDIR /ros2_ws
-RUN mkdir -p src
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
-COPY test_camera_stack.sh /test_camera_stack.sh
-RUN chmod +x /test_camera_stack.sh
 
 # --- 10. Set Default Directory and Command ---
-WORKDIR /ros2_ws
+WORKDIR /home
+RUN git clone git@github.com:Heckus/Sunspot.git
 CMD ["/bin/bash"]
