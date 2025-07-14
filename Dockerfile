@@ -1,5 +1,5 @@
 # Description: ROS2 Humble with Pi 5 Camera Support using libcamera and picamera2
-# This version builds libcamera and installs all required Python build dependencies.
+# This version builds libcamera and installs all required dependencies for it and libcamera-apps.
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use bash for shell commands
 SHELL ["/bin/bash", "-c"]
 
-# --- 1. Install Build-Time and Run-Time Dependencies (from APT) ---
+# --- 1. Install All Build-Time and Run-Time Dependencies (from APT) ---
 RUN apt-get update && apt-get install -y \
     # Build tools for libcamera and others
     build-essential \
@@ -16,8 +16,9 @@ RUN apt-get update && apt-get install -y \
     git \
     ninja-build \
     pkg-config \
-    # libcamera dependencies
+    # libcamera & libcamera-apps dependencies
     libboost-dev \
+    libboost-program-options-dev \
     libgnutls28-dev \
     libtiff5-dev \
     libevent-dev \
@@ -31,7 +32,6 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- 2. Install Python build tools via Pip ---
-# This includes Meson and its Python dependencies (jinja2, ply)
 RUN pip3 install --upgrade meson jinja2 ply
 
 # --- 3. Build and Install libcamera From Source ---
