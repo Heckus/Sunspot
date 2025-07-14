@@ -1,0 +1,21 @@
+services:
+  ros_container:
+    image: ros2-pi5-image
+    container_name: ros2-pi5-container
+    privileged: true
+    network_mode: "host"
+    environment:
+      - DISPLAY=${DISPLAY}
+      - SSH_AUTH_SOCK=/ssh-agent
+    volumes:
+      - /dev:/dev
+      - /sys:/sys
+      - /proc:/proc
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /boot:/boot:ro
+      - ${SSH_AUTH_SOCK}:/ssh-agent
+    devices:
+      - /dev/i2c-1:/dev/i2c-1
+      - /dev/gpiomem:/dev/gpiomem
+    stdin_open: true # Equivalent to -i
+    tty: true        # Equivalent to -t
