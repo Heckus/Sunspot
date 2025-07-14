@@ -76,6 +76,15 @@ RUN apt-get update && apt-get install -y \
     python3-rosdep \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install libcamera system packages
+RUN apt-get update && apt-get install -y \
+    libcamera-dev \
+    libcamera-tools \
+    libcamera-apps \
+    python3-libcamera \
+    python3-picamera2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install Python dependencies for computer vision and YOLO
 RUN python3 -m pip install --no-cache-dir \
     numpy \
@@ -88,8 +97,6 @@ RUN python3 -m pip install --no-cache-dir \
     ultralytics \
     torch \
     torchvision \
-    # Picamera2 for Pi camera control
-    picamera2 \
     # Hardware monitoring
     smbus2 \
     gpiozero \
@@ -97,40 +104,6 @@ RUN python3 -m pip install --no-cache-dir \
     transforms3d \
     python-dateutil \
     pyyaml
-
-# --- Simplified libcamera build ---
-# Use minimal configuration for maximum compatibility
-RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
-    cd libcamera && \
-    git checkout v0.1.0 && \
-    meson setup build \
-        --buildtype=release \
-        -Dv4l2=true \
-        -Dtest=false \
-        -Ddocumentation=false \
-        -Dpycamera=enabled && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    cd .. && rm -rf libcamera
-
-# --- Simplified libcamera-apps build ---
-# Enable OpenCV support for computer vision integration
-RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
-    cd libcamera-apps && \
-    git checkout v1.4.0 && \
-    meson setup build \
-        --buildtype=release \
-        -Denable_libav=false \
-        -Denable_drm=false \
-        -Denable_egl=false \
-        -Denable_qt=false \
-        -Denable_opencv=true \
-        -Denable_tflite=false && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    cd .. && rm -rf libcamera-apps
 
 # Create ROS2 workspace and add camera nodes
 WORKDIR /ros2_ws
