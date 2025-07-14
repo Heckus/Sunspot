@@ -10,7 +10,7 @@ def generate_launch_description():
     package_share_dir = get_package_share_directory('ball_tracker')
 
     # Define the default path to the YOLO model and config files
-    default_yolo_model_path = os.path.join(package_share_dir, '..', '..', '..', 'src', 'ball_tracker', 'config', 'models_ball4.pt')
+    default_yolo_model_path = os.path.join(package_share_dir, 'models', 'models_ball4.pt')
     default_intrinsics_path = os.path.join(package_share_dir, 'config', 'picam_calibration.yaml')
     default_extrinsics_path = os.path.join(package_share_dir, 'config', 'extrinsics.yaml')
 
@@ -47,7 +47,7 @@ def generate_launch_description():
             executable='detection_node',
             name='detection_node',
             parameters=[
-                {'yolo_model_path': LaunchConfiguration('yolo_model')},
+                {'yolo_model_path': default_yolo_model_path},
                 {'confidence_threshold': LaunchConfiguration('confidence_threshold')}
             ],
             output='screen'
