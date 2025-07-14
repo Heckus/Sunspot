@@ -98,37 +98,27 @@ RUN python3 -m pip install --no-cache-dir \
     python-dateutil \
     pyyaml
 
-# --- IMPROVED libcamera build ---
-# More robust configuration with better error handling
+# --- Simplified libcamera build ---
+# Use minimal configuration for maximum compatibility
 RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
     cd libcamera && \
-    # Use a more stable release
-    git checkout v0.2.0 && \
-    # Configure with more explicit options
+    git checkout v0.1.0 && \
     meson setup build \
         --buildtype=release \
         -Dv4l2=true \
         -Dtest=false \
         -Ddocumentation=false \
-        -Dpycamera=enabled \
-        -Dpipelines=rpi/vc4 \
-        -Dipas=rpi/vc4 \
-        -Dgstreamer=disabled \
-        -Dqcam=disabled \
-        -Dlc-compliance=disabled \
-        -Dcam=enabled && \
+        -Dpycamera=enabled && \
     ninja -C build && \
     ninja -C build install && \
     ldconfig && \
     cd .. && rm -rf libcamera
 
-# --- IMPROVED libcamera-apps build ---
-# More conservative build with better compatibility
+# --- Simplified libcamera-apps build ---
+# Enable OpenCV support for computer vision integration
 RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
     cd libcamera-apps && \
-    # Use a more stable version
-    git checkout v1.5.0 && \
-    # Configure with minimal features for maximum compatibility
+    git checkout v1.4.0 && \
     meson setup build \
         --buildtype=release \
         -Denable_libav=false \
@@ -136,8 +126,7 @@ RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
         -Denable_egl=false \
         -Denable_qt=false \
         -Denable_opencv=true \
-        -Denable_tflite=false \
-        -Denable_hailo=false && \
+        -Denable_tflite=false && \
     ninja -C build && \
     ninja -C build install && \
     ldconfig && \
