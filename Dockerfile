@@ -67,6 +67,11 @@ RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
 RUN ldconfig && \
     rm -rf /usr/src/libcamera /usr/src/libcamera-apps
 
+# --- FIX: Add ROS GPG Key ---
+RUN apt-get update && apt-get install -y curl && \
+    curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
 # --- 6. Install ROS2 Packages ---
 RUN apt-get update && apt-get install -y \
     ros-humble-cv-bridge \
@@ -80,7 +85,6 @@ RUN apt-get update && apt-get install -y \
     ros-humble-geometry-msgs \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
 # --- 7. Install Final Build Dependency for Python Packages ---
 # This is placed here to guarantee it's available for the next step.
 RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
