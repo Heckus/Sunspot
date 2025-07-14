@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     libavcodec-dev \
     libavdevice-dev \
     libpng-dev \
+    libdrm-dev \
     # Python tools
     python3-pip \
     python3-dev \
