@@ -1,20 +1,46 @@
-# Description: ROS2 Humble on Debian Bookworm for Raspberry Pi 5
-# This version uses a Debian base image and adds all necessary build dependencies.
-FROM debian:bookworm-slim
+# Stage 1: Build ROS 2 from source on a Debian Bookworm base
+FROM debian:bookworm as ros2_builder
 
-# Set environment variables
-ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=C.UTF-8
-
-# --- 1. Install ALL Build-Time & System Dependencies ---
+# Install build tools and dependencies
 RUN apt-get update && apt-get install -y \
-    # Build tools
     build-essential \
     cmake \
     git \
-    ninja-build \
-    pkg-config \
-    # Dependencies for libcamera & libcamera-apps
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    python3-vcstool \
+    wget
+
+# Initialize rosdep
+RUN rosdep init && rosdep update
+
+# Create a ROS 2 workspace
+WORKDIR /ros2_ws
+RUN wget https://raw.githubusercontent.com/ros2/ros2/humble/ros2.repos \
+    && vcs import src < ros2.repos
+
+# Install ROS 2 dependencies
+RUN rosdep install --from-paths src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1"
+
+# Build the ROS 2 workspace
+RUN . /usr/share/colcon_cd/function/colcon_cd.sh && \
+    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+# ---
+
+# Stage 2: Create the final runtime image
+FROM debian:bookworm-slim
+
+# Set environment
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+
+# Install all runtime dependencies we discovered previously
+RUN apt-get update && apt-get install -y \
+    # Build tools for python packages
+    build-essential \
+    cmake \
+    # Dependencies for libcamera & python
     libboost-dev \
     libboost-program-options-dev \
     libgnutls28-dev \
@@ -27,63 +53,45 @@ RUN apt-get update && apt-get install -y \
     libdrm-dev \
     libcap-dev \
     # Python & Other Tools
-    curl \
-    gnupg \
-    lsb-release \
     python3-pip \
     python3-dev \
     python3-opencv \
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Install Python build tools via Pip ---
-# Added PyYAML for libcamera build process
+# Install python build tools
 RUN pip3 install --upgrade --break-system-packages meson jinja2 ply pyyaml
 
-# --- 3. Add the ROS2 APT Repository ---
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-# --- 4. Build and Install libcamera From Source ---
+# Build and install libcamera & apps
 WORKDIR /usr/src
 RUN git clone https://github.com/raspberrypi/libcamera.git && \
     cd libcamera && \
     meson build -Dpipelines=rpi/pisp -Dtest=false -Dv4l2=true && \
     ninja -C build install
-
-# --- 5. Build and Install libcamera-apps From Source ---
 WORKDIR /usr/src
 RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
     cd libcamera-apps && \
     meson build && \
     ninja -C build install
-
-# --- 6. Update Library Links & Cleanup ---
 RUN ldconfig && \
     rm -rf /usr/src/libcamera /usr/src/libcamera-apps
 
-# --- 7. Install ROS2 Packages & Final Python Runtime ---
-RUN apt-get update && apt-get install -y \
-    ros-humble-ros-base \
-    ros-humble-cv-bridge \
-    ros-humble-image-transport \
-    ros-humble-camera-info-manager \
-    ros-humble-image-view \
-    ros-humble-rqt-image-view \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages \
+# Copy the compiled ROS 2 from the builder stage
+COPY --from=ros2_builder /ros2_ws /ros2_ws
+
+# Install final Python runtime packages
+RUN pip3 install --no-cache-dir --break-system-packages \
        picamera2 \
        ultralytics \
        torch \
        torchvision
 
-# --- 8. Setup Workspace and Test Script ---
+# Setup workspace and test script
 WORKDIR /ros2_ws
-RUN mkdir -p src
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
 COPY test_camera_stack.sh /test_camera_stack.sh
 RUN chmod +x /test_camera_stack.sh
 
-# --- 9. Set Default Directory and Command ---
+# Set default directory and command
 WORKDIR /ros2_ws
 CMD ["/bin/bash"]
