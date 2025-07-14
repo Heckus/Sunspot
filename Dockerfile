@@ -1,5 +1,5 @@
 # Description: ROS2 Humble on Debian Bookworm for Raspberry Pi 5
-# This version uses the Debian base image and adds --break-system-packages to pip.
+# This version uses a Debian base image and adds all necessary build dependencies.
 FROM debian:bookworm-slim
 
 # Set environment variables
@@ -37,7 +37,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- 2. Install Python build tools via Pip ---
-RUN pip3 install --upgrade --break-system-packages meson jinja2 ply
+# Added PyYAML for libcamera build process
+RUN pip3 install --upgrade --break-system-packages meson jinja2 ply pyyaml
 
 # --- 3. Add the ROS2 APT Repository ---
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
