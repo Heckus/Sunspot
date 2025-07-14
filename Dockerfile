@@ -100,5 +100,4 @@ RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
 
 # --- 10. Set Default Directory and Command ---
 WORKDIR /home
-RUN git clone git@github.com:Heckus/Sunspot.git
 CMD ["/bin/bash"]
