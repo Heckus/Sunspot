@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
     libevent-dev \
     libexif-dev \
     libavcodec-dev \
+    libavdevice-dev \
+    libpng-dev \
     # Python tools
     python3-pip \
     python3-dev \
