@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     libavdevice-dev \
     libpng-dev \
     libdrm-dev \
+    libcap-dev \
     # Python tools
     python3-pip \
     python3-dev \
