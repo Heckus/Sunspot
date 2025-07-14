@@ -37,7 +37,7 @@ RUN pip3 install --upgrade meson
 WORKDIR /usr/src
 RUN git clone https://github.com/raspberrypi/libcamera.git && \
     cd libcamera && \
-    meson build -Dpipelines=raspberrypi -Dtest=false -Dv4l2=true && \
+    meson build -Dpipelines=rpi/pisp -Dtest=false -Dv4l2=true && \
     ninja -C build install
 
 # --- 4. Build and Install libcamera-apps From Source ---
