@@ -41,12 +41,12 @@ RUN apt-get update && apt-get install -y \
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- Add known git hosts to avoid manual confirmation ---
-# RUN mkdir -p -m 0700 ~/.ssh && \
-#     ssh-keyscan github.com >> ~/.ssh/known_hosts && \
-#     ssh-keyscan gitlab.com >> ~/.ssh/known_hosts && \
-#     ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
-# --- 2. Install Python build tools via Pip ---
+#--- Add known git hosts to avoid manual confirmation ---
+RUN mkdir -p -m 0700 ~/.ssh && \
+    ssh-keyscan github.com >> ~/.ssh/known_hosts && \
+    ssh-keyscan gitlab.com >> ~/.ssh/known_hosts && \
+    ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+#--- 2. Install Python build tools via Pip ---
 RUN pip3 install --upgrade meson jinja2 ply
 
 # --- 3. Build and Install libcamera From Source ---
@@ -66,16 +66,6 @@ RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
 # --- 5. Update Library Links and Clean Up Build Artifacts ---
 RUN ldconfig && \
     rm -rf /usr/src/libcamera /usr/src/libcamera-apps
-
-# --- FIX: Re-add Ubuntu and ROS GPG Keys ---
-# RUN apt-get update && \
-#     apt-get install -y --no-install-recommends \
-#         gnupg \
-#         ubuntu-keyring \
-#         curl && \
-#     rm -f /etc/apt/sources.list.d/ros2.list && \
-#     curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-#     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
 # --- 6. Install ROS2 Packages ---
 RUN apt-get update && apt-get install -y \
