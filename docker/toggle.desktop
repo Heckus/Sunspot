@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Name=Toggle Container
+Comment=Starts or stops the Docker container
+Exec=/home/hecke/toggle_container.sh
+Icon=docker
+Terminal=false
+Type=Application

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Name=Exec into Container
+Comment=Open a bash shell in a specific service
+Exec=lxterminal -e "sh -c 'cd /home/hecke/ && docker compose exec ros_container bash; exec bash'"
+Icon=access
+Terminal=false
+Type=Application
+Name[en_GB]=ContainerConnect.Desktop
