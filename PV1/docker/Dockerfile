@@ -70,6 +70,7 @@ RUN ldconfig && \
 # --- 6. Install ROS2 Packages ---
 RUN apt-get update && apt-get install -y \
     ros-humble-cv-bridge \
+    ros-humble-rviz2 \
     ros-humble-image-transport \
     ros-humble-camera-info-manager \
     ros-humble-image-proc \
