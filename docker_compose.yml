@@ -14,6 +14,7 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - /boot:/boot:ro
       - ${SSH_AUTH_SOCK}:/ssh-agent
+      - ./Sunspot:/root/Sunspot
     devices:
       - /dev/i2c-1:/dev/i2c-1
       - /dev/gpiomem:/dev/gpiomem
