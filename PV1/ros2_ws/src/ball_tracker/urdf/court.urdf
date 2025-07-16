@@ -3,12 +3,20 @@
 
   <link name="world"/>
 
-  <link name="court_link">
+  <!-- <link name="court_link">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="package://ball_tracker/meshes/model.dae"/>
       </geometry>
+    </visual>
+  </link> -->
+  <link name="court_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+      <box size="18 9 0.1" /> 
+    </geometry>
     </visual>
   </link>
 
