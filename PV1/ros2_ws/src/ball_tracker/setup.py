@@ -16,7 +16,12 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
         # Include all config files from the 'config' directory
         (os.path.join('share', package_name, 'config'), glob(os.path.join('config', '*.yaml'))),
+        # Include all model files from the 'models' directory
         (os.path.join('share', package_name, 'models'), glob(os.path.join('models', '*.pt'))),
+        
+        # --- ADD THESE TWO LINES ---
+        (os.path.join('share', package_name, 'urdf'), glob(os.path.join('urdf', '*.urdf'))),
+        (os.path.join('share', package_name, 'meshes'), glob(os.path.join('meshes', '*.dae'))),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
