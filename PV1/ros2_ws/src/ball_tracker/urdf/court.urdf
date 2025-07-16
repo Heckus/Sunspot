@@ -15,7 +15,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-      <box size="18 9 0.1" /> 
+      <box size="20 20 20 " /> 
     </geometry>
     </visual>
   </link>
