@@ -1,95 +1,173 @@
+"""
+ros2 launch ball_tracker ball_tracker_launch.py
+
+ros2 launch ball_tracker ball_tracker_launch.py save_frames:=True battery_monitor:=True run_intrinsic_cal:=True
+
+ros2 launch ball_tracker ball_tracker_launch.py run_intrinsic_cal:=True checkerboard_size:=9x7 square_size:=0.020
+"""
+
 from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    RegisterEventHandler,
+    OpaqueFunction,
+    LogInfo,
+)
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.substitutions import (
+    FindExecutable,
+    LaunchConfiguration,
+    PythonExpression,
+)
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 import os
 
+
 def generate_launch_description():
-    # Get the package share directory
-    package_share_dir = get_package_share_directory('ball_tracker')
+    package_share_dir = get_package_share_directory("ball_tracker")
+    default_rviz_config_path = os.path.join(
+        package_share_dir, "rviz", "ball_tracker.rviz"
+    )
 
-    # Define the default path to the YOLO model and config files
-    default_yolo_model_path = os.path.join(package_share_dir, 'models', 'models_ball4.pt')
-    default_intrinsics_path = os.path.join(package_share_dir, 'config', 'picam_calibration.yaml')
-    default_extrinsics_path = os.path.join(package_share_dir, 'config', 'extrinsics.yaml')
+    # --- Declare Launch Arguments ---
+    declare_save_frames_arg = DeclareLaunchArgument(
+        "save_frames", default_value="False", description="Enable saving raw frames"
+    )
+    declare_battery_monitor_arg = DeclareLaunchArgument(
+        "battery_monitor",
+        default_value="False",
+        description="Enable the battery monitor",
+    )
+    declare_run_intrinsic_cal_arg = DeclareLaunchArgument(
+        "run_intrinsic_cal",
+        default_value="False",
+        description="Run the intrinsic camera calibration tool",
+    )
+    declare_checkerboard_size_arg = DeclareLaunchArgument(
+        "checkerboard_size",
+        default_value="8x6",
+        description="Checkerboard internal corners (e.g., 8x6)",
+    )
+    declare_checkerboard_square_size_arg = DeclareLaunchArgument(
+        "square_size",
+        default_value="0.025",
+        description="Size of a checkerboard square in meters",
+    )
 
-    return LaunchDescription([
-        # --- Declare Launch Arguments ---
-        DeclareLaunchArgument('cam_width', default_value='1280', description='Camera frame width'),
-        DeclareLaunchArgument('cam_height', default_value='720', description='Camera frame height'),
-        DeclareLaunchArgument('cam_framerate', default_value='30.0', description='Camera framerate'),
-        DeclareLaunchArgument('yolo_model', default_value=default_yolo_model_path, description='Path to the YOLOv8 model file'),
-        DeclareLaunchArgument('confidence_threshold', default_value='0.65', description='Confidence threshold for YOLO detection'),
-        DeclareLaunchArgument('ball_radius', default_value='0.105', description='Physical radius of the ball in meters'),
-        DeclareLaunchArgument('save_frames', default_value='False', description='Enable/disable saving raw frames'),
-        DeclareLaunchArgument('save_path', default_value='/media/pi/USB_DRIVE/ros_images', description='Path to save raw frames'),
+    # --- Get Launch Configurations ---
+    run_intrinsic_cal = LaunchConfiguration("run_intrinsic_cal")
+    save_frames = LaunchConfiguration("save_frames")
+    battery_monitor = LaunchConfiguration("battery_monitor")
 
-        # --- Node Definitions ---
+    # --- Define Nodes ---
+    camera_node = Node(
+        package="ball_tracker",
+        executable="camera_node",
+        name="camera_node",
+        output="screen",
+        # Assuming camera_info_manager will handle loading the calibration file
+    )
 
-        # 1. Camera Node
-        Node(
-            package='ball_tracker',
-            executable='camera_node',
-            name='camera_node',
-            parameters=[
-                {'camera.width': LaunchConfiguration('cam_width')},
-                {'camera.height': LaunchConfiguration('cam_height')},
-                {'camera.framerate': LaunchConfiguration('cam_framerate')},
-                {'camera_info_url': default_intrinsics_path}
-            ],
-            output='screen'
-        ),
+    # Intrinsic calibration node (runs conditionally)
+    intrinsic_calibrator = ExecuteProcess(
+        cmd=[
+            FindExecutable(name="ros2"),
+            " run camera_calibration cameracalibrator",
+            " --size ",
+            LaunchConfiguration("checkerboard_size"),
+            " --square ",
+            LaunchConfiguration("square_size"),
+            " image:=/image_raw",
+        ],
+        shell=True,
+        condition=IfCondition(run_intrinsic_cal),
+    )
 
-        # 2. Detection Node (with dynamic parameter setting)
-        Node(
-            package='ball_tracker',
-            executable='detection_node',
-            name='detection_node',
-            parameters=[
-                {'yolo_model_path': default_yolo_model_path},
-                {'confidence_threshold': LaunchConfiguration('confidence_threshold')}
-            ],
-            output='screen'
-        ),
+    # Extrinsic calibration node
+    extrinsic_calibrator = ExecuteProcess(
+        cmd=[
+            FindExecutable(name="ros2"),
+            " run ball_tracker extrinsic_calibrator",
+        ],
+        shell=True,
+        # Will be launched by an event handler
+    )
 
-        # 3. Calculation Node
-        Node(
-            package='ball_tracker',
-            executable='calculation_node',
-            name='calculation_node',
-            parameters=[
-                {'ball_radius_m': LaunchConfiguration('ball_radius')}
-            ],
-            output='screen'
-        ),
+    # Core application nodes
+    detection_node = Node(
+        package="ball_tracker",
+        executable="detection_node",
+        name="detection_node",
+        output="screen",
+    )
+    calculation_node = Node(
+        package="ball_tracker",
+        executable="calculation_node",
+        name="calculation_node",
+        output="screen",
+    )
+    rviz2_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="rviz2",
+        arguments=["-d", default_rviz_config_path],
+    )
 
-        # 4. Battery Monitor Node
-        Node(
-            package='ball_tracker',
-            executable='battery_monitor',
-            name='battery_monitor_node',
-            output='screen'
-        ),
-        
-        # 5. Frame Saver Node
-        Node(
-            package='ball_tracker',
-            executable='frame_saver',
-            name='frame_saver_node',
-            parameters=[
-                {'saving_enabled': LaunchConfiguration('save_frames')},
-                {'save_path': LaunchConfiguration('save_path')}
-            ],
-            output='screen'
-        ),
-        
-        # 6. RViz2 Node for Visualization
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            # arguments=['-d', os.path.join(package_share_dir, 'rviz', 'ball_tracker.rviz')] # Optional: load a saved RViz config
-            output='log'
-        ),
-    ])
+    # Optional nodes
+    frame_saver_node = Node(
+        package="ball_tracker",
+        executable="frame_saver",
+        name="frame_saver_node",
+        output="screen",
+        condition=IfCondition(save_frames),
+    )
+    battery_monitor_node = Node(
+        package="ball_tracker",
+        executable="battery_monitor",
+        name="battery_monitor_node",
+        output="screen",
+        condition=IfCondition(battery_monitor),
+    )
+
+    # --- Define Event Handlers for Sequencing ---
+
+    # This handler launches the main application after extrinsic calibration finishes
+    main_app_handler = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=extrinsic_calibrator,
+            on_exit=[detection_node, calculation_node, rviz2_node],
+        )
+    )
+
+    # This function decides what to do based on the 'run_intrinsic_cal' argument
+    def launch_logic(context):
+        if context.launch_configurations["run_intrinsic_cal"] == "True":
+            # If running intrinsic calibration, launch extrinsic AFTER intrinsic is done
+            handler = RegisterEventHandler(
+                event_handler=OnProcessExit(
+                    target_action=intrinsic_calibrator, on_exit=[extrinsic_calibrator]
+                )
+            )
+            return [intrinsic_calibrator, handler]
+        else:
+            # Otherwise, launch extrinsic calibration right away
+            return [extrinsic_calibrator]
+
+    return LaunchDescription(
+        [
+            declare_run_intrinsic_cal_arg,
+            declare_checkerboard_size_arg,
+            declare_checkerboard_square_size_arg,
+            declare_save_frames_arg,
+            declare_battery_monitor_arg,
+            camera_node,
+            frame_saver_node,
+            battery_monitor_node,
+            main_app_handler,
+            # The OpaqueFunction allows for conditional logic at launch time
+            OpaqueFunction(function=launch_logic),
+        ]
+    )
