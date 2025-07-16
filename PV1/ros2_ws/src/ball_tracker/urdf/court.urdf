@@ -7,7 +7,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="package://ball_tracker/meshes/Untitled.dae"/>
+        <mesh filename="package://ball_tracker/meshes/Model.dae"/>
       </geometry>
     </visual>
   </link>
