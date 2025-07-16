@@ -4,16 +4,11 @@ from launch_ros.actions import Node
 import os
 
 def generate_launch_description():
-    # Get the path to your package
     package_share_dir = get_package_share_directory('ball_tracker')
-
-    # Get the path to the URDF file
     urdf_file = os.path.join(package_share_dir, 'urdf', 'court.urdf')
 
-    # --- Nodes to Launch ---
-
     # 1. Robot State Publisher
-    # Reads the URDF file and publishes the /robot_description topic and tf transforms
+    # Publishes the transform from 'world' to 'court_link' based on the URDF
     robot_state_publisher_node = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -21,18 +16,30 @@ def generate_launch_description():
         output='screen',
         arguments=[urdf_file]
     )
+    
+    # 2. Static Transform Publisher (The New Addition!)
+    # Publishes a static transform from 'map' to 'world'. This creates the 'map' frame.
+    static_tf_publisher_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='static_transform_publisher',
+        arguments=[
+            '0', '0', '0',  # x, y, z offset
+            '0', '0', '0',  # roll, pitch, yaw rotation
+            'map',         # parent frame
+            'world'        # child frame
+        ]
+    )
 
-    # 2. RViz2
-    # Visualizer tool
+    # 3. RViz2
     rviz2_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2'
-        # You can add a custom RViz config file here if you have one
-        # arguments=['-d', os.path.join(package_share_dir, 'rviz', 'court.rviz')]
     )
 
     return LaunchDescription([
         robot_state_publisher_node,
+        static_tf_publisher_node, # Add the new node to the launch description
         rviz2_node
     ])
