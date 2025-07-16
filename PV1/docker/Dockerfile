@@ -79,6 +79,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-rqt-image-view \
     ros-humble-sensor-msgs \
     ros-humble-geometry-msgs \
+    ros-humble-camera-calibration \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # --- 7. Install Final Build Dependency for Python Packages ---
