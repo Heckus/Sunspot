@@ -47,8 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- 2. Install specific versions of Python build tools ---
 RUN pip3 install --upgrade \
-    "meson>=0.63.0" \
-    "colcon-meson>=0.2.0" \
+    meson \
+    colcon-meson \
     jinja2 \
     ply \
     setuptools \
@@ -58,10 +58,10 @@ RUN pip3 install --upgrade \
 WORKDIR /tmp
 RUN git clone  https://github.com/raspberrypi/libcamera.git && \
     cd libcamera && \
-    meson setup build --buildtype=release \
-        -Dpipelines=rpi/pisp \
-        -Dv4l2=true \
-        -Dtest=false && \
+    meson setup build --prefix=/usr --buildtype=release \
+    -Dpipelines=rpi/pisp \
+    -Dv4l2=true \
+    -Dtest=false && \
     ninja -C build && \
     ninja -C build install && \
     ldconfig && \
