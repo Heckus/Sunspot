@@ -56,16 +56,11 @@ RUN pip3 install --upgrade \
 
 # --- 3. Build libcamera separately (system-wide) ---
 WORKDIR /tmp
-RUN git clone --branch v0.3.0 https://github.com/raspberrypi/libcamera.git && \
+RUN git clone  https://github.com/raspberrypi/libcamera.git && \
     cd libcamera && \
     meson setup build --buildtype=release \
-        -Dpipelines=rpi/vc4,rpi/pisp \
-        -Dipas=rpi/vc4,rpi/pisp \
-        -Dv4l2=enabled \
-        -Dqcam=disabled \
-        -Dcam=disabled \
-        -Dlc-compliance=disabled \
-        -Dgstreamer=disabled \
+        -Dpipelines=rpi/pisp \
+        -Dv4l2=true \
         -Dtest=false && \
     ninja -C build && \
     ninja -C build install && \
