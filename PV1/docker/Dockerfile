@@ -36,13 +36,11 @@ RUN pip3 install --upgrade meson jinja2 ply colcon-meson
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 RUN git clone https://github.com/raspberrypi/libcamera.git -b v0.2.0 src/libcamera && \
-    git clone https://github.com/christianrauch/camera_ros.git  src/camera_ros
+    git clone https://github.com/christianrauch/camera_ros.git -b main src/camera_ros
 
 # --- 4. Install All ROS Dependencies for the Workspace ---
-# rosdep will read the package.xml for both packages and install their dependencies.
-# The '--skip-keys=libcamera' flag is crucial, as it tells rosdep "don't install the old
-# libcamera from apt, I have the source code for it right here".
-RUN rosdep init && \
+# This version of the command safely skips 'rosdep init' if it has already been run.
+RUN if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y --skip-keys=libcamera
 
