@@ -1,5 +1,5 @@
-# Description: ROS2 Humble with Pi 5 Camera Support using libcamera and picamera2
-# This version includes graphics libraries (Qt5) to enable preview windows.
+# Description: ROS2 Humble with CORRECT Pi 5 Camera Support using libcamera and picamera2
+# This version builds both libcamera AND camera_ros from source to guarantee correct linking.
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -8,16 +8,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use bash for shell commands
 SHELL ["/bin/bash", "-c"]
 
-# --- 1. Install Core Build-Time Dependencies (for libcamera) ---
-RUN apt-get update && apt-get install -y \
-    # Build tools for libcamera and others
+# --- 1. Install Core Build-Time Dependencies (for libcamera AND ROS) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Build tools
     build-essential \
     cmake \
     git \
     ninja-build \
     pkg-config \
     openssh-client \
-    # libcamera & libcamera-apps dependencies
+    # libcamera & ROS dependencies
     libboost-dev \
     libboost-program-options-dev \
     libgnutls28-dev \
@@ -28,14 +28,13 @@ RUN apt-get update && apt-get install -y \
     libavdevice-dev \
     libpng-dev \
     libdrm-dev \
-    # Graphics libraries for preview window
     qtbase5-dev \
     libegl1-mesa-dev \
     libgles2-mesa-dev \
-    # Python tools
+    # Python and ROS tools
     python3-pip \
     python3-dev \
-    # Other tools
+    python3-rosdep \
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -63,21 +62,28 @@ RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
     ninja -C build install
 
 # --- 5. CRITICAL FIX: Update Library Links ---
-# This command forces the system to recognize the new libcamera you just built
-RUN ldconfig && \
-    rm -rf /usr/src/libcamera /usr/src/libcamera-apps
+# This forces the system to recognize the new libcamera you just built
+RUN ldconfig
 
-# --- 6. Add the Raspberry Pi Repository (NEW STEP) ---
-# This is needed for the pre-compiled ROS camera node
-RUN apt-get update && apt-get install -y curl gnupg && \
-    curl -s https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | apt-key add - && \
-    echo "deb https://archive.raspberrypi.com/debian/ bullseye main" > /etc/apt/sources.list.d/raspberrypi.list && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# --- 6. Create ROS Workspace and Add camera_ros ---
+# This step creates a workspace and clones the correct camera_ros fork into it.
+RUN mkdir -p /ros2_ws/src
+WORKDIR /ros2_ws
+RUN git clone https://github.com/christianrauch/camera_ros.git -b humble src/camera_ros
 
-# --- 7. Install ROS2 Packages (MODIFIED STEP) ---
-# Now we add ros-humble-camera-ros, which will link against the new libcamera
-RUN apt-get update && apt-get install -y \
-    ros-humble-camera-ros \
+# --- 7. Install ROS Dependencies for a Source Build ---
+# rosdep installs all libraries needed to COMPILE the packages in your workspace.
+RUN rosdep init && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y
+
+# --- 8. Build the ROS Workspace (Compiles camera_ros) ---
+# This is the key: it compiles camera_ros from source, linking it against the new libcamera.
+RUN . /opt/ros/humble/setup.bash && colcon build --symlink-install
+
+# --- 9. Install Remaining ROS and Python Packages ---
+# Install other pre-built ROS nodes and the final Python packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-cv-bridge \
     ros-humble-rviz2 \
     ros-humble-image-transport \
@@ -93,8 +99,6 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 8. Install Python Run-time Dependencies (No change) ---
-RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
 RUN python3 -m pip install --no-cache-dir \
     "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
@@ -104,9 +108,8 @@ RUN python3 -m pip install --no-cache-dir \
     "pyyaml" \
     "picamera2"
 
-# --- 9. Setup Workspace and Test Script ---
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
-
-# --- 10. Set Default Directory and Command ---
+# --- 10. Final Setup ---
+# Source the new workspace we built inside the image.
+RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
 WORKDIR /home
 CMD ["/bin/bash"]
