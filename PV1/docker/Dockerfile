@@ -47,8 +47,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- 2. Install specific versions of Python build tools ---
 RUN pip3 install --upgrade \
-    meson \
-    colcon-meson \
+    "meson==0.63.3" \
+    "colcon-meson==0.2.1" \
     jinja2 \
     ply \
     setuptools \
@@ -100,7 +100,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 
 # --- 9. Build camera_ros ---
+# --- 9. Build camera_ros ---
 RUN . /opt/ros/humble/setup.bash && \
+    export CMAKE_PREFIX_PATH=/usr:$CMAKE_PREFIX_PATH && \
     colcon build --symlink-install \
     --cmake-args -DCMAKE_BUILD_TYPE=Release \
     --parallel-workers 1
