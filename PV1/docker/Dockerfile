@@ -1,5 +1,5 @@
-# Description: ROS2 Humble with Pi 5 Camera Support
-# Uses a two-stage approach: build libcamera separately, then build camera_ros
+# Description: ROS2 Humble with Pi Camera Support using proper libcamera integration
+# Uses colcon workspace approach with Raspberry Pi libcamera fork
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -14,7 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ninja-build \
     pkg-config \
-    # libcamera dependencies
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    # libcamera dependencies (as per libcamera.org/getting-started.html)
     libboost-dev \
     libgnutls28-dev \
     libtiff5-dev \
@@ -28,9 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libudev-dev \
     libdrm-dev \
     libjpeg-dev \
+    libdw-dev \
+    libunwind-dev \
     # ROS tools & dependencies
     curl \
-    python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \
     # OpenCV and image processing
@@ -43,46 +47,42 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # I2C tools
     i2c-tools \
     libi2c-dev \
+    # Video4Linux utilities for debugging
+    v4l-utils \
+    # Add dependency for python-prctl (needed by picamera2)
+    libcap-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Install specific versions of Python build tools ---
-RUN pip3 install --upgrade \
-    "meson==0.63.3" \
-    "colcon-meson==0.2.1" \
+# --- 2. Install colcon-meson (with compatible meson version) ---
+RUN pip3 install --no-cache-dir \
+    "meson>=0.56,<1.0" \
+    "colcon-meson>=0.2.0" \
     jinja2 \
-    ply \
-    setuptools \
-    wheel
+    ply
 
-# --- 3. Build libcamera separately (system-wide) ---
-WORKDIR /tmp
-RUN git clone  https://github.com/raspberrypi/libcamera.git && \
-    cd libcamera && \
-    meson setup build --prefix=/usr --buildtype=release \
-    -Dpipelines=rpi/pisp \
-    -Dv4l2=true \
-    -Dtest=false && \
-    ninja -C build && \
-    ninja -C build install && \
-    ldconfig && \
-    cd .. && rm -rf libcamera
+# --- 3. Create workspace and setup libcamera + camera_ros ---
+RUN mkdir -p /camera_ws/src
+WORKDIR /camera_ws
 
-# --- 4. Create ROS Workspace ---
-RUN mkdir -p /ros2_ws/src
-WORKDIR /ros2_ws
+# Clone Raspberry Pi libcamera fork (essential for newer camera modules)
+RUN cd src && \
+    git clone https://github.com/raspberrypi/libcamera.git
 
 # Clone camera_ros
-RUN git clone https://github.com/christianrauch/camera_ros.git -b main src/camera_ros
+RUN cd src && \
+    git clone https://github.com/christianrauch/camera_ros.git -b main
 
-# --- 5. Initialize rosdep ---
+# --- 4. Initialize rosdep ---
 RUN rosdep init || true && rosdep update
 
-# --- 6. Install ROS Dependencies ---
+# --- 5. Install ROS Dependencies (skip libcamera to avoid conflicts) ---
 RUN apt-get update && \
     rosdep install --from-paths src --ignore-src -r -y \
-    --skip-keys="libcamera clang-format ros-humble-ament-cmake-clang-format ros-humble-ament-cmake-mypy ros-humble-ament-cmake-pyflakes" || true
+    --rosdistro humble \
+    --skip-keys="libcamera clang-format" && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 7. Install missing ROS packages manually ---
+# --- 6. Install additional ROS packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-info-manager \
     ros-humble-cv-bridge \
@@ -96,34 +96,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-builtin-interfaces \
     ros-humble-rosidl-default-generators \
     ros-humble-rosidl-default-runtime \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-
-# --- 9. Build camera_ros ---
-# --- 9. Build camera_ros ---
-RUN . /opt/ros/humble/setup.bash && \
-    export CMAKE_PREFIX_PATH=/usr:$CMAKE_PREFIX_PATH && \
-    colcon build --symlink-install \
-    --cmake-args -DCMAKE_BUILD_TYPE=Release \
-    --parallel-workers 1
-
-# --- 10. Install Additional ROS packages ---
-RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rviz2 \
-    ros-humble-camera-info-manager \
     ros-humble-image-proc \
     ros-humble-vision-opencv \
     ros-humble-image-view \
     ros-humble-rqt-image-view \
     ros-humble-vision-msgs \
     ros-humble-camera-calibration \
-    python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
-RUN python3 -m pip install --no-cache-dir "setuptools<58"
+# --- 7. Build libcamera first, then camera_ros ---
+# Note: Using parallel-workers 1 and disabling python bindings for reliability in low-memory environments.
+# If you have allocated more memory to Docker (e.g., >8GB), you can try increasing workers and removing -Dpython=disabled.
+RUN . /opt/ros/humble/setup.bash && \
+    # First, build and install only libcamera
+    colcon build \
+        --packages-select libcamera \
+        --event-handlers=console_direct+ \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -Dpython=disabled \
+        --parallel-workers 1 && \
+    \
+    # Now, source the new install space and build the rest
+    . /camera_ws/install/setup.bash && \
+    colcon build \
+        --packages-up-to camera_ros \
+        --event-handlers=console_direct+ \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release \
+        --parallel-workers 1
 
-# --- 11. Install Python packages ---
+# --- 8. Install Python packages ---
 RUN python3 -m pip install --no-cache-dir \
     "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
@@ -133,8 +134,11 @@ RUN python3 -m pip install --no-cache-dir \
     "pyyaml" \
     "picamera2"
 
-# --- 12. Final Setup ---
-RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
+# --- 9. Setup environment ---
+RUN echo "source /camera_ws/install/setup.bash" >> /root/.bashrc
+
+# --- 10. Create camera info directory ---
+RUN mkdir -p /root/.ros/camera_info
 
 # Set working directory
 WORKDIR /home
