@@ -36,7 +36,7 @@ RUN pip3 install --upgrade meson jinja2 ply colcon-meson
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
 RUN git clone https://github.com/raspberrypi/libcamera.git -b v0.2.0 src/libcamera && \
-    git clone https://github.com/christianrauch/camera_ros.git -b humble src/camera_ros
+    git clone https://github.com/christianrauch/camera_ros.git  src/camera_ros
 
 # --- 4. Install All ROS Dependencies for the Workspace ---
 # rosdep will read the package.xml for both packages and install their dependencies.
