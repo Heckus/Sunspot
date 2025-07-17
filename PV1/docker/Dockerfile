@@ -98,9 +98,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rosidl-default-runtime \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 8. Set PKG_CONFIG_PATH to find libcamera ---
-ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
-ENV LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
 
 # --- 9. Build camera_ros ---
 RUN . /opt/ros/humble/setup.bash && \
@@ -120,6 +117,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-calibration \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
 
 # --- 11. Install Python packages ---
 RUN python3 -m pip install --no-cache-dir \
