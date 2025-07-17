@@ -1,6 +1,6 @@
-# [cite_start]Description: ROS2 Humble with Pi 5 Camera Support using libcamera and picamera2 [cite: 1]
+# Description: ROS2 Humble with Pi 5 Camera Support using libcamera and picamera2
 # This version includes graphics libraries (Qt5) to enable preview windows.
-FROM ros:humble-ros-base 
+FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -35,8 +35,6 @@ RUN apt-get update && apt-get install -y \
     # Python tools
     python3-pip \
     python3-dev \
-    python3-numpy \
-    python3-opencv \
     # Other tools
     i2c-tools \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -46,6 +44,7 @@ RUN mkdir -p -m 0700 ~/.ssh && \
     ssh-keyscan github.com >> ~/.ssh/known_hosts && \
     ssh-keyscan gitlab.com >> ~/.ssh/known_hosts && \
     ssh-keyscan bitbucket.org >> ~/.ssh/known_hosts
+
 #--- 2. Install Python build tools via Pip ---
 RUN pip3 install --upgrade meson jinja2 ply
 
@@ -63,12 +62,22 @@ RUN git clone https://github.com/raspberrypi/libcamera-apps.git && \
     meson build && \
     ninja -C build install
 
-# --- 5. Update Library Links and Clean Up Build Artifacts ---
+# --- 5. CRITICAL FIX: Update Library Links ---
+# This command forces the system to recognize the new libcamera you just built
 RUN ldconfig && \
     rm -rf /usr/src/libcamera /usr/src/libcamera-apps
 
-# --- 6. Install ROS2 Packages ---
+# --- 6. Add the Raspberry Pi Repository (NEW STEP) ---
+# This is needed for the pre-compiled ROS camera node
+RUN apt-get update && apt-get install -y curl gnupg && \
+    curl -s https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | apt-key add - && \
+    echo "deb https://archive.raspberrypi.com/debian/ bullseye main" > /etc/apt/sources.list.d/raspberrypi.list && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- 7. Install ROS2 Packages (MODIFIED STEP) ---
+# Now we add ros-humble-camera-ros, which will link against the new libcamera
 RUN apt-get update && apt-get install -y \
+    ros-humble-camera-ros \
     ros-humble-cv-bridge \
     ros-humble-rviz2 \
     ros-humble-image-transport \
@@ -83,13 +92,11 @@ RUN apt-get update && apt-get install -y \
     ros-humble-camera-calibration \
     python3-colcon-common-extensions \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-# --- 7. Install Final Build Dependency for Python Packages ---
-# This is placed here to guarantee it's available for the next step.
-RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
 
-# --- 8. Install Python Run-time Dependencies ---
+# --- 8. Install Python Run-time Dependencies (No change) ---
+RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists/* 
 RUN python3 -m pip install --no-cache-dir \
-    "numpy>=1.23.0,<2" \
+    "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
     "ultralytics" \
     "torch~=2.0" \

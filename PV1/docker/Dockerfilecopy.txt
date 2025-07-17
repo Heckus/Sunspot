@@ -78,6 +78,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-image-view \
     ros-humble-rqt-image-view \
     ros-humble-sensor-msgs \
+    ros-humble-vision-msgs \
     ros-humble-geometry-msgs \
     ros-humble-camera-calibration \
     python3-colcon-common-extensions \
@@ -88,13 +89,13 @@ RUN apt-get update && apt-get install -y libcap-dev && rm -rf /var/lib/apt/lists
 
 # --- 8. Install Python Run-time Dependencies ---
 RUN python3 -m pip install --no-cache-dir \
-    numpy \
-    opencv-python \
-    ultralytics \
-    torch \
-    torchvision \
-    pyyaml \
-    picamera2
+    "numpy>=1.23.0,<2" \
+    "opencv-python==4.8.0.76" \
+    "ultralytics" \
+    "torch~=2.0" \
+    "torchvision~=0.15" \
+    "pyyaml" \
+    "picamera2"
 
 # --- 9. Setup Workspace and Test Script ---
 RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
