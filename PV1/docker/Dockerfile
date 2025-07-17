@@ -69,7 +69,7 @@ RUN ldconfig
 # This step creates a workspace and clones the correct camera_ros fork into it.
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
-RUN git clone https://github.com/christianrauch/camera_ros.git -b humble src/camera_ros
+RUN git clone https://github.com/christianrauch/camera_ros.git src/camera_ros
 
 # --- 7. Install ROS Dependencies for a Source Build ---
 # rosdep installs all libraries needed to COMPILE the packages in your workspace.
