@@ -21,48 +21,89 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgnutls28-dev \
     libtiff5-dev \
     libevent-dev \
+    libgtest-dev \
+    libyaml-dev \
+    python3-yaml \
+    python3-ply \
+    python3-jinja2 \
+    # Additional libcamera dependencies
+    libssl-dev \
+    libudev-dev \
     # ROS tools & other dependencies
     curl \
     python3-pip \
     python3-rosdep \
     python3-colcon-common-extensions \
+    python3-colcon-meson \
+    # OpenCV and image processing dependencies
+    libopencv-dev \
+    python3-opencv \
+    # Additional ROS packages that might be missing
+    clang-format \
+    python3-flake8 \
+    python3-mypy \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Add Official ROS2 Repository (CRITICAL FIX) ---
-# This tells apt where to find all the 'ros-humble-*' packages for the rosdep step.
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg && \
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+# --- 2. Install Python Build Tools ---
+RUN pip3 install --upgrade \
+    meson \
+    jinja2 \
+    ply \
+    colcon-meson \
+    setuptools \
+    wheel
 
-# --- 3. Install Python Build Tools (including colcon-meson) ---
-# As per the instructions, colcon-meson is needed to build libcamera in a workspace.
-RUN pip3 install --upgrade meson jinja2 ply colcon-meson
-
-# --- 4. Create ROS Workspace and Clone ALL Sources ---
-# We clone both libcamera and the recommended camera_ros fork into the workspace.
+# --- 3. Create ROS Workspace and Clone ALL Sources ---
 RUN mkdir -p /ros2_ws/src
 WORKDIR /ros2_ws
-RUN git clone https://github.com/raspberrypi/libcamera.git -b v0.2.0 src/libcamera && \
-    git clone https://github.com/christianrauch/camera_ros.git -b main src/camera_ros
 
-# --- 5. Install All ROS Dependencies for the Workspace ---
-# This version of the command safely skips 'rosdep init' if it has already been run.
-# It will now succeed because we added the ROS repository in Step 2.
+# Clone libcamera (Pi specific version)
+RUN git clone https://github.com/raspberrypi/libcamera.git -b v0.2.0 src/libcamera
+
+# Clone camera_ros
+RUN git clone https://github.com/christianrauch/camera_ros.git -b main src/camera_ros
+
+# --- 4. Initialize rosdep and update ---
+RUN rosdep init || true && rosdep update
+
+# --- 5. Install Available ROS Dependencies ---
+# Install what's available, skip problematic packages
 RUN apt-get update && \
-    if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then rosdep init; fi && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y --skip-keys=libcamera
+    rosdep install --from-paths src --ignore-src -r -y \
+    --skip-keys="libcamera clang-format ros-humble-ament-cmake-clang-format ros-humble-ament-cmake-mypy ros-humble-ament-cmake-pyflakes" || true
 
-# --- 6. Build the Entire ROS Workspace ---
+# --- 6. Install missing ROS packages manually ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-humble-camera-info-manager \
+    ros-humble-cv-bridge \
+    ros-humble-sensor-msgs \
+    ros-humble-std-msgs \
+    ros-humble-geometry-msgs \
+    ros-humble-image-transport \
+    ros-humble-ament-cmake \
+    ros-humble-rclcpp \
+    ros-humble-rclpy \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- 7. Build the Entire ROS Workspace ---
 # colcon will use colcon-meson to build libcamera, then build camera_ros against it.
-RUN . /opt/ros/humble/setup.bash && colcon build --symlink-install
+RUN . /opt/ros/humble/setup.bash && \
+    colcon build --symlink-install \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    --parallel-workers $(nproc)
 
-# --- 7. Install Final Runtime Packages ---
-# These are packages needed to run the rest of your application.
+# --- 8. Install Final Runtime Packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rviz2 \
     ros-humble-camera-calibration \
+    ros-humble-image-view \
+    ros-humble-rqt-image-view \
+    # I2C tools
+    i2c-tools \
+    libi2c-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# --- 9. Install Python packages ---
 RUN python3 -m pip install --no-cache-dir \
     "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
@@ -72,8 +113,12 @@ RUN python3 -m pip install --no-cache-dir \
     "pyyaml" \
     "picamera2"
 
-# --- 8. Final Setup ---
+# --- 10. Final Setup ---
 # Source the new workspace we built inside the image.
 RUN echo "source /ros2_ws/install/setup.bash" >> /root/.bashrc
+
+# Set working directory
 WORKDIR /home
+
+# Default command
 CMD ["/bin/bash"]
