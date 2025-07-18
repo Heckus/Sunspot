@@ -81,7 +81,7 @@ RUN mkdir -p /tmp/libcamera_build && \
     cd /tmp/libcamera_build && \
     git clone https://git.libcamera.org/libcamera/libcamera.git && \
     cd libcamera && \
-    meson setup build --buildtype=release -Dpipelines=rpi/vc4,rpi/pisp -Dipas=rpi/vc4,rpi/pisp -Dv4l2=true -Dgstreamer=disabled -Dqt=disabled -Dcam=disabled -Dlc-compliance=disabled -Dtest=false -Ddocumentation=disabled && \
+    meson setup build --buildtype=release -Dpipelines=rpi/vc4,rpi/pisp -Dv4l2=true && \
     ninja -C build && \
     ninja -C build install && \
     ldconfig && \
