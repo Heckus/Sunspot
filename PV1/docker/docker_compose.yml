@@ -7,16 +7,78 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - SSH_AUTH_SOCK=/ssh-agent
+      - QT_X11_NO_MITSHM=1
     volumes:
       - /dev:/dev
       - /sys:/sys
       - /proc:/proc
       - /tmp/.X11-unix:/tmp/.X11-unix
       - /boot:/boot:ro
+      - /opt/vc:/opt/vc
+      - /lib/modules:/lib/modules:ro
+      - /run/udev:/run/udev:ro
+      - /var/run/dbus:/var/run/dbus
       - ${SSH_AUTH_SOCK}:/ssh-agent
       - ./Sunspot:/root/Sunspot
     devices:
+      # Camera and media devices
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+      - /dev/video4:/dev/video4
+      - /dev/video5:/dev/video5
+      - /dev/video6:/dev/video6
+      - /dev/video7:/dev/video7
+      - /dev/video8:/dev/video8
+      - /dev/video9:/dev/video9
+      - /dev/video10:/dev/video10
+      - /dev/video11:/dev/video11
+      - /dev/video12:/dev/video12
+      - /dev/video13:/dev/video13
+      - /dev/video14:/dev/video14
+      - /dev/video15:/dev/video15
+      - /dev/video16:/dev/video16
+      - /dev/video17:/dev/video17
+      - /dev/video18:/dev/video18
+      - /dev/video19:/dev/video19
+      - /dev/video20:/dev/video20
+      - /dev/video21:/dev/video21
+      - /dev/video22:/dev/video22
+      - /dev/video23:/dev/video23
+      - /dev/video24:/dev/video24
+      - /dev/video25:/dev/video25
+      - /dev/video26:/dev/video26
+      - /dev/video27:/dev/video27
+      - /dev/video28:/dev/video28
+      - /dev/video29:/dev/video29
+      - /dev/video30:/dev/video30
+      - /dev/video31:/dev/video31
+      - /dev/video32:/dev/video32
+      - /dev/video33:/dev/video33
+      - /dev/video34:/dev/video34
+      - /dev/video35:/dev/video35
+      # Media devices for camera
+      - /dev/media0:/dev/media0
+      - /dev/media1:/dev/media1
+      - /dev/media2:/dev/media2
+      - /dev/media3:/dev/media3
+      - /dev/media4:/dev/media4
+      - /dev/media5:/dev/media5
+      # Camera-specific devices
+      - /dev/vchiq:/dev/vchiq
+      - /dev/vcsm-cma:/dev/vcsm-cma
+      - /dev/dri:/dev/dri
+      - /dev/mem:/dev/mem
+      # GPIO and I2C (already included)
       - /dev/i2c-1:/dev/i2c-1
+      - /dev/i2c-0:/dev/i2c-0
+      - /dev/i2c-10:/dev/i2c-10
+      - /dev/i2c-11:/dev/i2c-11
+      - /dev/i2c-12:/dev/i2c-12
       - /dev/gpiomem:/dev/gpiomem
+      # SPI devices
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/spidev0.1:/dev/spidev0.1
     stdin_open: true # Equivalent to -i
     tty: true        # Equivalent to -t
