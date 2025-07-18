@@ -1,5 +1,5 @@
 # Description: ROS2 Humble with Pi Camera Support using proper libcamera integration
-# Uses colcon workspace approach with Raspberry Pi libcamera fork
+# Fixed version addressing package availability issues
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libdw-dev \
     libunwind-dev \
+    # Additional DRM/KMS dependencies (available packages only)
+    libdrm2 \
+    libdrm-common \
     # ROS tools & dependencies
     curl \
     python3-rosdep \
@@ -51,38 +54,68 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils \
     # Add dependency for python-prctl (needed by picamera2)
     libcap-dev \
+    # Available libcamera packages
+    libcamera-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Install colcon-meson (with compatible meson version) ---
+# --- 2. Add Raspberry Pi OS repository for libcamera packages ---
+# This step adds the official Raspberry Pi repository to get libcamera packages
+RUN echo "deb http://archive.raspberrypi.org/debian/ bullseye main" > /etc/apt/sources.list.d/raspi.list && \
+    curl -fsSL https://archive.raspberrypi.org/debian/raspberrypi.gpg.key | apt-key add - && \
+    apt-get update || true
+
+# Try to install Raspberry Pi specific packages (may not work in all architectures)
+RUN apt-get install -y --no-install-recommends \
+    libcamera-apps || echo "libcamera-apps not available, continuing without it" && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# --- 3. Install colcon-meson (with compatible meson version) ---
 RUN pip3 install --no-cache-dir \
     "meson>=0.56,<1.0" \
     "colcon-meson>=0.2.0" \
     jinja2 \
     ply
 
-# --- 3. Create workspace and setup libcamera + camera_ros ---
+# --- 4. Build libcamera from source (since system packages aren't available) ---
+RUN mkdir -p /tmp/libcamera_build && \
+    cd /tmp/libcamera_build && \
+    git clone https://git.libcamera.org/libcamera/libcamera.git && \
+    cd libcamera && \
+    meson setup build --buildtype=release -Dpipelines=rpi/vc4,rpi/pisp -Dipas=rpi/vc4,rpi/pisp -Dv4l2=true -Dgstreamer=disabled -Dqt=disabled -Dcam=disabled -Dlc-compliance=disabled -Dtest=false -Ddocumentation=disabled && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    cd / && rm -rf /tmp/libcamera_build
+
+# --- 5. Install Python libcamera bindings ---
+RUN pip3 install --no-cache-dir \
+    "pybind11[global]" \
+    && mkdir -p /tmp/pycamera_build && \
+    cd /tmp/pycamera_build && \
+    git clone https://github.com/raspberrypi/picamera2.git && \
+    cd picamera2 && \
+    pip3 install --no-cache-dir -e . && \
+    cd / && rm -rf /tmp/pycamera_build
+
+# --- 6. Create workspace and setup camera_ros ---
 RUN mkdir -p /camera_ws/src
 WORKDIR /camera_ws
-
-# Clone Raspberry Pi libcamera fork (essential for newer camera modules)
-RUN cd src && \
-    git clone https://github.com/raspberrypi/libcamera.git
 
 # Clone camera_ros
 RUN cd src && \
     git clone https://github.com/christianrauch/camera_ros.git -b main
 
-# --- 4. Initialize rosdep ---
+# --- 7. Initialize rosdep ---
 RUN rosdep init || true && rosdep update
 
-# --- 5. Install ROS Dependencies (skip libcamera to avoid conflicts) ---
+# --- 8. Install ROS Dependencies ---
 RUN apt-get update && \
     rosdep install --from-paths src --ignore-src -r -y \
     --rosdistro humble \
     --skip-keys="libcamera clang-format" && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 6. Install additional ROS packages ---
+# --- 9. Install additional ROS packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-info-manager \
     ros-humble-cv-bridge \
@@ -105,40 +138,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-calibration \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 7. Build libcamera first, then camera_ros ---
-# Note: Using parallel-workers 1 and disabling python bindings for reliability in low-memory environments.
-# If you have allocated more memory to Docker (e.g., >8GB), you can try increasing workers and removing -Dpython=disabled.
+# --- 10. Build camera_ros ---
 RUN . /opt/ros/humble/setup.bash && \
-    # First, build and install only libcamera
-    colcon build \
-        --packages-select libcamera \
-        --event-handlers=console_direct+ \
-        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -Dpython=disabled \
-        --parallel-workers 1 && \
-    \
-    # Now, source the new install space and build the rest
-    . /camera_ws/install/setup.bash && \
     colcon build \
         --packages-up-to camera_ros \
         --event-handlers=console_direct+ \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
         --parallel-workers 1
 
-# --- 8. Install Python packages ---
+# --- 11. Install additional Python packages ---
 RUN python3 -m pip install --no-cache-dir \
     "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
     "ultralytics" \
     "torch~=2.0" \
     "torchvision~=0.15" \
-    "pyyaml" \
-    "picamera2"
+    "pyyaml"
 
-# --- 9. Setup environment ---
+# --- 12. Setup environment ---
 RUN echo "source /camera_ws/install/setup.bash" >> /root/.bashrc
 
-# --- 10. Create camera info directory ---
+# --- 13. Create camera info directory ---
 RUN mkdir -p /root/.ros/camera_info
+
+# --- 14. Set environment variables for headless operation ---
+ENV DISPLAY=""
+ENV QT_QPA_PLATFORM=offscreen
+ENV PICAMERA2_HEADLESS=1
 
 # Set working directory
 WORKDIR /home
