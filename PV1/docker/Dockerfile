@@ -1,5 +1,5 @@
 # Description: ROS2 Humble with Pi Camera Support using proper libcamera integration
-# Fixed version with pykms support for Docker containers
+# Uses colcon workspace approach with Raspberry Pi libcamera fork
 FROM ros:humble-ros-base
 
 # Set environment variables for non-interactive installation
@@ -33,13 +33,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libdw-dev \
     libunwind-dev \
-    # KMS++ dependencies - CRITICAL for pykms
-    libkms++1 \
-    libkms++-dev \
-    python3-kms++ \
-    # Additional DRM/KMS dependencies
-    libdrm2 \
-    libdrm-common \
     # ROS tools & dependencies
     curl \
     python3-rosdep \
@@ -58,10 +51,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     v4l-utils \
     # Add dependency for python-prctl (needed by picamera2)
     libcap-dev \
-    # System libcamera packages (for proper integration)
-    python3-libcamera \
-    libcamera-apps \
-    libcamera-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- 2. Install colcon-meson (with compatible meson version) ---
@@ -71,18 +60,22 @@ RUN pip3 install --no-cache-dir \
     jinja2 \
     ply
 
-# --- 3. Create workspace and setup camera_ros (skip building libcamera) ---
+# --- 3. Create workspace and setup libcamera + camera_ros ---
 RUN mkdir -p /camera_ws/src
 WORKDIR /camera_ws
 
-# Clone camera_ros only (use system libcamera instead)
+# Clone Raspberry Pi libcamera fork (essential for newer camera modules)
+RUN cd src && \
+    git clone https://github.com/raspberrypi/libcamera.git
+
+# Clone camera_ros
 RUN cd src && \
     git clone https://github.com/christianrauch/camera_ros.git -b main
 
 # --- 4. Initialize rosdep ---
 RUN rosdep init || true && rosdep update
 
-# --- 5. Install ROS Dependencies ---
+# --- 5. Install ROS Dependencies (skip libcamera to avoid conflicts) ---
 RUN apt-get update && \
     rosdep install --from-paths src --ignore-src -r -y \
     --rosdistro humble \
@@ -112,39 +105,40 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-calibration \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 7. Build only camera_ros (using system libcamera) ---
+# --- 7. Build libcamera first, then camera_ros ---
+# Note: Using parallel-workers 1 and disabling python bindings for reliability in low-memory environments.
+# If you have allocated more memory to Docker (e.g., >8GB), you can try increasing workers and removing -Dpython=disabled.
 RUN . /opt/ros/humble/setup.bash && \
+    # First, build and install only libcamera
+    colcon build \
+        --packages-select libcamera \
+        --event-handlers=console_direct+ \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -Dpython=disabled \
+        --parallel-workers 1 && \
+    \
+    # Now, source the new install space and build the rest
+    . /camera_ws/install/setup.bash && \
     colcon build \
         --packages-up-to camera_ros \
         --event-handlers=console_direct+ \
         --cmake-args -DCMAKE_BUILD_TYPE=Release \
         --parallel-workers 1
 
-# --- 8. Install Python packages with system-site-packages access ---
-# Install picamera2 using system packages instead of pip to avoid conflicts
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3-picamera2 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install other Python packages
+# --- 8. Install Python packages ---
 RUN python3 -m pip install --no-cache-dir \
     "numpy~=1.23.5" \
     "opencv-python==4.8.0.76" \
     "ultralytics" \
     "torch~=2.0" \
     "torchvision~=0.15" \
-    "pyyaml"
+    "pyyaml" \
+    "picamera2"
 
 # --- 9. Setup environment ---
 RUN echo "source /camera_ws/install/setup.bash" >> /root/.bashrc
 
 # --- 10. Create camera info directory ---
 RUN mkdir -p /root/.ros/camera_info
-
-# --- 11. Set environment variables for headless operation ---
-ENV DISPLAY=""
-ENV QT_QPA_PLATFORM=offscreen
-ENV PICAMERA2_HEADLESS=1
 
 # Set working directory
 WORKDIR /home
