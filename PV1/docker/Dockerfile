@@ -21,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- 2. Install colcon-meson ---
-# Required for building some ROS2 packages, install before building libcamera
 RUN pip3 install --no-cache-dir "meson>=0.56,<1.0" "colcon-meson>=0.2.0"
 
 # --- 3. Build libcamera from source ---
@@ -35,13 +34,12 @@ RUN mkdir -p /tmp/libcamera_build && \
     ldconfig && \
     cd / && rm -rf /tmp/libcamera_build
 
-# --- 4. Install picamera2 and its Python bindings for libcamera (CORRECTED) ---
+# --- 4. Install picamera2 and its Python bindings for libcamera ---
 RUN pip3 install --no-cache-dir "pybind11[global]" && \
     mkdir -p /tmp/picamera2_build && \
     cd /tmp/picamera2_build && \
     git clone https://github.com/raspberrypi/picamera2.git && \
     cd picamera2 && \
-    # Use a standard install, not an editable (-e) one
     pip3 install --no-cache-dir . && \
     cd / && rm -rf /tmp/picamera2_build
 
@@ -50,11 +48,16 @@ RUN mkdir -p /camera_ws/src
 WORKDIR /camera_ws
 RUN cd src && git clone https://github.com/christianrauch/camera_ros.git -b main
 
-# --- 6. Install ROS Dependencies ---
-RUN rosdep init || true && rosdep update && \
+# --- 6. Install ROS Dependencies (CORRECTED) ---
+RUN apt-get update && \
+    rosdep init || true && \
+    rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y \
-    --rosdistro humble --skip-keys="libcamera"
-# --- 6. Install additional ROS packages ---
+    --rosdistro humble \
+    --skip-keys="libcamera"
+
+
+    # --- 6. Install additional ROS packages ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-info-manager \
     ros-humble-cv-bridge \
