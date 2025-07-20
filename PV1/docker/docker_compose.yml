@@ -8,6 +8,8 @@ services:
       - DISPLAY=${DISPLAY}
       - SSH_AUTH_SOCK=/ssh-agent
       - QT_X11_NO_MITSHM=1
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - CYCLONEDDS_URI=file:///root/cyclonedds.xml
     volumes:
       - /dev:/dev
       - /sys:/sys
@@ -20,6 +22,7 @@ services:
       - /var/run/dbus:/var/run/dbus
       - ${SSH_AUTH_SOCK}:/ssh-agent
       - ./Sunspot:/root/Sunspot
+      - ./cyclonedds.xml:/root/cyclonedds.xml
     devices:
       # Camera and media devices
       - /dev/video0:/dev/video0
