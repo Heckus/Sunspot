@@ -8,8 +8,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use bash for shell commands
 SHELL ["/bin/bash", "-c"]
 
-# --- 1. Install Core Build-Time Dependencies (for libcamera) ---
-RUN apt-get update && apt-get install -y \
+#--- 1. Install Core Build-Time Dependencies (for libcamera) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build tools for libcamera and others
     build-essential \
     cmake \
@@ -39,7 +39,9 @@ RUN apt-get update && apt-get install -y \
     python3-opencv \
     # Other tools
     i2c-tools \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get -f install -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 #--- Add known git hosts to avoid manual confirmation ---
 RUN mkdir -p -m 0700 ~/.ssh && \
