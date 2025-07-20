@@ -1,56 +1,68 @@
-# Description: Clean ROS 2 Humble environment with camera_ros and CycloneDDS.
-# Base image provides ROS and basic tools.
+# Description: ROS 2 Humble with a specific libcamera version (0.5) and camera_ros built from source.
+# This approach ensures camera compatibility on devices like the Raspberry Pi 5.
 FROM ros:humble-ros-base
 
 # Set environment for non-interactive installs and shell
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-c"]
 
-# --- 1. Install Core System & ROS 2 Dependencies ---
-# Install everything in a single RUN command to reduce image layers.
-# This includes Python tools, ROS build tools, and your specific ROS packages.
+# --- 1. Install ALL Build Dependencies ---
+# Get everything needed for libcamera, camera_ros, and your Python packages in one go.
+# This creates a more efficient Docker image layer.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Python & Build essentials
-    python3-pip \
-    python3-colcon-common-extensions \
-    git \
-    # Your required ROS packages
+    # Build essentials & source control
+    build-essential cmake git pkg-config \
+    # Python & ROS build tools
+    python3-pip python3-colcon-common-extensions python3-rosdep \
+    # libcamera build dependencies
+    meson ninja-build libboost-dev libgnutls28-dev libtiff5-dev libdrm-dev libudev-dev libjpeg-dev \
+    # Other ROS packages needed
+    ros-humble-vision-opencv ros-humble-rmw-cyclonedds-cpp \
+    # Dependency for picamera2
     libcap-dev \
-    # camera_ros will automatically pull in libcamera and cv_bridge as dependencies.
-    ros-humble-camera-ros \
-    ros-humble-rmw-cyclonedds-cpp \
-    # Common tools for computer vision and visualization
-    ros-humble-vision-opencv \
-    ros-humble-image-transport \
-    ros-humble-image-proc \
-    ros-humble-rviz2 \
     # Optional but useful tools
-    i2c-tools \
-    v4l-utils \
-    # Clean up apt cache to keep image small
+    i2c-tools v4l-utils \
+    # Clean up apt cache
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# --- 2. Install Python Packages ---
-# Install Python packages required for your application nodes.
-# Note: We do not install opencv-python from pip to avoid conflicts with the
-# system version (ros-humble-vision-opencv) that ROS depends on.
+# --- 2. Build and Install libcamera v0.5 from Source ---
+# This step is critical. We build libcamera and install it into the system's
+# standard directories (/usr/lib, /usr/include) so that other programs can find it.
+WORKDIR /usr/src
+RUN git clone https://git.libcamera.org/libcamera/libcamera.git && \
+    cd libcamera && \
+    git checkout v0.5 && \
+    meson build --prefix=/usr -Dpipelines=raspberrypi -Dtest=false -Ddocumentation=false && \
+    ninja -C build install && \
+    # Update the linker cache to recognize the new libraries
+    ldconfig
+
+# --- 3. Install Python Packages ---
+# Install these before building the ROS workspace.
 RUN python3 -m pip install --no-cache-dir \
-    "numpy~=1.23.5" \
-    "opencv-python==4.8.0.76" \
-    "ultralytics" \
-    "torch~=2.0" \
-    "torchvision~=0.15" \
-    "pyyaml" \
-    "picamera2"
+    picamera2 \
+    ultralytics \
+    torch \
+    torchvision
 
-# --- 3. Setup Environment ---
-# Source the main ROS 2 setup file in the .bashrc
-RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
+# --- 4. Create, Configure, and Build the ROS Workspace ---
+# Now that libcamera is installed system-wide, we can build camera_ros.
+WORKDIR /root/ros2_ws/src
+RUN git clone https://github.com/christianrauch/camera_ros.git
+WORKDIR /root/ros2_ws
+# Initialize rosdep to find dependencies for camera_ros
+RUN rosdep init || true && rosdep update
+# Install dependencies, skipping libcamera since we built it ourselves.
+RUN rosdep install --from-paths src --ignore-src -r -y --skip-keys=libcamera
+# Now, finally, build the workspace. This will succeed because libcamera is findable.
+RUN . /opt/ros/humble/setup.bash && colcon build --symlink-install
 
-# --- 4. Create camera info directory ---
-RUN mkdir -p /root/.ros/camera_info
+# --- 5. Setup Final Environment ---
+# Source both the main ROS setup file and our workspace's setup file.
+RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc && \
+    echo "source /root/ros2_ws/install/setup.bash" >> /root/.bashrc
 
-# Set a working directory for your projects
+# Set the final working directory
 WORKDIR /root/ros2_ws
 
 # Default command to start an interactive bash shell
