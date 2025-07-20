@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-colcon-common-extensions \
     git \
     # Your required ROS packages
+    libcap-dev \
     # camera_ros will automatically pull in libcamera and cv_bridge as dependencies.
     ros-humble-camera-ros \
     ros-humble-rmw-cyclonedds-cpp \
@@ -34,10 +35,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Note: We do not install opencv-python from pip to avoid conflicts with the
 # system version (ros-humble-vision-opencv) that ROS depends on.
 RUN python3 -m pip install --no-cache-dir \
-    "numpy" \
+    "numpy~=1.23.5" \
+    "opencv-python==4.8.0.76" \
     "ultralytics" \
-    "torch" \
-    "torchvision" \
+    "torch~=2.0" \
+    "torchvision~=0.15" \
     "pyyaml" \
     "picamera2"
 
