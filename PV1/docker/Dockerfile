@@ -87,6 +87,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-camera-info-manager \
     ros-humble-cv-bridge \
     ros-humble-sensor-msgs \
+    ros-humble-rmw-cyclonedds-cpp \
     ros-humble-std-msgs \
     ros-humble-geometry-msgs \
     ros-humble-image-transport \
