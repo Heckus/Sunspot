@@ -1,4 +1,4 @@
-# 🏐 3D Volleyball Tracker with ROS2 🤖
+#  3D Volleyball Tracker with ROS2 
 
 This repository contains the source code for a real-time 3D volleyball tracking system developed for a Raspberry Pi. The system uses a camera, a custom AI model, and the **Robot Operating System 2 (ROS2)** to detect a volleyball and determine its precise 3D position.
 
@@ -6,7 +6,7 @@ This project serves as a comprehensive demonstration of skills in **robotics**, 
 
 ---
 
-## 🌟 Overview
+##  Overview
 
 The core objective of this project is to create a robust and scalable system that can:
 
@@ -17,7 +17,7 @@ The core objective of this project is to create a robust and scalable system tha
 
 ---
 
-## 🚀 Key Features
+##  Key Features
 
 -   **Real-time Performance**: Optimized for high-speed processing on a Raspberry Pi.
 -   **AI-Powered Detection**: Utilizes a custom-trained **YOLOv5** model for accurate and efficient volleyball detection.
@@ -29,7 +29,7 @@ The core objective of this project is to create a robust and scalable system tha
 
 ---
 
-## 🛠️ Tech Stack & Skills Demonstrated
+##  Tech Stack & Skills Demonstrated
 
 This project showcases a wide range of in-demand skills in robotics and software engineering:
 
@@ -50,7 +50,7 @@ This project showcases a wide range of in-demand skills in robotics and software
 
 ---
 
-## 🔧 System Architecture
+##  System Architecture
 
 The system is composed of several key ROS2 nodes that work in concert:
 
