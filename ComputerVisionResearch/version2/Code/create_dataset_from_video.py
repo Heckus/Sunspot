@@ -7,7 +7,58 @@ import yaml
 import math
 
 # =============================================================================
-# --- Assistant Detector for MULTIPLE BALLS ---
+# --- CLASS: Momentum Tracker (Physics Prediction) ---
+# =============================================================================
+class MomentumTracker:
+    def __init__(self):
+        self.history = []  # Stores center points [(x,y), (x,y), ...]
+        self.max_history = 5 # Number of frames to calculate velocity from
+    
+    def update(self, box):
+        """Add a new position to the history."""
+        cx = (box[0] + box[2]) / 2
+        cy = (box[1] + box[3]) / 2
+        self.history.append((cx, cy))
+        if len(self.history) > self.max_history:
+            self.history.pop(0)
+
+    def replace_last(self, box):
+        """
+        Control Theory 'Correction' Step:
+        Overwrites the last entry. Used when the User (Ground Truth) 
+        corrects the YOLO (Sensor) detection.
+        """
+        if self.history:
+            self.history.pop()
+        self.update(box)
+            
+    def predict(self, frame_shape):
+        """Predict next position based on velocity vector."""
+        if len(self.history) < 2:
+            return None
+        
+        # Calculate velocity vector (dx, dy)
+        (x1, y1) = self.history[-2]
+        (x2, y2) = self.history[-1]
+        
+        dx = x2 - x1
+        dy = y2 - y1
+        
+        # Predicted center
+        pred_x = int(x2 + dx)
+        pred_y = int(y2 + dy)
+        
+        # Bounds check
+        h, w = frame_shape[:2]
+        if 0 <= pred_x < w and 0 <= pred_y < h:
+            return (pred_x, pred_y)
+        return None
+    
+    def reset(self):
+        self.history = []
+
+#=============================================================================
+# --- CLASS: Smart Color Detector (Roundness + Square Lock + Padding) ---
 # =============================================================================
 class ColorBlobDetector:
     def __init__(self):
@@ -16,6 +67,11 @@ class ColorBlobDetector:
         self.upper_yellow = np.array([40, 255, 255])
         self.frame_count = 0
         self.warmup_frames = 50
+        
+        # --- NEW PARAMETER ---
+        # 0.0 = exact fit to color contour
+        # 0.2 = 20% larger than the contour (Recommended)
+        self.box_padding = 0.2 
 
     def detect(self, frame):
         self.frame_count += 1
@@ -23,6 +79,7 @@ class ColorBlobDetector:
         if self.frame_count < self.warmup_frames:
             return []
 
+        h_img, w_img = frame.shape[:2]
         hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         colorMask = cv2.inRange(hsv_frame, self.lower_yellow, self.upper_yellow)
         combinedMask = cv2.bitwise_and(fgMask, colorMask)
@@ -38,19 +95,41 @@ class ColorBlobDetector:
             area = cv2.contourArea(c)
             if area < 100 or area > 20000:
                 continue
-            x, y, w, h = cv2.boundingRect(c)
-            aspect_ratio = w / float(h)
-            if aspect_ratio < 0.7 or aspect_ratio > 1.3:
+            
+            # --- Roundness Check ---
+            ((cx, cy), radius) = cv2.minEnclosingCircle(c)
+            circle_area = np.pi * (radius ** 2)
+            if circle_area == 0: continue
+            
+            roundness = area / circle_area
+            if roundness < 0.60:
                 continue
-            hull = cv2.convexHull(c)
-            solidity = area / float(cv2.contourArea(hull))
-            if solidity < 0.85:
-                continue
-            detected_boxes.append((x, y, x + w, y + h))
-        return detected_boxes
 
+            x, y, w, h = cv2.boundingRect(c)
+
+            # --- Force Square & Apply Padding ---
+            center_x = x + w // 2
+            center_y = y + h // 2
+            
+            # 1. Determine base size (largest dimension)
+            side_length = max(w, h)
+            
+            # 2. Apply expansion factor
+            # We multiply by (1 + padding) to grow the box relative to its size
+            expanded_side = side_length * (1 + self.box_padding)
+            r = int(expanded_side / 2)
+            
+            # 3. Clamp to screen boundaries
+            new_x1 = max(0, center_x - r)
+            new_y1 = max(0, center_y - r)
+            new_x2 = min(w_img, center_x + r)
+            new_y2 = min(h_img, center_y + r)
+
+            detected_boxes.append((new_x1, new_y1, new_x2, new_y2))
+            
+        return detected_boxes
 # =============================================================================
-# --- Global Variables & Multi-Box Mouse Callback ---
+# --- Global Variables & Mouse Callback ---
 # =============================================================================
 drawing = False
 ix, iy = -1, -1
@@ -60,8 +139,11 @@ def multi_box_editor_callback(event, x, y, flags, param):
     global ix, iy, drawing
     boxes = param['boxes']
     frame_copy = param['frame'].copy()
-    # --- FIX 1: Get source_map from the callback parameters ---
+    h_img, w_img, _ = frame_copy.shape
     source_map = param['source_map']
+    
+    # Visual Params
+    physics_enabled = param.get('physics_enabled', True)
 
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
@@ -69,16 +151,31 @@ def multi_box_editor_callback(event, x, y, flags, param):
 
     elif event == cv2.EVENT_MOUSEMOVE:
         if drawing:
-            # --- FIX 2: Pass source_map to the drawing function ---
-            draw_all_boxes(frame_copy, boxes, source_map)
-            cv2.rectangle(frame_copy, (ix, iy), (x, y), (0, 255, 0), 2)
+            draw_interface(frame_copy, boxes, source_map, physics_enabled)
+            
+            # Square Lock Logic
+            r = max(abs(x - ix), abs(y - iy))
+            x1 = max(0, ix - r)
+            y1 = max(0, iy - r)
+            x2 = min(w_img, ix + r)
+            y2 = min(h_img, iy + r)
+            
+            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.circle(frame_copy, (ix, iy), 3, (0, 0, 255), -1)
             cv2.imshow(WINDOW_NAME, frame_copy)
 
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
-        x1, y1, x2, y2 = min(ix, x), min(iy, y), max(ix, x), max(iy, y)
+        r = max(abs(x - ix), abs(y - iy))
+        x1 = max(0, ix - r)
+        y1 = max(0, iy - r)
+        x2 = min(w_img, ix + r)
+        y2 = min(h_img, iy + r)
+
         if x2 > x1 and y2 > y1:
             boxes.append((x1, y1, x2, y2))
+            draw_interface(frame_copy, boxes, source_map, physics_enabled)
+            cv2.imshow(WINDOW_NAME, frame_copy)
 
     elif event == cv2.EVENT_RBUTTONDOWN:
         if boxes:
@@ -91,20 +188,28 @@ def multi_box_editor_callback(event, x, y, flags, param):
             
             if box_to_delete_idx != -1:
                 box_width = boxes[box_to_delete_idx][2] - boxes[box_to_delete_idx][0]
-                if min_dist < box_width:
+                if min_dist < max(box_width, 50): 
                     boxes.pop(box_to_delete_idx)
-                    # Since a manual box has no source, we don't need to pop from source_map
-                    # The main loop will redraw with the correct colors
+                    draw_interface(frame_copy, boxes, source_map, physics_enabled)
+                    cv2.imshow(WINDOW_NAME, frame_copy)
 
 # =============================================================================
-# --- Core Functions (Drawing, Saving, etc.) ---
+# --- Helper Functions ---
 # =============================================================================
-def draw_all_boxes(frame, boxes, source_map):
-    # This function now correctly receives source_map
+def draw_interface(frame, boxes, source_map, physics_enabled):
+    # Draw Boxes
     for i, box in enumerate(boxes):
-        # Manually drawn boxes won't be in the source_map, so they get a default color
-        color = source_map.get(i, (0, 255, 0)) # Default to green for manual
+        color = source_map.get(i, (0, 255, 0)) 
         cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
+    
+    # Draw Physics Indicator (Top Left)
+    status_text = "PHYSICS: ON" if physics_enabled else "PHYSICS: OFF (RESET)"
+    status_color = (0, 255, 0) if physics_enabled else (0, 0, 255)
+    
+    # Background for text to make it readable
+    cv2.rectangle(frame, (5, 5), (280, 35), (50, 50, 50), -1)
+    cv2.putText(frame, status_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 
+                0.6, status_color, 2)
 
 def convert_to_yolo_format(bbox, img_width, img_height):
     x1, y1, x2, y2 = bbox
@@ -126,11 +231,7 @@ def save_labels_and_image(frame, bboxes, base_filename, dirs, target_dims):
 
     orig_height, orig_width, _ = frame.shape
     yolo_labels = []
-    # Note: We now scale inside this function, assuming bboxes are for the original frame.
     for bbox in bboxes:
-        x_ratio, y_ratio = target_width / orig_width, target_height / orig_height
-        x1, y1, x2, y2 = bbox
-        # It's better practice to convert to YOLO format using target dimensions directly
         yolo_labels.append(convert_to_yolo_format(bbox, orig_width, orig_height))
 
     with open(label_path, 'w') as f:
@@ -138,28 +239,39 @@ def save_labels_and_image(frame, bboxes, base_filename, dirs, target_dims):
     return True
 
 def print_instructions():
-    print("\n--- Volleyball Interactive Labeler (Multi-Ball Edition) ---")
-    # ... (instructions remain the same)
-    print("  'q' - Quit the application")
-    print("\n--- Review & Edit Mode ---")
-    print("  's' - Save all current boxes and advance")
-    print("  'd' - Discard frame and advance")
-    print("  'c' - Clear all boxes to draw manually")
-    print("  Left-Click & Drag - Add a new box")
-    print("  Right-Click       - Delete the nearest box")
+    print("\n--- Volleyball Interactive Labeler (Physics & Square Lock) ---")
+    print("  's' - Save all current boxes and update Physics Tracker")
+    print("  'd' - Discard frame")
+    print("  'c' - Clear all boxes")
+    print("  'q' - Quit")
+    print("\n--- Controls ---")
+    print("  Left-Click & Drag - Create SQUARE box from CENTER")
+    print("  'p'      - Toggle Physics Prediction ON/OFF")
     print("\n--- Box Colors ---")
     print("  BLUE   - YOLO Detection")
-    print("  YELLOW - Color Detection Assistant")
-    print("  GREEN  - Manually Drawn Box")
+    print("  YELLOW - Color Detection (Roundness Filtered)")
+    print("  PURPLE - Physics Prediction (Momentum)")
+    print("  GREEN  - Manual")
     print("----------------------------------------------------------\n")
 
 # =============================================================================
 # --- Main Function ---
 # =============================================================================
 def main(args):
-    TARGET_DIMS = (640, 640); YOLO_MODEL = "models/modeln_ball2.pt"
+    TARGET_DIMS = (640, 640)
+    YOLO_MODEL = "../models/modeln_ball2.pt" 
+    
     print_instructions()
-    yolo_model = YOLO(YOLO_MODEL)
+    
+    try:
+        yolo_model = YOLO(YOLO_MODEL)
+    except Exception as e:
+        print(f"[WARNING] YOLO model load failed: {e}. Proceeding without YOLO.")
+        yolo_model = None
+
+    assistant_detector = ColorBlobDetector()
+    tracker = MomentumTracker()
+    
     video_path, output_dir = args.video, args.output_dir
     video_filename = os.path.splitext(os.path.basename(video_path))[0]
     dirs = {'images': os.path.join(output_dir, "images"), 'labels': os.path.join(output_dir, "labels")}
@@ -169,15 +281,25 @@ def main(args):
     if not cap.isOpened(): print(f"[ERROR] Could not open video file: {video_path}"); return
     
     frame_idx, saved_frame_count = 0, 0
-    assistant_detector = ColorBlobDetector()
+    last_w, last_h = 50, 50 
+    
+    # Toggles
+    physics_enabled = True 
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
-        #frame = cv2.rotate(frame,cv2.ROTATE_180)
-        yolo_results = yolo_model.predict(frame, conf=args.conf, classes=[0], verbose=False)
-        current_boxes = [ [int(i) for i in box.xyxy[0]] for box in yolo_results[0].boxes ]
-        source_map = {i: (255, 100, 0) for i in range(len(current_boxes))} # Blue for YOLO
+        
+        current_boxes = []
+        source_map = {}
+        auto_tracked_this_frame = False # Flag to track if we did a sensor update
+        
+        # --- 1. SENSOR DETECTIONS (YOLO / Color) ---
+        if yolo_model:
+            yolo_results = yolo_model.predict(frame, conf=args.conf, classes=[0], verbose=False)
+            current_boxes = [ [int(i) for i in box.xyxy[0]] for box in yolo_results[0].boxes ]
+            if current_boxes:
+                source_map = {i: (255, 100, 0) for i in range(len(current_boxes))} # Blue
 
         if not current_boxes:
             assistant_boxes = assistant_detector.detect(frame)
@@ -185,56 +307,111 @@ def main(args):
                 current_boxes = assistant_boxes
                 source_map = {i: (0, 255, 255) for i in range(len(current_boxes))} # Yellow
 
+        # --- 2. SENSOR UPDATE (Immediate Physics Influence) ---
+        if current_boxes and physics_enabled:
+            # We use the first detection to guide the physics engine IMMEDIATELY
+            tracker.update(current_boxes[0])
+            auto_tracked_this_frame = True
+            # Update last known size
+            last_w = current_boxes[0][2] - current_boxes[0][0]
+            last_h = current_boxes[0][3] - current_boxes[0][1]
+
+        # --- 3. PHYSICS PREDICTION (If Sensors Failed) ---
+        if not current_boxes and physics_enabled:
+            predicted_center = tracker.predict(frame.shape)
+            if predicted_center:
+                px, py = predicted_center
+                r = max(last_w, last_h) // 2
+                h_img, w_img = frame.shape[:2]
+                
+                p_x1 = max(0, px - r)
+                p_y1 = max(0, py - r)
+                p_x2 = min(w_img, px + r)
+                p_y2 = min(h_img, py + r)
+                
+                current_boxes.append((p_x1, p_y1, p_x2, p_y2))
+                source_map = {0: (255, 0, 255)} # Purple
+
         cv2.namedWindow(WINDOW_NAME)
-        # --- FIX 3: Add source_map to the dictionary passed to the callback ---
-        callback_param = {'boxes': current_boxes, 'frame': frame, 'source_map': source_map}
+        # Pass physics_enabled to callback so it can draw the indicator
+        callback_param = {
+            'boxes': current_boxes, 
+            'frame': frame, 
+            'source_map': source_map,
+            'physics_enabled': physics_enabled
+        }
         cv2.setMouseCallback(WINDOW_NAME, multi_box_editor_callback, callback_param)
 
         while True:
             frame_copy = frame.copy()
-            # The main loop's draw call always has access to the correct source_map
-            draw_all_boxes(frame_copy, current_boxes, source_map)
+            draw_interface(frame_copy, current_boxes, source_map, physics_enabled)
             
-            info_text = "'s' Save | 'd' Discard | 'c' Clear | 'q' Quit"
-            cv2.putText(frame_copy, info_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2, cv2.LINE_AA)
+            info_text = f"Frame: {frame_idx} | Saved: {saved_frame_count} | 'p' Toggle Physics"
+            cv2.putText(frame_copy, info_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 1)
             cv2.imshow(WINDOW_NAME, frame_copy)
 
             key = cv2.waitKey(20) & 0xFF
             
             if key == ord('q'):
-                cap.release()
-                break
+                cap.release(); cv2.destroyAllWindows(); return
+                
+            elif key == ord('p'):
+                physics_enabled = not physics_enabled
+                # Update param so mouse callback knows new state immediately
+                callback_param['physics_enabled'] = physics_enabled
+                if not physics_enabled:
+                    tracker.reset() # RESET HISTORY
+                    print("Physics Tracker RESET.")
+                else:
+                    print("Physics Tracker ENABLED.")
+                    
             elif key == ord('s'):
                 base_filename = f"{video_filename}_frame_{frame_idx:06d}"
-                # The save function now correctly takes the original frame and its boxes
                 if save_labels_and_image(frame, current_boxes, base_filename, dirs, TARGET_DIMS):
                     saved_frame_count += 1
-                    print(f"Saved {len(current_boxes)} boxes for frame {frame_idx}")
+                    print(f"Saved frame {frame_idx}")
+                    
+                    # --- 4. GROUND TRUTH CORRECTION ---
+                    # If we have a finalized box (manually confirmed or edited)
+                    if current_boxes and physics_enabled:
+                        if auto_tracked_this_frame:
+                            # If we ALREADY updated based on YOLO/Color, but the user might have
+                            # moved the box, we perform a CORRECTION (replace last entry).
+                            tracker.replace_last(current_boxes[0])
+                        else:
+                            # If it was a purely manual add (physics/sensors didn't find it),
+                            # we treat this as a new update.
+                            tracker.update(current_boxes[0])
+                            
+                        # Keep size updated
+                        last_w = current_boxes[0][2] - current_boxes[0][0]
+                        last_h = current_boxes[0][3] - current_boxes[0][1]
                 break
+                
             elif key == ord('d'):
                 print(f"Discarded frame {frame_idx}")
                 break
+            
             elif key == ord('c'):
                 current_boxes.clear()
                 source_map.clear()
         
-        if not cap.isOpened(): break
         frame_idx += 1
     
+    cap.release()
     cv2.destroyAllWindows()
-    print(f"\n[INFO] Exiting. Total images saved: {saved_frame_count}")
+    # Save YAML
     yaml_path = os.path.join(output_dir, "data.yaml")
     abs_output_dir = os.path.abspath(output_dir)
     yaml_data = {'path': abs_output_dir, 'train': 'images', 'val': 'images', 'names': {0: 'volleyball'}}
     with open(yaml_path, 'w') as f:
         yaml.dump(yaml_data, f, sort_keys=False)
-    print(f"[SUCCESS] Dataset and YAML file are in: {output_dir}")
-
+    print(f"[SUCCESS] Dataset ready in: {output_dir}")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Interactively label multiple volleyballs in a video.")
-    parser.add_argument("--video", type=str, required=True, help="Path to the input video file.")
-    parser.add_argument("--output-dir", type=str, required=True, help="Directory to save the dataset.")
-    parser.add_argument("--conf", type=float, default=0.4, help="Confidence threshold for initial YOLO detection.")
+    parser = argparse.ArgumentParser(description="Volleyball Labeler (Square Lock + Physics)")
+    parser.add_argument("--video", type=str, required=True, help="Path to input video.")
+    parser.add_argument("--output-dir", type=str, required=True, help="Path to output directory.")
+    parser.add_argument("--conf", type=float, default=0.4, help="YOLO confidence threshold.")
     args = parser.parse_args()
     main(args)
